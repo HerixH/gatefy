@@ -1,0 +1,41 @@
+{
+    "name": "frontend",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "eslint"
+    },
+    "dependencies": {
+        "@metamask/sdk": "^0.33.1",
+        "@openzeppelin/contracts": "^5.2.0",
+        "@rainbow-me/rainbowkit": "^2.2.10",
+        "@supabase/supabase-js": "^2.97.0",
+        "@tanstack/react-query": "^5.90.21",
+        "@zxing/library": "^0.21.3",
+        "clsx": "^2.1.1",
+        "ethers": "^6.16.0",
+        "framer-motion": "^12.34.3",
+        "lucide-react": "^0.575.0",
+        "next": "16.1.6",
+        "qrcode.react": "^4.2.0",
+        "react": "19.2.3",
+        "react-dom": "19.2.3",
+        "tailwind-merge": "^3.5.0",
+        "viem": "^2.46.2",
+        "wagmi": "^2.14.9"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4",
+        "@types/node": "^20",
+        "@types/react": "^19",
+        "@types/react-dom": "^19",
+        "babel-plugin-react-compiler": "1.0.0",
+        "eslint": "^9",
+        "eslint-config-next": "16.1.6",
+        "tailwindcss": "^4",
+        "typescript": "^5"
+    }
+}

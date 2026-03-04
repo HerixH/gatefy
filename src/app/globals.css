@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #020202;
+    --foreground: #ffffff;
+    --primary: #ffffff;
+    --secondary: #a1a1aa;
+    --accent: #3b82f6;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased selection:bg-white selection:text-black;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #222;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+.premium-glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40;
+}
+
+.btn-premium {
+  @apply relative px-8 py-4 bg-white text-black font-medium transition-all duration-500 hover:scale-[1.02] active:scale-[0.98] overflow-hidden;
+}
+
+.grid-bg {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+  background-size: 40px 40px;
+}
+
+@keyframes slow-pan {
+  0% {
+    background-position: 0% 0%;
+  }
+
+  100% {
+    background-position: 100% 100%;
+  }
+}
+
+.animate-slow-pan {
+  animation: slow-pan 60s linear infinite;
+}

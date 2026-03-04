@@ -1,0 +1,204 @@
+[
+  {
+    "code": "RD01OD1P",
+    "used": true,
+    "createdAt": "2026-02-21T20:33:56.502Z",
+    "usedAt": "2026-02-23T14:55:05.775Z",
+    "usedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "NG1Y6I5R",
+    "used": false,
+    "createdAt": "2026-02-21T20:41:11.373Z"
+  },
+  {
+    "code": "OFRRZOGU",
+    "used": false,
+    "createdAt": "2026-02-21T20:42:52.630Z"
+  },
+  {
+    "code": "HLX688LR",
+    "used": false,
+    "createdAt": "2026-02-21T20:51:09.118Z"
+  },
+  {
+    "code": "9N2XD1OO",
+    "used": false,
+    "createdAt": "2026-02-21T20:58:35.462Z"
+  },
+  {
+    "code": "K4X9LUSO",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:33.854Z"
+  },
+  {
+    "code": "GMRAU6AB",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:37.344Z"
+  },
+  {
+    "code": "EJC4AS7G",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:37.633Z"
+  },
+  {
+    "code": "4O1IVBAA",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:37.873Z"
+  },
+  {
+    "code": "UG789SHB",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:38.069Z"
+  },
+  {
+    "code": "ONR44DZV",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:38.282Z"
+  },
+  {
+    "code": "87448K1P",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:38.468Z"
+  },
+  {
+    "code": "6BWVHOBU",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:38.669Z"
+  },
+  {
+    "code": "5QYDYMUD",
+    "used": true,
+    "createdAt": "2026-02-21T21:02:38.928Z",
+    "usedAt": "2026-02-23T14:57:06.481Z",
+    "usedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "AE4E4GW8",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:39.115Z"
+  },
+  {
+    "code": "4VL7ILCW",
+    "used": false,
+    "createdAt": "2026-02-21T21:02:39.312Z"
+  },
+  {
+    "code": "F2EB6MJB",
+    "used": false,
+    "createdAt": "2026-02-21T21:38:20.704Z",
+    "vip": true,
+    "txHash": "DEV-1771709900703",
+    "purchasedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "CTC85NU0",
+    "used": false,
+    "createdAt": "2026-02-21T21:40:30.484Z"
+  },
+  {
+    "code": "ZDRNJNRU",
+    "used": false,
+    "createdAt": "2026-02-23T12:54:15.067Z",
+    "vip": true,
+    "txHash": "DEV-1771851255066",
+    "purchasedBy": "0xde25F46688C78B5f5dE21a7bB06F4EAeF2A13E7A"
+  },
+  {
+    "code": "6DOB1V36",
+    "used": false,
+    "createdAt": "2026-02-23T13:05:00.662Z"
+  },
+  {
+    "code": "EV4BAIYM",
+    "used": true,
+    "createdAt": "2026-02-23T13:12:12.857Z",
+    "usedAt": "2026-02-23T13:12:27.210Z",
+    "usedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "9SCSCH67",
+    "used": false,
+    "createdAt": "2026-02-23T13:22:20.961Z",
+    "vip": true,
+    "txHash": "DEV-1771852940960",
+    "purchasedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "GATEFY01",
+    "used": true,
+    "createdAt": "2026-02-23T15:25:00.000Z",
+    "usedAt": "2026-02-23T13:33:04.853Z",
+    "usedBy": "0x90aFA671FfE59ef61304f3A2ef68c363d4cff21B"
+  },
+  {
+    "code": "2W0XHS7P",
+    "used": false,
+    "createdAt": "2026-02-23T14:49:32.313Z"
+  },
+  {
+    "code": "O3WIKH2C",
+    "used": false,
+    "createdAt": "2026-02-25T19:03:58.992Z"
+  },
+  {
+    "code": "VKENZD0K",
+    "used": false,
+    "createdAt": "2026-02-25T20:56:32.392Z"
+  },
+  {
+    "code": "Z5KSGMLE",
+    "used": false,
+    "createdAt": "2026-02-25T21:45:18.553Z"
+  },
+  {
+    "code": "ST5B4R1Q",
+    "used": false,
+    "createdAt": "2026-03-04T19:13:44.438Z"
+  },
+  {
+    "code": "7JLRGEI3",
+    "used": false,
+    "createdAt": "2026-03-04T20:48:44.887Z"
+  },
+  {
+    "code": "PZAV65GW",
+    "used": false,
+    "createdAt": "2026-03-04T20:50:31.862Z"
+  },
+  {
+    "code": "7Y433SIJ",
+    "used": false,
+    "createdAt": "2026-03-04T20:50:48.491Z"
+  },
+  {
+    "code": "5KJN6QU6",
+    "used": false,
+    "createdAt": "2026-03-04T20:51:27.652Z"
+  },
+  {
+    "code": "8O69R5MT",
+    "used": false,
+    "createdAt": "2026-03-04T20:51:39.323Z"
+  },
+  {
+    "code": "WHZAN1G5",
+    "used": false,
+    "createdAt": "2026-03-04T20:53:17.361Z"
+  },
+  {
+    "code": "GENOGOHC",
+    "used": false,
+    "createdAt": "2026-03-04T20:57:24.593Z"
+  },
+  {
+    "code": "YTKR2Z1U",
+    "used": false,
+    "createdAt": "2026-03-04T20:57:40.008Z"
+  },
+  {
+    "code": "ZDKEJ5GV",
+    "used": false,
+    "createdAt": "2026-03-04T21:03:48.397Z"
+  }
+]

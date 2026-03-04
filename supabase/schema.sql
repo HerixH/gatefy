@@ -1,0 +1,78 @@
+-- Run this in Supabase Dashboard → SQL Editor to create the events table and storage.
+
+-- Events table (includes banner_url for event banner image)
+create table if not exists public.events (
+  id text primary key,
+  name text not null,
+  description text default '',
+  date timestamptz not null,
+  end_date timestamptz,
+  location text default '',
+  organizer text not null,
+  verification_code text not null,
+  created_at timestamptz default now(),
+  attendee_count integer default 0,
+  max_attendees integer,
+  is_vip boolean default false,
+  vip_token_address text default '',
+  vip_min_balance text default '1',
+  banner_url text
+);
+
+-- If table already exists, run: alter table public.events add column if not exists end_date timestamptz; alter table public.events add column if not exists max_attendees integer;
+
+-- Optional: RLS so anyone can read events, only service role can write
+alter table public.events enable row level security;
+
+drop policy if exists "Events are viewable by everyone" on public.events;
+create policy "Events are viewable by everyone"
+  on public.events for select
+  using (true);
+
+drop policy if exists "Service role can do everything" on public.events;
+create policy "Service role can do everything"
+  on public.events for all
+  using (true)
+  with check (true);
+
+-- =============================================================================
+-- STORAGE: Event banner images (used when creating events)
+-- =============================================================================
+-- 1. Create the bucket (public so banner URLs work without auth).
+--    If this fails (e.g. missing file_size_limit column), use instead:
+--    insert into storage.buckets (id, name, public) values ('event-banners', 'event-banners', true) on conflict (id) do nothing;
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'event-banners',
+  'event-banners',
+  true,
+  5242880,
+  array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+-- 2. RLS: allow anyone to read (view) banner images
+drop policy if exists "Anyone can view event banners" on storage.objects;
+create policy "Anyone can view event banners"
+  on storage.objects for select
+  using (bucket_id = 'event-banners');
+
+-- 3. RLS: allow uploads (app uses service role; this allows authenticated uploads if needed)
+drop policy if exists "Allow event banner uploads" on storage.objects;
+create policy "Allow event banner uploads"
+  on storage.objects for insert
+  with check (bucket_id = 'event-banners');
+
+drop policy if exists "Allow event banner updates" on storage.objects;
+create policy "Allow event banner updates"
+  on storage.objects for update
+  using (bucket_id = 'event-banners');
+
+-- Optional: allow delete for cleanup
+drop policy if exists "Allow event banner deletes" on storage.objects;
+create policy "Allow event banner deletes"
+  on storage.objects for delete
+  using (bucket_id = 'event-banners');
