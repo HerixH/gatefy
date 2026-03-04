@@ -23,6 +23,10 @@ const pressStart = Press_Start_2P({
 export const metadata: Metadata = {
   title: "Gatefy | NFT Attendance Protocol",
   description: "Secure, time-limited proof of attendance for your events.",
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

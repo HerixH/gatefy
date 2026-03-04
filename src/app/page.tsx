@@ -510,7 +510,7 @@ export default function Home() {
                         className="w-full text-left hover:bg-white/[0.03] transition-colors group overflow-hidden"
                       >
                         {ev.bannerUrl && (
-                          <div className="w-full h-20 bg-white/5">
+                          <div className="w-full h-28 bg-white/5">
                             <img src={ev.bannerUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                           </div>
                         )}
@@ -866,14 +866,14 @@ export default function Home() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-center justify-center p-4 lg:p-8"
+            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-start justify-center overflow-y-auto p-4 lg:p-8 pt-8 lg:pt-12"
             onClick={(e) => e.target === e.currentTarget && setSelectedEvent(null)}
           >
             <motion.div
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 24 }}
-              className="w-full max-w-lg border border-white/10 bg-black overflow-y-auto max-h-[90vh] lg:max-h-none no-scrollbar flex flex-col"
+              className="w-full max-w-lg border border-white/10 bg-black overflow-y-auto max-h-[85vh] no-scrollbar flex flex-col shrink-0"
             >
               {/* Sticky header: Back + status + Close (always visible) */}
               <div className="sticky top-0 z-10 shrink-0 p-4 lg:p-6 flex items-center gap-4 border-b border-white/10 bg-black backdrop-blur-sm">
@@ -883,8 +883,7 @@ export default function Home() {
                   className="shrink-0 flex items-center gap-2 px-3 py-2 rounded border border-white/30 bg-white/10 hover:bg-white/20 text-white text-sm font-bold tracking-wide"
                   aria-label="Back"
                 >
-                  <span aria-hidden className="text-lg leading-none">←</span>
-                  <span>Back</span>
+                  Back
                 </button>
                 <div className="flex items-center gap-3 min-w-0">
                   {isUpcoming(selectedEvent.date) ? (
@@ -919,7 +918,7 @@ export default function Home() {
               <div className="p-6 lg:p-8 space-y-8">
                 {selectedEvent.bannerUrl && (
                   <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2">
-                    <img src={selectedEvent.bannerUrl} alt="" className="w-full h-40 lg:h-52 object-cover" />
+                    <img src={selectedEvent.bannerUrl} alt="" className="w-full h-52 lg:h-72 object-cover" />
                   </div>
                 )}
                 <div>
@@ -1266,7 +1265,7 @@ export default function Home() {
               <div className="p-6 lg:p-8 space-y-8">
                 {createdEvent.bannerUrl && (
                   <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2">
-                    <img src={createdEvent.bannerUrl} alt="" className="w-full h-36 object-cover rounded-t" />
+                    <img src={createdEvent.bannerUrl} alt="" className="w-full h-48 lg:h-56 object-cover rounded-t" />
                   </div>
                 )}
                 <div className="space-y-1">
