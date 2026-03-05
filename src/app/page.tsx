@@ -91,6 +91,13 @@ export default function Home() {
       .finally(() => setLoadingAttendees(false));
   };
 
+  // Auto-update event status (Upcoming → Ongoing → Past) as time passes
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 15_000); // refresh every 15s so status auto-updates when event goes live
+    return () => clearInterval(id);
+  }, []);
+
   // Check registration and fetch attendees when event selected
   useEffect(() => {
     if (selectedEvent && address) {
@@ -317,24 +324,54 @@ export default function Home() {
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const isUpcoming = (iso: string) => {
-    if (!iso) return true;
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const isoTrim = String(iso).trim();
-    // Date-only "YYYY-MM-DD" → treat as that calendar day in local time (avoids UTC midnight = previous day in some zones)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(isoTrim)) {
-      const [y, m, d] = isoTrim.split('-').map(Number);
-      const eventDay = new Date(y, m - 1, d).getTime();
-      return eventDay >= todayStart;
+  const formatDateTime = (iso: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const hasTime = /T\d{1,2}:\d{2}/.test(String(iso).trim()) || iso.includes(':');
+    if (hasTime) {
+      return d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
-    const eventDate = new Date(iso);
-    if (Number.isNaN(eventDate.getTime())) return true;
-    const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate()).getTime();
-    return eventDay >= todayStart;
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
-  const hasEventStarted = (iso: string) => new Date() >= new Date(iso);
+  type EventStatus = 'upcoming' | 'ongoing' | 'past';
+
+  const getEventStatus = (date: string, endDate?: string): EventStatus => {
+    if (!date) return 'upcoming';
+    const now = new Date();
+    const isoTrim = String(date).trim();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(isoTrim)) {
+      const [y, m, d] = isoTrim.split('-').map(Number);
+      const eventDayStart = new Date(y, m - 1, d).getTime();
+      const eventDayEnd = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      if (now.getTime() < eventDayStart) return 'upcoming';
+      if (now.getTime() <= eventDayEnd) return 'ongoing';
+      return 'past';
+    }
+
+    const start = new Date(date);
+    if (Number.isNaN(start.getTime())) return 'upcoming';
+
+    if (endDate) {
+      const end = new Date(endDate);
+      if (now < start) return 'upcoming';
+      if (now <= end) return 'ongoing';
+      return 'past';
+    }
+
+    const startDayEnd = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 23, 59, 59, 999);
+    if (now < start) return 'upcoming';
+    if (now <= startDayEnd) return 'ongoing';
+    return 'past';
+  };
+
+  const isUpcoming = (iso: string, endDate?: string) => getEventStatus(iso, endDate) === 'upcoming';
+  const isOngoing = (iso: string, endDate?: string) => getEventStatus(iso, endDate) === 'ongoing';
+  const isPast = (iso: string, endDate?: string) => getEventStatus(iso, endDate) === 'past';
+  const hasEventStarted = (iso: string) => getEventStatus(iso) !== 'upcoming';
 
   // Remaining seats = capacity minus registrations (so it updates after someone registers)
   const getRegisteredCount = (ev: Event) => ev.registrationCount ?? ev.attendeeCount;
@@ -489,18 +526,18 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Live Events</p>
                 <span className="text-[9px] font-mono text-white/70 tracking-widest">
-                  {events.filter(ev => isUpcoming(ev.date)).length} Active
+                  {events.filter(ev => !isPast(ev.date, ev.endDate)).length} Active
                 </span>
               </div>
 
               <div className="border border-white/5 bg-white/[0.01] backdrop-blur-3xl overflow-hidden">
-                {events.filter(ev => isUpcoming(ev.date)).length === 0 ? (
+                {events.filter(ev => !isPast(ev.date, ev.endDate)).length === 0 ? (
                   <div className="p-8 flex flex-col items-center justify-center text-center gap-4 min-h-[160px]">
                     <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30">No active events</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-white/[0.05]">
-                    {events.filter(ev => isUpcoming(ev.date)).map((ev, i) => (
+                    {events.filter(ev => !isPast(ev.date, ev.endDate)).map((ev, i) => (
                       <motion.button
                         key={ev.id}
                         initial={{ opacity: 0 }}
@@ -582,17 +619,19 @@ export default function Home() {
                             <div className="flex items-start justify-between gap-4">
                               <div className="space-y-1 min-w-0">
                                 <div className="flex items-center gap-2">
-                                  {isUpcoming(ev.date) ? (
-                                    <div className="w-1 h-1 bg-green-500 rounded-full shrink-0" />
+                                  {isUpcoming(ev.date, ev.endDate) ? (
+                                    <div className="w-1 h-1 bg-green-500 rounded-full shrink-0" title="Upcoming" />
+                                  ) : isOngoing(ev.date, ev.endDate) ? (
+                                    <div className="w-1 h-1 bg-amber-500 rounded-full shrink-0 animate-pulse" title="Ongoing" />
                                   ) : (
-                                    <div className="w-1 h-1 bg-white/20 rounded-full shrink-0" />
+                                    <div className="w-1 h-1 bg-white/20 rounded-full shrink-0" title="Past" />
                                   )}
                                   <p className="text-[11px] font-bold tracking-tight truncate opacity-70">{ev.name}</p>
                                 </div>
                                 <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">Managed Asset // {ev.organizer.slice(0, 6)}...{ev.organizer.slice(-4)}</p>
                               </div>
                               <div className="text-right shrink-0">
-                                <p className="text-[8px] font-mono text-secondary/40">{formatDate(ev.date)}</p>
+                                <p className="text-[8px] font-mono text-secondary/40">{formatDateTime(ev.date)}</p>
                                 <p className="text-[8px] tracking-widest text-accent mt-0.5">
                                   {ev.maxAttendees != null && ev.maxAttendees > 0
                                     ? `${getRegisteredCount(ev)} / ${ev.maxAttendees} · ${getRemainingSeats(ev) ?? 0} left`
@@ -886,10 +925,15 @@ export default function Home() {
                   Back
                 </button>
                 <div className="flex items-center gap-3 min-w-0">
-                  {isUpcoming(selectedEvent.date) ? (
+                  {isUpcoming(selectedEvent.date, selectedEvent.endDate) ? (
                     <>
                       <div className="w-1.5 h-1.5 bg-green-500 rounded-full shrink-0" />
                       <span className="text-[9px] tracking-[0.3em] uppercase text-green-400 font-bold truncate">Upcoming</span>
+                    </>
+                  ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
+                    <>
+                      <div className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0 animate-pulse" />
+                      <span className="text-[9px] tracking-[0.3em] uppercase text-amber-400 font-bold truncate">Ongoing</span>
                     </>
                   ) : (
                     <>
@@ -931,12 +975,12 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Start</p>
-                    <p className="text-sm font-mono text-white/70">{formatDate(selectedEvent.date)}</p>
+                    <p className="text-sm font-mono text-white/70">{formatDateTime(selectedEvent.date)}</p>
                   </div>
                   {selectedEvent.endDate ? (
                     <div className="space-y-1">
                       <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">End</p>
-                      <p className="text-sm font-mono text-white/70">{formatDate(selectedEvent.endDate)}</p>
+                      <p className="text-sm font-mono text-white/70">{formatDateTime(selectedEvent.endDate)}</p>
                     </div>
                   ) : null}
                   {selectedEvent.location && (
@@ -1046,7 +1090,7 @@ export default function Home() {
                     {/* Attendee / Visitor lists for Organizer */}
                     {address?.toLowerCase() === selectedEvent.organizer.toLowerCase() && (
                       <div className="space-y-6">
-                        {!isUpcoming(selectedEvent.date) ? (
+                        {isPast(selectedEvent.date, selectedEvent.endDate) ? (
                           <>
                             <div className="flex items-center justify-between gap-4">
                               <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">Past event — visitor summary</p>
@@ -1183,7 +1227,12 @@ export default function Home() {
 
                     {/* Action Button: Register first, then Verify only when event has started and is not past */}
                     {!isUserRegistered ? (
-                      isUpcoming(selectedEvent.date) ? (
+                      isPast(selectedEvent.date, selectedEvent.endDate) ? (
+                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
+                          <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
+                        </div>
+                      ) : (
                         <button
                           disabled={registering}
                           onClick={handleRegister}
@@ -1193,18 +1242,13 @@ export default function Home() {
                             {registering ? 'Processing...' : 'Register for Event'}
                           </span>
                         </button>
-                      ) : (
-                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
-                          <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
-                          <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
-                        </div>
                       )
-                    ) : !isUpcoming(selectedEvent.date) ? (
+                    ) : isPast(selectedEvent.date, selectedEvent.endDate) ? (
                       <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
                         <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                       </div>
-                    ) : hasEventStarted(selectedEvent.date) ? (
+                    ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
                       <button
                         onClick={() => { setSelectedEvent(null); setShowScanner(true); }}
                         className="btn-premium w-full py-4 group"
@@ -1217,7 +1261,7 @@ export default function Home() {
                     ) : (
                       <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
-                        <p className="text-[9px] text-white/30 mt-1">Event starts {formatDate(selectedEvent.date)}</p>
+                        <p className="text-[9px] text-white/30 mt-1">Event starts {formatDateTime(selectedEvent.date)}</p>
                       </div>
                     )}
                   </div>
@@ -1271,7 +1315,7 @@ export default function Home() {
                 <div className="space-y-1">
                   <h2 className="text-2xl font-bold tracking-tighter">{createdEvent.name}</h2>
                   <p className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-bold">
-                    {formatDate(createdEvent.date)}{createdEvent.location ? ` · ${createdEvent.location}` : ''}
+                    {formatDateTime(createdEvent.date)}{createdEvent.location ? ` · ${createdEvent.location}` : ''}
                   </p>
                 </div>
 
