@@ -56,11 +56,12 @@ export default function About() {
                     </div>
 
                     {/* Stats row */}
-                    <div className="grid grid-cols-3 gap-4 my-16 border-y border-white/5 py-10">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-16 border-y border-white/5 py-10">
                         {[
                             { label: 'Network', value: 'Base' },
                             { label: 'Standard', value: 'ERC-721' },
                             { label: 'Status', value: 'Live' },
+                            { label: 'Available', value: 'Mini App · Web' },
                         ].map(s => (
                             <div key={s.label} className="space-y-2">
                                 <p className="text-[9px] tracking-[0.35em] uppercase text-white/30 font-bold">{s.label}</p>

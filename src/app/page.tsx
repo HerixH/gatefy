@@ -483,6 +483,9 @@ export default function Home() {
               <span className="text-[9px] lg:text-[10px] font-bold tracking-[0.3em] lg:tracking-[0.4em] uppercase text-secondary/80">
                 Autonomous Verification Protocol
               </span>
+              <span className="block mt-2 text-[8px] lg:text-[9px] font-mono tracking-[0.2em] uppercase text-white/30">
+                Base Mini App · Web
+              </span>
             </div>
 
             <h1 className="text-[18vw] sm:text-[12vw] lg:text-[10rem] font-medium leading-[0.8] tracking-tighter mb-6 lg:mb-16 text-gradient">

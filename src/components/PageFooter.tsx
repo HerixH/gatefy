@@ -25,7 +25,7 @@ export function PageFooter() {
             </div>
 
             <div className="border-t border-white/[0.03] py-2 text-center">
-                <span className="text-[7px] font-mono tracking-[0.3em] text-white/15 uppercase">© 2026 Gatefy Protocol — Built on Base</span>
+                <span className="text-[7px] font-mono tracking-[0.3em] text-white/15 uppercase">© 2026 Gatefy Protocol — Built on Base · Base Mini App & Web</span>
             </div>
         </footer>
     );

@@ -7,7 +7,12 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
     try {
         const events = await getEvents();
-        const registrations = await getRegistrations();
+        let registrations: Awaited<ReturnType<typeof getRegistrations>> = [];
+        try {
+            registrations = await getRegistrations();
+        } catch (regErr) {
+            console.error('Failed to fetch registrations (using empty):', regErr);
+        }
         const sorted = events
             .map((ev) => {
                 const registrationCount = registrations.filter(
@@ -20,7 +25,9 @@ export async function GET() {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });
     } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch events' }, { status: 500 });
+        console.error('GET /api/events error:', error);
+        const msg = error instanceof Error ? error.message : 'Failed to fetch events';
+        return NextResponse.json({ error: msg }, { status: 500 });
     }
 }
 
