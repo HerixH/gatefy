@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const registrations = getRegistrations();
+        const registrations = await getRegistrations();
         return NextResponse.json(registrations, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });

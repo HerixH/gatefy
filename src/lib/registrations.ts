@@ -1,11 +1,4 @@
-import fs from 'fs';
-import path from 'path';
-
-const DATA_DIR = path.join(process.cwd(), 'data');
-const REGISTRATIONS_PATH = path.join(DATA_DIR, 'registrations.json');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-if (!fs.existsSync(REGISTRATIONS_PATH)) fs.writeFileSync(REGISTRATIONS_PATH, JSON.stringify([]));
+import { isSupabaseConfigured, getSupabase } from './supabase';
 
 export interface Registration {
     eventId: string;
@@ -13,43 +6,39 @@ export interface Registration {
     registeredAt: string;
 }
 
-export const getRegistrations = (): Registration[] => {
-    return JSON.parse(fs.readFileSync(REGISTRATIONS_PATH, 'utf8'));
-};
+export async function getRegistrations(): Promise<Registration[]> {
+    if (!isSupabaseConfigured) return [];
+    const supabase = getSupabase();
+    const { data, error } = await supabase.from('registrations').select('*').order('registered_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(r => ({
+        eventId: r.event_id,
+        wallet: r.wallet,
+        registeredAt: r.registered_at,
+    }));
+}
 
-const saveRegistrations = (registrations: Registration[]) => {
-    fs.writeFileSync(REGISTRATIONS_PATH, JSON.stringify(registrations, null, 2));
-};
-
-export const registerForEvent = (eventId: string, wallet: string): boolean => {
-    const registrations = getRegistrations();
+export async function registerForEvent(eventId: string, wallet: string): Promise<boolean> {
+    if (!isSupabaseConfigured) throw new Error('Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     const cleanEventId = eventId.trim().toLowerCase();
     const cleanWallet = wallet.trim().toLowerCase();
 
-    const exists = registrations.find(r =>
-        r.eventId.toLowerCase() === cleanEventId &&
-        r.wallet.toLowerCase() === cleanWallet
-    );
+    const { data: existing } = await getSupabase().from('registrations').select('event_id').eq('event_id', cleanEventId).eq('wallet', cleanWallet).maybeSingle();
+    if (existing) return false;
 
-    if (exists) return false;
-
-    registrations.push({
-        eventId: cleanEventId,
+    const { error } = await getSupabase().from('registrations').insert({
+        event_id: cleanEventId,
         wallet: cleanWallet,
-        registeredAt: new Date().toISOString()
     });
-
-    saveRegistrations(registrations);
+    if (error) throw error;
     return true;
-};
+}
 
-export const isRegistered = (eventId: string, wallet: string): boolean => {
-    const registrations = getRegistrations();
+export async function isRegistered(eventId: string, wallet: string): Promise<boolean> {
+    if (!isSupabaseConfigured) return false;
     const cleanEventId = eventId.trim().toLowerCase();
     const cleanWallet = wallet.trim().toLowerCase();
 
-    return registrations.some(r =>
-        r.eventId.toLowerCase() === cleanEventId &&
-        r.wallet.toLowerCase() === cleanWallet
-    );
-};
+    const { data } = await getSupabase().from('registrations').select('event_id').eq('event_id', cleanEventId).eq('wallet', cleanWallet).maybeSingle();
+    return !!data;
+}

@@ -6,9 +6,6 @@ import { isSupabaseConfigured, getSupabase } from './supabase';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const EVENTS_PATH = path.join(DATA_DIR, 'events.json');
 
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
-if (!fs.existsSync(EVENTS_PATH)) fs.writeFileSync(EVENTS_PATH, JSON.stringify([]));
-
 export interface Event {
     id: string;
     name: string;
@@ -75,13 +72,17 @@ export async function getEvents(): Promise<Event[]> {
         if (error) throw error;
         return (data ?? []).map(rowToEvent);
     }
-    const raw = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf8')) as (Event & { bannerUrl?: string })[];
-    return raw.map(e => ({ ...e, bannerUrl: e.bannerUrl ?? undefined }));
+    try {
+        const raw = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf8')) as (Event & { bannerUrl?: string })[];
+        return raw.map(e => ({ ...e, bannerUrl: e.bannerUrl ?? undefined }));
+    } catch {
+        return [];
+    }
 }
 
 export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attendeeCount' | 'verificationCode'>): Promise<Event> {
     const id = Math.random().toString(36).substring(2, 10).toUpperCase();
-    const verificationCode = generateCode();
+    const verificationCode = await generateCode();
     const createdAt = new Date().toISOString();
     const event: Event = {
         ...data,
@@ -116,7 +117,12 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
 
     const events = await getEvents();
     events.push(event);
-    fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+        fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+    } catch {
+        throw new Error('File system not writable (e.g. on Vercel). Use Supabase.');
+    }
     return event;
 }
 
@@ -133,7 +139,11 @@ export async function incrementAttendee(eventId: string): Promise<void> {
     const idx = events.findIndex(e => e.id === eventId);
     if (idx !== -1) {
         events[idx].attendeeCount += 1;
-        fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+        try {
+            fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+        } catch {
+            // Ignore on read-only FS (Vercel)
+        }
     }
 }
 

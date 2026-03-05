@@ -9,7 +9,7 @@ export async function POST(request: Request) {
         const msg = getSupabaseConfigError() ?? 'Supabase not configured.';
         return NextResponse.json(
             {
-                error: `Banner upload not configured. ${msg} Add both to .env.local in the project root, then restart the dev server. See supabase/STORAGE.md.`,
+                error: `Banner upload not configured. ${msg} Add NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY to your environment, then redeploy. See supabase/STORAGE.md.`,
             },
             { status: 503 }
         );

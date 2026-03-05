@@ -76,3 +76,46 @@ drop policy if exists "Allow event banner deletes" on storage.objects;
 create policy "Allow event banner deletes"
   on storage.objects for delete
   using (bucket_id = 'event-banners');
+
+-- =============================================================================
+-- CLAIM CODES, ATTENDANCE, REGISTRATIONS (required for Vercel - no file system)
+-- =============================================================================
+
+create table if not exists public.claim_codes (
+  code text primary key,
+  used boolean default false,
+  created_at timestamptz default now(),
+  used_at timestamptz,
+  used_by text,
+  vip boolean default false,
+  tx_hash text,
+  purchased_by text
+);
+
+create table if not exists public.attendance (
+  id bigserial primary key,
+  wallet text not null,
+  code text not null,
+  checked_in_at timestamptz default now(),
+  event_id text
+);
+
+create table if not exists public.registrations (
+  event_id text not null,
+  wallet text not null,
+  registered_at timestamptz default now(),
+  primary key (event_id, wallet)
+);
+
+alter table public.claim_codes enable row level security;
+alter table public.attendance enable row level security;
+alter table public.registrations enable row level security;
+
+drop policy if exists "Service role manages claim_codes" on public.claim_codes;
+create policy "Service role manages claim_codes" on public.claim_codes for all using (true) with check (true);
+
+drop policy if exists "Service role manages attendance" on public.attendance;
+create policy "Service role manages attendance" on public.attendance for all using (true) with check (true);
+
+drop policy if exists "Service role manages registrations" on public.registrations;
+create policy "Service role manages registrations" on public.registrations for all using (true) with check (true);

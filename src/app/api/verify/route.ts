@@ -23,7 +23,7 @@ export async function POST(request: Request) {
         }
 
         // 1. Peek at the code to see if it exists and check if it's linked to an event
-        const claim = peekCode(code);
+        const claim = await peekCode(code);
         const event = await getEventByCode(code);
 
         // If it's not a valid code and not an event code, it's invalid
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
         // 3. Check for registration
         if (event && wallet && wallet !== '0xDEV') {
-            if (!isRegistered(event.id, wallet)) {
+            if (!(await isRegistered(event.id, wallet))) {
                 return NextResponse.json({
                     success: false,
                     message: 'Verification Denied: You must register for this event first.'
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
         }
 
         // 4. Actually mark code as used / record attendance
-        const { success, newCheckin } = verifyCode(code, wallet, event?.id);
+        const { success, newCheckin } = await verifyCode(code, wallet, event?.id);
 
         if (success) {
             if (event && newCheckin) {

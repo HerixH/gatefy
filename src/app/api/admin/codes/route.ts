@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const codes = getCodes();
+        const codes = await getCodes();
         return NextResponse.json(codes, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST() {
     try {
-        const code = generateCode();
+        const code = await generateCode();
         return NextResponse.json({ code });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to generate code' }, { status: 500 });

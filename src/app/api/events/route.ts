@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
     try {
         const events = await getEvents();
-        const registrations = getRegistrations();
+        const registrations = await getRegistrations();
         const sorted = events
             .map((ev) => {
                 const registrationCount = registrations.filter(

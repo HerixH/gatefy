@@ -11,6 +11,8 @@ NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 ```
 
+For production (e.g. Vercel), you can also use `SUPABASE_URL` instead of `NEXT_PUBLIC_SUPABASE_URL` if the latter isn't available in API routes.
+
 - **NEXT_PUBLIC_SUPABASE_URL**: Project URL from [Supabase Dashboard](https://supabase.com/dashboard) → Project Settings → API.
 - **SUPABASE_SERVICE_ROLE_KEY**: Service role key from the same page (under "Project API keys"). Use this only on the server; never expose it in client code.
 

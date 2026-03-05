@@ -12,7 +12,7 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'Event ID is required' }, { status: 400 });
         }
 
-        const records = getAttendance();
+        const records = await getAttendance();
         const id = eventId.trim();
         const eventAttendees = records.filter(
             r => r.eventId != null && String(r.eventId).toLowerCase() === id.toLowerCase()

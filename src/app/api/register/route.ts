@@ -11,11 +11,11 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Event ID and wallet are required' }, { status: 400 });
         }
 
-        if (isRegistered(eventId, wallet)) {
+        if (await isRegistered(eventId, wallet)) {
             return NextResponse.json({ error: 'Already registered' }, { status: 400 });
         }
 
-        const success = registerForEvent(eventId, wallet);
+        const success = await registerForEvent(eventId, wallet);
         if (success) {
             return NextResponse.json({ success: true });
         } else {
@@ -35,7 +35,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ error: 'Missing params' }, { status: 400 });
     }
 
-    return NextResponse.json({ registered: isRegistered(eventId, wallet) }, {
+    return NextResponse.json({ registered: await isRegistered(eventId, wallet) }, {
         headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
     });
 }

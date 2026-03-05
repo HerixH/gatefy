@@ -17,7 +17,7 @@ export async function POST(request: Request) {
         // In dev mode, skip on-chain verification entirely
         if (DEV_MODE) {
             console.log('[DEV MODE] Skipping payment verification for VIP imprint');
-            const code = generateCode({ vip: true, txHash: 'DEV-' + Date.now(), purchasedBy: wallet });
+            const code = await generateCode({ vip: true, txHash: 'DEV-' + Date.now(), purchasedBy: wallet });
             return NextResponse.json({ success: true, code }, { status: 201 });
         }
 
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
             }
         }
 
-        const code = generateCode({ vip: true, txHash, purchasedBy: wallet });
+        const code = await generateCode({ vip: true, txHash, purchasedBy: wallet });
         return NextResponse.json({ success: true, code }, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to generate VIP imprint' }, { status: 500 });
