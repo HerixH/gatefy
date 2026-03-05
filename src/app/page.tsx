@@ -69,6 +69,7 @@ export default function Home() {
 
   // Registration
   const [isUserRegistered, setIsUserRegistered] = useState(false);
+  const [isUserVerified, setIsUserVerified] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [attendees, setAttendees] = useState<any[]>([]);
   const [registrations, setRegistrations] = useState<{ wallet: string; registeredAt: string }[]>([]);
@@ -98,7 +99,7 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
-  // Check registration and fetch attendees when event selected
+  // Check registration, verification status, and fetch attendees when event selected
   useEffect(() => {
     if (selectedEvent && address) {
       // 1. Check registration
@@ -107,7 +108,13 @@ export default function Home() {
         .then(data => setIsUserRegistered(!!data.registered))
         .catch(() => setIsUserRegistered(false));
 
-      // 2. Fetch attendees and registrations if owner (no cache so list is up to date)
+      // 2. Check if user has already verified for this event
+      fetch(`/api/events/verified?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => setIsUserVerified(!!data.verified))
+        .catch(() => setIsUserVerified(false));
+
+      // 3. Fetch attendees and registrations if owner (no cache so list is up to date)
       if (selectedEvent.organizer.toLowerCase() === address.toLowerCase()) {
         setLoadingAttendees(true);
         Promise.all([
@@ -125,6 +132,7 @@ export default function Home() {
       }
     } else {
       setIsUserRegistered(false);
+      setIsUserVerified(false);
       setAttendees([]);
       setRegistrations([]);
     }
@@ -245,6 +253,7 @@ export default function Home() {
       });
       const result = await res.json();
       if (result.success) {
+        setIsUserVerified(true);
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
         } else {
@@ -1249,15 +1258,25 @@ export default function Home() {
                         <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                       </div>
                     ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
-                      <button
-                        onClick={() => { setSelectedEvent(null); setShowScanner(true); }}
-                        className="btn-premium w-full py-4 group"
-                      >
-                        <div className="flex items-center justify-center gap-3">
-                          <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
-                          <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
+                      isUserVerified ? (
+                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
+                          </div>
+                          <p className="text-[9px] text-white/25 mt-1">You have already checked in for this event.</p>
                         </div>
-                      </button>
+                      ) : (
+                        <button
+                          onClick={() => { setSelectedEvent(null); setShowScanner(true); }}
+                          className="btn-premium w-full py-4 group"
+                        >
+                          <div className="flex items-center justify-center gap-3">
+                            <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
+                            <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
+                          </div>
+                        </button>
+                      )
                     ) : (
                       <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
