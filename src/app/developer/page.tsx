@@ -29,9 +29,16 @@ const statusColor: Record<string, string> = {
     research: 'rgba(168,85,247,0.7)',
 };
 
+const truncateAddress = (addr: string) => {
+    if (!addr || addr.length < 14) return addr;
+    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+};
+
 export default function Developer() {
     const [copied, setCopied] = useState(false);
-    const WALLET = '0xYOUR_WALLET_ADDRESS_HERE';
+    const [revealed, setRevealed] = useState(false);
+    const WALLET = process.env.NEXT_PUBLIC_TIP_WALLET || '0xYOUR_WALLET_ADDRESS_HERE';
+    const displayAddress = revealed ? WALLET : truncateAddress(WALLET);
 
     const copyWallet = () => {
         navigator.clipboard.writeText(WALLET);
@@ -113,10 +120,14 @@ export default function Developer() {
                             <p className="text-[9px] tracking-[0.3em] uppercase text-white/20 font-bold mb-3">Tip in Crypto · Base / ETH</p>
                             <button
                                 onClick={copyWallet}
-                                className="w-full flex items-center gap-3 border border-white/10 bg-white/[0.02] px-4 py-3 hover:border-white/20 hover:bg-white/[0.04] transition-all text-left group"
+                                onMouseEnter={() => setRevealed(true)}
+                                onMouseLeave={() => setRevealed(false)}
+                                onFocus={() => setRevealed(true)}
+                                onBlur={() => setRevealed(false)}
+                                className="w-full flex items-center gap-3 border border-white/10 bg-white/[0.02] px-4 py-3 hover:border-white/20 hover:bg-white/[0.04] transition-all text-left group select-none"
                             >
                                 <div className="w-1.5 h-1.5 rounded-full bg-white/60 shrink-0" />
-                                <span className="text-[11px] font-mono text-white/50 tracking-wider break-all group-hover:text-white/70 transition-colors flex-1">{WALLET}</span>
+                                <span className="text-[11px] font-mono text-white/50 tracking-wider break-all group-hover:text-white/70 transition-colors flex-1">{displayAddress}</span>
                                 <AnimatePresence mode="wait">
                                     {copied ? (
                                         <motion.span key="copied" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-[8px] font-bold tracking-[0.3em] uppercase shrink-0 text-green-400">Copied!</motion.span>
@@ -125,15 +136,15 @@ export default function Developer() {
                                     )}
                                 </AnimatePresence>
                             </button>
-                            <p className="text-[8px] font-mono tracking-widest text-white/15 uppercase mt-2">Click to copy address</p>
+                            <p className="text-[8px] font-mono tracking-widest text-white/15 uppercase mt-2">Hover to reveal · Click to copy full address</p>
                         </div>
 
                         {/* Social row */}
                         <div className="flex flex-wrap gap-3">
                             {[
-                                { label: 'X / Twitter', href: 'https://twitter.com' },
-                                { label: 'GitHub', href: 'https://github.com' },
-                                { label: 'Farcaster', href: 'https://warpcast.com' },
+                                { label: 'X / Twitter', href: 'https://x.com/gatefyprotocol' },
+                                { label: 'GitHub', href: 'https://github.com/HerixH' },
+                                { label: 'Farcaster', href: 'https://farcaster.xyz/herixhangandu' },
                             ].map(s => (
                                 <a
                                     key={s.label}
