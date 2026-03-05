@@ -559,8 +559,14 @@ export default function Home() {
                         className="w-full text-left hover:bg-white/[0.03] transition-colors group overflow-hidden"
                       >
                         {ev.bannerUrl && (
-                          <div className="w-full h-28 bg-white/5">
-                            <img src={ev.bannerUrl} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                          <div className="w-full h-28 bg-white/5 relative overflow-hidden">
+                            <img
+                              src={ev.bannerUrl}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                            />
                           </div>
                         )}
                         <div className="flex items-start justify-between gap-4 p-5">
@@ -791,8 +797,14 @@ export default function Home() {
                   <div className="space-y-2">
                     <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Banner image</label>
                     {form.bannerUrl ? (
-                      <div className="relative">
-                        <img src={form.bannerUrl} alt="Banner preview" className="w-full h-32 object-cover rounded border border-white/10" />
+                      <div className="relative bg-white/5 min-h-32 rounded border border-white/10 overflow-hidden">
+                        <img
+                          src={form.bannerUrl}
+                          alt="Banner preview"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          className="w-full h-32 object-cover"
+                        />
                         <button
                           type="button"
                           onClick={() => setForm(f => ({ ...f, bannerUrl: '' }))}
@@ -974,8 +986,14 @@ export default function Home() {
 
               <div className="p-6 lg:p-8 space-y-8">
                 {selectedEvent.bannerUrl && (
-                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2">
-                    <img src={selectedEvent.bannerUrl} alt="" className="w-full h-52 lg:h-72 object-cover" />
+                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2 bg-white/5 min-h-[13rem] lg:min-h-[18rem]">
+                    <img
+                      src={selectedEvent.bannerUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      className="w-full h-52 lg:h-72 object-cover"
+                    />
                   </div>
                 )}
                 <div>
@@ -1331,8 +1349,14 @@ export default function Home() {
 
               <div className="p-6 lg:p-8 space-y-8">
                 {createdEvent.bannerUrl && (
-                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2">
-                    <img src={createdEvent.bannerUrl} alt="" className="w-full h-48 lg:h-56 object-cover rounded-t" />
+                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2 bg-white/5 min-h-[12rem] lg:min-h-[14rem]">
+                    <img
+                      src={createdEvent.bannerUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      className="w-full h-48 lg:h-56 object-cover rounded-t"
+                    />
                   </div>
                 )}
                 <div className="space-y-1">
