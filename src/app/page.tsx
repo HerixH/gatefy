@@ -719,76 +719,77 @@ export default function Home() {
                   <p className="text-[10px] uppercase tracking-[0.25em] text-secondary/30 font-bold">Protocol registration</p>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Event Name *</label>
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Event Name *</label>
                     <input
                       type="text"
                       required
                       value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                       placeholder="e.g. Gatefy Launch Party"
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm"
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Start Date & Time *</label>
-                    <input
-                      type="datetime-local"
-                      required
-                      value={form.date}
-                      onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors [color-scheme:dark]"
-                    />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Start Date & Time *</label>
+                      <input
+                        type="datetime-local"
+                        required
+                        value={form.date}
+                        onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">End Date & Time</label>
+                      <input
+                        type="datetime-local"
+                        value={form.endDate}
+                        onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
+                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
+                      />
+                    </div>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">End Date & Time</label>
-                    <input
-                      type="datetime-local"
-                      value={form.endDate}
-                      onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors [color-scheme:dark]"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Location</label>
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Location</label>
                     <input
                       type="text"
                       value={form.location}
                       onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
                       placeholder="e.g. Dubai, UAE"
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Number of people (max capacity)</label>
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Max capacity</label>
                     <input
                       type="number"
                       min={1}
                       value={form.maxAttendees}
                       onChange={e => setForm(f => ({ ...f, maxAttendees: e.target.value }))}
-                      placeholder="e.g. 100 (leave empty for unlimited)"
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors [color-scheme:dark]"
+                      placeholder="Leave empty for unlimited"
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Description</label>
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Description</label>
                     <textarea
                       value={form.description}
                       onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                       placeholder="Brief event description..."
                       rows={3}
-                      className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-white/30 transition-colors resize-none"
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm resize-none"
                     />
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold block">Banner image</label>
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Banner image</label>
                     {form.bannerUrl ? (
                       <div className="relative">
                         <img src={form.bannerUrl} alt="Banner preview" className="w-full h-32 object-cover rounded border border-white/10" />
@@ -801,7 +802,7 @@ export default function Home() {
                         </button>
                       </div>
                     ) : (
-                      <label className="block w-full bg-white/[0.03] border border-white/10 px-4 py-6 text-center text-white/40 text-sm font-mono cursor-pointer hover:border-white/20 transition-colors">
+                      <label className="block w-full bg-white/[0.04] border border-white/10 px-4 py-6 text-center text-white/40 text-sm font-mono cursor-pointer hover:border-white/20 hover:bg-white/[0.06] transition-all rounded-sm">
                         {uploadingBanner ? 'Uploading…' : 'Choose image (optional)'}
                         <input
                           type="file"
