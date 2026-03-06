@@ -276,14 +276,19 @@ export default function Home() {
     setCreating(true);
     setCreateError('');
     try {
+      // datetime-local returns YYYY-MM-DDTHH:mm (no timezone). Convert to ISO so the user's
+      // local time is stored correctly; otherwise Postgres treats it as server (UTC) time.
+      const dateIso = form.date ? new Date(form.date).toISOString() : form.date;
+      const endDateIso = form.endDate ? new Date(form.endDate).toISOString() : form.endDate;
       const res = await fetch('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...form,
+          date: dateIso,
+          endDate: endDateIso || undefined,
           organizer: address,
           bannerUrl: form.bannerUrl || undefined,
-          endDate: form.endDate || undefined,
           maxAttendees: form.maxAttendees ? parseInt(form.maxAttendees, 10) : undefined,
         }),
       });
