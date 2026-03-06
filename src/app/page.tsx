@@ -2,7 +2,7 @@
 
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits } from 'viem';
@@ -49,7 +49,7 @@ interface Event {
   bannerUrl?: string;
 }
 
-export default function Home() {
+function HomeContent() {
   const { address, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
 
@@ -1718,5 +1718,13 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <HomeContent />
+    </Suspense>
   );
 }
