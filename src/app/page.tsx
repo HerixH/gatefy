@@ -3,6 +3,7 @@
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -212,9 +213,20 @@ export default function Home() {
   const [createError, setCreateError] = useState('');
   const [uploadingBanner, setUploadingBanner] = useState(false);
 
+  const searchParams = useSearchParams();
+
   useEffect(() => {
     fetchEvents();
   }, [address]);
+
+  // Auto-select event from URL ?event=ID (for registration links)
+  useEffect(() => {
+    const eventId = searchParams.get('event');
+    if (eventId && events.length > 0) {
+      const ev = events.find(e => e.id.toLowerCase() === eventId.toLowerCase());
+      if (ev) setSelectedEvent(ev);
+    }
+  }, [searchParams, events]);
 
   const fetchEvents = async (): Promise<Event[]> => {
     try {
@@ -323,13 +335,56 @@ export default function Home() {
     }
   };
 
-  const handleDownloadQR = (eventName: string) => {
-    const canvas = document.getElementById('event-qr-canvas') as HTMLCanvasElement;
-    if (!canvas) return;
-    const url = canvas.toDataURL('image/png');
+  const getRegistrationLink = (ev: Event) =>
+    (typeof window !== 'undefined' ? window.location.origin : '') + '/?event=' + ev.id;
+
+  const handleDownloadQR = (ev: Event, canvasId: string) => {
+    const qrCanvas = document.getElementById(canvasId) as HTMLCanvasElement;
+    if (!qrCanvas) return;
+    const regLink = getRegistrationLink(ev);
+    const dateStr = formatDateTime(ev.date);
+    const locStr = ev.location || 'TBA';
+
+    // Composite canvas: event details + QR + manual code
+    const pad = 32;
+    const qrSize = 200;
+    const w = 400;
+    const h = 580;
+    const composite = document.createElement('canvas');
+    composite.width = w;
+    composite.height = h;
+    const ctx = composite.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 22px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(ev.name.toUpperCase(), w / 2, pad + 24);
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(dateStr + (locStr !== 'TBA' ? ' · ' + locStr : ''), w / 2, pad + 50);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect((w - qrSize - 24) / 2, pad + 70, qrSize + 24, qrSize + 24);
+    ctx.drawImage(qrCanvas, (w - qrSize) / 2, pad + 82, qrSize, qrSize);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillText('Verification Code', w / 2, pad + qrSize + 110);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 20px monospace';
+    ctx.fillText(ev.verificationCode, w / 2, pad + qrSize + 132);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText('Register: ' + regLink, w / 2, h - pad - 36);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillText('Gatefy Protocol · Scan or enter code to verify attendance', w / 2, h - pad);
+
+    const url = composite.toDataURL('image/png');
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${eventName.replace(/\s+/g, '-').toLowerCase()}-qr.png`;
+    a.download = `${ev.name.replace(/\s+/g, '-').toLowerCase()}-gatefy-qr.png`;
     a.click();
   };
 
@@ -1094,6 +1149,12 @@ export default function Home() {
 
                             <div className="flex flex-wrap justify-center md:justify-start gap-4">
                               <button
+                                onClick={() => handleDownloadQR(selectedEvent, `organizer-qr-${selectedEvent.id}`)}
+                                className="px-4 py-2 bg-white text-black hover:bg-neutral-200 transition-all text-[9px] tracking-[0.2em] uppercase font-bold"
+                              >
+                                Download QR
+                              </button>
+                              <button
                                 onClick={() => {
                                   navigator.clipboard.writeText(selectedEvent.verificationCode);
                                 }}
@@ -1103,23 +1164,17 @@ export default function Home() {
                               </button>
                               <button
                                 onClick={() => {
-                                  const canvas = document.getElementById(`organizer-qr-${selectedEvent.id}`) as HTMLCanvasElement;
-                                  if (canvas) {
-                                    const url = canvas.toDataURL('image/png');
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = `${selectedEvent.name.replace(/\s+/g, '-').toLowerCase()}-qr.png`;
-                                    a.click();
-                                  }
+                                  navigator.clipboard.writeText(getRegistrationLink(selectedEvent));
+                                  showWalletToast('Registration link copied to clipboard.');
                                 }}
-                                className="px-4 py-2 bg-white text-black hover:bg-neutral-200 transition-all text-[9px] tracking-[0.2em] uppercase font-bold"
+                                className="px-4 py-2 bg-white/10 border border-white/20 hover:bg-white/20 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white"
                               >
-                                Download QR
+                                Copy Registration Link
                               </button>
                             </div>
                           </div>
                         </div>
-                        <p className="text-[8px] tracking-[0.1em] uppercase text-white/10 font-medium text-center md:text-left">Distribute this code or QR only to verified entities.</p>
+                        <p className="text-[8px] tracking-[0.1em] uppercase text-white/10 font-medium text-center md:text-left">Share the registration link for sign-ups. Download the QR (includes event details) for check-in at the event.</p>
                       </div>
                     )}
 
@@ -1394,25 +1449,36 @@ export default function Home() {
                 <div className="p-4 border border-white/[0.06] bg-white/[0.02] space-y-1">
                   <p className="text-[8px] uppercase tracking-[0.25em] text-white/40 font-bold">How it works</p>
                   <p className="text-xs text-white/40 font-light leading-relaxed">
-                    Share this QR code with your attendees. They scan it on the Gatefy homepage to verify their attendance and mint their proof-of-presence.
+                    Download the QR (includes event details) or copy the registration link to share. Attendees register first, then scan the code at the event to verify and mint their proof-of-presence.
                   </p>
                 </div>
 
                 {/* Actions */}
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => handleDownloadQR(createdEvent.name)}
-                    className="btn-premium flex-1 py-4 flex items-center justify-center gap-3"
-                  >
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold">Download QR</span>
-                  </button>
+                <div className="flex flex-col gap-4">
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => handleDownloadQR(createdEvent, 'event-qr-canvas')}
+                      className="btn-premium flex-1 py-4 flex items-center justify-center gap-3"
+                    >
+                      <span className="tracking-[0.2em] uppercase text-sm font-bold">Download QR</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdEvent.verificationCode);
+                      }}
+                      className="flex-1 py-4 border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center"
+                    >
+                      <span className="tracking-[0.2em] uppercase text-sm font-bold opacity-60">Copy Code</span>
+                    </button>
+                  </div>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(createdEvent.verificationCode);
+                      navigator.clipboard.writeText(getRegistrationLink(createdEvent));
+                      showWalletToast('Registration link copied to clipboard.');
                     }}
-                    className="flex-1 py-4 border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center"
+                    className="w-full py-4 border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2"
                   >
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold opacity-60">Copy Code</span>
+                    <span className="tracking-[0.2em] uppercase text-sm font-bold opacity-60">Copy Registration Link</span>
                   </button>
                 </div>
               </div>

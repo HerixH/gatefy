@@ -17,6 +17,26 @@ export function getSupabaseConfigError(): string | null {
   return null;
 }
 
+/** True if using an elevated key: service_role JWT, or sb_secret_ (new format). Rejects anon JWT and sb_publishable_. */
+function isElevatedKey(key: string): boolean {
+  if (!key || typeof key !== 'string') return false;
+  const k = key.trim();
+  if (k.startsWith('sb_secret_')) return true; // New secret key format
+  if (k.startsWith('sb_publishable_')) return false; // Low privilege
+  if (k.startsWith('eyJ')) {
+    try {
+      const b64 = k.split('.')[1];
+      const payload = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+      return payload?.role === 'service_role';
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export const isUsingServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) && isElevatedKey(process.env.SUPABASE_SERVICE_ROLE_KEY ?? '');
+
 let client: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient {
