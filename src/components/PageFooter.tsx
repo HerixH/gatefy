@@ -3,19 +3,24 @@ import Link from 'next/link';
 
 export function PageFooter() {
     return (
-        <footer className="border-t border-white/5 bg-[#050505] mt-auto">
+        <footer className="relative z-10 border-t border-white/5 bg-[#050505] mt-auto">
             <div className="max-w-4xl mx-auto px-6 lg:px-12 py-5 flex flex-col sm:flex-row items-center justify-between gap-4">
 
-                {/* Links */}
+                {/* Links — use stopPropagation to avoid wallet connect intercept in Mini App */}
                 <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
                     {[
                         { label: 'About', href: '/about' },
+                        { label: 'Leaderboard', href: '/leaderboard' },
                         { label: 'Developer', href: '/developer' },
                         { label: 'Terms', href: '/terms' },
                         { label: 'Privacy', href: '/privacy' },
                     ].map((link, i, arr) => (
                         <span key={link.label} className="flex items-center gap-5">
-                            <Link href={link.href} className="text-[9px] tracking-[0.3em] uppercase text-white/35 hover:text-white transition-colors font-bold">
+                            <Link
+                                href={link.href}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-[9px] tracking-[0.3em] uppercase text-white/35 hover:text-white transition-colors font-bold"
+                            >
                                 {link.label}
                             </Link>
                             {i < arr.length - 1 && <span className="text-white/10 text-[10px]">|</span>}

@@ -4,6 +4,7 @@ import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -1676,25 +1677,26 @@ function HomeContent() {
         )}
       </AnimatePresence>
 
-      <footer className="border-t border-white/5 bg-[#050505]">
+      <footer className="relative z-10 border-t border-white/5 bg-[#050505]">
         <div className="max-w-[1400px] mx-auto px-6 lg:px-12 py-5 flex flex-col sm:flex-row items-center justify-between gap-4">
 
-          {/* Links */}
+          {/* Links — use Link for client-side nav to avoid wallet intercept in Mini App */}
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
             {[
               { label: 'About', href: '/about' },
+              { label: 'Leaderboard', href: '/leaderboard' },
               { label: 'Developer', href: '/developer' },
               { label: 'Terms', href: '/terms' },
               { label: 'Privacy', href: '/privacy' },
-
             ].map((link, i, arr) => (
               <span key={link.label} className="flex items-center gap-6">
-                <a
+                <Link
                   href={link.href}
+                  onClick={(e) => e.stopPropagation()}
                   className="text-[9px] tracking-[0.3em] uppercase text-white/40 hover:text-white transition-colors font-bold"
                 >
                   {link.label}
-                </a>
+                </Link>
                 {i < arr.length - 1 && (
                   <span className="text-white/10 text-[10px]">|</span>
                 )}
