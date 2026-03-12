@@ -23,23 +23,23 @@ const pressStart = Press_Start_2P({
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://gatefy.vercel.app";
 
 export const metadata: Metadata = {
-  title: "Gatefy | NFT Attendance Protocol",
+  title: "GATE PROTOCOL | NFT Attendance",
   description: "Secure, time-limited proof of attendance for your events.",
   icons: {
     icon: "/favicon.svg",
     apple: "/favicon.svg",
   },
   openGraph: {
-    title: "Gatefy | NFT Attendance Protocol",
+    title: "GATE PROTOCOL | NFT Attendance",
     description: "Secure, time-limited proof of attendance for your events.",
     url: siteUrl,
-    siteName: "Gatefy Protocol",
+    siteName: "GATE PROTOCOL",
     images: [
       {
         url: `${siteUrl}/opengraph-image.png`,
         width: 1200,
         height: 630,
-        alt: "Gatefy Protocol",
+        alt: "GATE PROTOCOL",
       },
     ],
     locale: "en_US",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Gatefy | NFT Attendance Protocol",
+    title: "GATE PROTOCOL | NFT Attendance",
     description: "Secure, time-limited proof of attendance for your events.",
     images: [`${siteUrl}/opengraph-image.png`],
   },

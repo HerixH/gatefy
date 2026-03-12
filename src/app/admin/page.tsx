@@ -264,7 +264,7 @@ export default function AdminDashboard() {
                                 </g>
                             </svg>
                             <div className="flex flex-col items-start leading-none gap-1">
-                                <span className="text-3xl font-black tracking-[0.2em] uppercase text-white">Gatefy</span>
+                                <span className="text-3xl font-black tracking-[0.2em] uppercase text-white">GATE</span>
                                 <span className="text-[10px] font-bold tracking-[0.5em] uppercase text-white/70">Protocol</span>
                             </div>
                         </div>
@@ -320,7 +320,7 @@ export default function AdminDashboard() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none">
-                        <span className="text-[11px] font-black tracking-[0.2em] uppercase">Gatefy</span>
+                        <span className="text-[11px] font-black tracking-[0.2em] uppercase">GATE</span>
                         <span className="text-[6px] font-bold tracking-[0.4em] uppercase text-white/70">Protocol</span>
                     </div>
                 </div>
@@ -470,7 +470,7 @@ export default function AdminDashboard() {
                             <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-16">
                                 <div className="space-y-4">
                                     <h1 className="text-7xl font-medium tracking-tighter italic">PROTOCOL DASHBOARD.</h1>
-                                    <p className="text-[10px] uppercase tracking-[0.5em] text-white/20 font-black">Gatefy Autonomous Verification Node</p>
+                                    <p className="text-[10px] uppercase tracking-[0.5em] text-white/20 font-black">GATE PROTOCOL Autonomous Verification Node</p>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

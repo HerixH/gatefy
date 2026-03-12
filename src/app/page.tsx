@@ -379,7 +379,7 @@ function HomeContent() {
     ctx.fillText('Register: ' + regLink, w / 2, h - pad - 36);
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.font = '10px system-ui, sans-serif';
-    ctx.fillText('Gatefy Protocol · Scan or enter code to verify attendance', w / 2, h - pad);
+    ctx.fillText('GATE PROTOCOL · Scan or enter code to verify attendance', w / 2, h - pad);
 
     const url = composite.toDataURL('image/png');
     const a = document.createElement('a');
@@ -503,7 +503,7 @@ function HomeContent() {
           </svg>
           {/* Wordmark */}
           <div className="flex flex-col leading-none gap-[3px]">
-            <span className="text-base lg:text-lg font-black tracking-[0.3em] uppercase text-white">Gatefy</span>
+            <span className="text-base lg:text-lg font-black tracking-[0.3em] uppercase text-white">GATE</span>
             <span className="text-[8px] lg:text-[9px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
           </div>
         </div>
@@ -793,7 +793,7 @@ function HomeContent() {
                       required
                       value={form.name}
                       onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. Gatefy Launch Party"
+                      placeholder="e.g. GATE Launch Party"
                       className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm"
                     />
                   </div>
@@ -1568,7 +1568,7 @@ function HomeContent() {
                     </div>
 
                     <p className="text-[9px] leading-relaxed text-white/25 font-mono">
-                      Payment is sent to the Gatefy treasury via USDC on Base. After confirmation your exclusive QR imprint is generated instantly.
+                      Payment is sent to the GATE PROTOCOL treasury via USDC on Base. After confirmation your exclusive QR imprint is generated instantly.
                     </p>
 
                     {vipError && (
@@ -1714,7 +1714,7 @@ function HomeContent() {
 
         </div>
         <div className="border-t border-white/[0.03] py-2 text-center">
-          <span className="text-[7px] font-mono tracking-[0.3em] text-white/15 uppercase">© 2026 Gatefy Protocol — Built on Base</span>
+          <span className="text-[7px] font-mono tracking-[0.3em] text-white/15 uppercase">© 2026 GATE PROTOCOL — Built on Base</span>
         </div>
       </footer>
     </div>

@@ -6,7 +6,7 @@ import { PageFooter } from '@/components/PageFooter';
 const sections = [
     {
         title: '1. What We Collect',
-        body: 'Gatefy Protocol collects only the minimum data necessary to operate: your public wallet address (when connected), event metadata you submit as an organiser, and attendance records associated with your wallet. We do not collect names, emails, or any personally identifiable off-chain information unless voluntarily provided.',
+        body: 'GATE PROTOCOL collects only the minimum data necessary to operate: your public wallet address (when connected), event metadata you submit as an organiser, and attendance records associated with your wallet. We do not collect names, emails, or any personally identifiable off-chain information unless voluntarily provided.',
     },
     {
         title: '2. On-Chain Data',
@@ -56,7 +56,7 @@ export default function Privacy() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none gap-[3px]">
-                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">Gatefy</span>
+                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">GATE</span>
                         <span className="text-[7px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
                     </div>
                 </Link>
@@ -91,7 +91,7 @@ export default function Privacy() {
                     </div>
 
                     <div className="mt-12 pt-8 border-t border-white/5">
-                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 Gatefy Protocol — Built on Base. Data minimised by design.</p>
+                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 GATE PROTOCOL — Built on Base. Data minimised by design.</p>
                     </div>
 
                 </motion.div>

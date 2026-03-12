@@ -26,7 +26,7 @@ export default function About() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none gap-[3px]">
-                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">Gatefy</span>
+                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">GATE</span>
                         <span className="text-[7px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
                     </div>
                 </Link>
@@ -43,15 +43,15 @@ export default function About() {
 
                     <h1 className="text-5xl lg:text-7xl font-black tracking-tighter leading-none mb-8 text-white">
                         What is<br />
-                        <span className="text-white/90">Gatefy?</span>
+                        <span className="text-white/90">GATE?</span>
                     </h1>
 
                     <div className="space-y-10 text-white/60 font-light leading-relaxed text-base lg:text-lg">
                         <p>
-                            Gatefy Protocol is a decentralised attendance verification system built on the <span className="text-white/90 font-medium">Base blockchain</span>. It enables event organisers to issue tamper-proof, on-chain proof-of-attendance records to participants — permanently and without intermediaries.
+                            GATE PROTOCOL is a decentralised attendance verification system built on the <span className="text-white/90 font-medium">Base blockchain</span>. It enables event organisers to issue tamper-proof, on-chain proof-of-attendance records to participants — permanently and without intermediaries.
                         </p>
                         <p>
-                            Unlike traditional ticketing systems that rely on centralised databases, Gatefy uses cryptographic QR codes and smart contracts to ensure every check-in is verifiable, immutable, and owned by the attendee — not the platform.
+                            Unlike traditional ticketing systems that rely on centralised databases, GATE PROTOCOL uses cryptographic QR codes and smart contracts to ensure every check-in is verifiable, immutable, and owned by the attendee — not the platform.
                         </p>
                     </div>
 

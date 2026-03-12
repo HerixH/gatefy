@@ -6,15 +6,15 @@ import { PageFooter } from '@/components/PageFooter';
 const sections = [
     {
         title: '1. Acceptance of Terms',
-        body: 'By accessing or using the Gatefy Protocol ("Protocol"), you agree to be bound by these Terms of Service. If you do not agree, you may not use the Protocol. These terms apply to all users, organisers, and attendees interacting with any Gatefy smart contract or interface.',
+        body: 'By accessing or using the GATE PROTOCOL ("Protocol"), you agree to be bound by these Terms of Service. If you do not agree, you may not use the Protocol. These terms apply to all users, organisers, and attendees interacting with any GATE PROTOCOL smart contract or interface.',
     },
     {
         title: '2. Protocol Use',
-        body: 'Gatefy Protocol is a decentralised attendance verification tool. You may use it to create events, verify attendance, and receive on-chain proof-of-presence tokens. You are solely responsible for ensuring that your use complies with applicable laws in your jurisdiction.',
+        body: 'GATE PROTOCOL is a decentralised attendance verification tool. You may use it to create events, verify attendance, and receive on-chain proof-of-presence tokens. You are solely responsible for ensuring that your use complies with applicable laws in your jurisdiction.',
     },
     {
         title: '3. Wallet Responsibility',
-        body: 'You are fully responsible for the security of your cryptocurrency wallet. Gatefy Protocol does not have access to your private keys and cannot recover lost assets. Any transactions made on-chain are final and irreversible.',
+        body: 'You are fully responsible for the security of your cryptocurrency wallet. GATE PROTOCOL does not have access to your private keys and cannot recover lost assets. Any transactions made on-chain are final and irreversible.',
     },
     {
         title: '4. Non-Transferable Tokens',
@@ -22,7 +22,7 @@ const sections = [
     },
     {
         title: '5. VIP Imprint',
-        body: 'VIP Imprint codes are issued after successful USDC payment confirmation on-chain. Payments are final. Gatefy takes no responsibility for failed transactions due to insufficient funds, network congestion, or user error.',
+        body: 'VIP Imprint codes are issued after successful USDC payment confirmation on-chain. Payments are final. GATE PROTOCOL takes no responsibility for failed transactions due to insufficient funds, network congestion, or user error.',
     },
     {
         title: '6. Disclaimer',
@@ -56,7 +56,7 @@ export default function Terms() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none gap-[3px]">
-                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">Gatefy</span>
+                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">GATE</span>
                         <span className="text-[7px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
                     </div>
                 </Link>

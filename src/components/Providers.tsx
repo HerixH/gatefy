@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@rainbow-me/rainbowkit/styles.css';
 
 const config = getDefaultConfig({
-    appName: 'Gatefy POAP',
+    appName: 'GATE PROTOCOL POAP',
     projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'da9e31959714af0c9fac3f6c827a5d3e', // Default demo ID
     chains: [base, baseSepolia],
     ssr: true,

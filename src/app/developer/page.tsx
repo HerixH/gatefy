@@ -6,7 +6,7 @@ import { PageFooter } from '@/components/PageFooter';
 
 const platforms = [
     {
-        name: 'Gatefy Protocol',
+        name: 'GATE PROTOCOL',
         tag: 'Live',
         desc: 'Decentralised attendance verification — QR-based proof-of-presence powered by on-chain NFTs. Built for events, conferences, and any gathering that deserves a permanent record.',
         stack: ['Next.js', 'Solidity', 'Wagmi', 'Base'],
@@ -67,7 +67,7 @@ export default function Developer() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none gap-[3px]">
-                        <span className="text-base font-black tracking-[0.3em] uppercase text-white">Gatefy</span>
+                        <span className="text-base font-black tracking-[0.3em] uppercase text-white">GATE</span>
                         <span className="text-[8px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
                     </div>
                 </Link>
