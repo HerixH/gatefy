@@ -8,18 +8,22 @@ export async function GET(request: Request) {
         const { searchParams } = new URL(request.url);
         const eventId = searchParams.get('eventId');
         const wallet = searchParams.get('wallet');
+        const email = searchParams.get('email');
 
-        if (!eventId || !wallet) {
-            return NextResponse.json({ error: 'eventId and wallet are required' }, { status: 400 });
+        if (!eventId || (!wallet && !email)) {
+            return NextResponse.json({ error: 'eventId and wallet or email are required' }, { status: 400 });
         }
 
         const records = await getAttendance();
         const id = eventId.trim().toLowerCase();
-        const w = wallet.trim().toLowerCase();
 
-        const verified = records.some(
-            r => r.eventId != null && String(r.eventId).toLowerCase() === id && r.wallet.toLowerCase() === w
-        );
+        const verified = records.some(r => {
+            if (r.eventId == null || String(r.eventId).toLowerCase() !== id) return false;
+            if (email) {
+                return (r.email ?? '').toLowerCase() === email.trim().toLowerCase();
+            }
+            return r.wallet != null && r.wallet.toLowerCase() === wallet!.trim().toLowerCase();
+        });
 
         return NextResponse.json({ verified }, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },

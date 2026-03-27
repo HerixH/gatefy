@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getEvents, createEvent } from '@/lib/events';
 import { getRegistrations } from '@/lib/registrations';
+import { makeEmailOrganizerId } from '@/lib/event-organizer';
+import { sendOrganizerEventCreatedEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,13 +33,63 @@ export async function GET() {
     }
 }
 
+const ADDR = /^0x[a-fA-F0-9]{40}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { name, description, date, endDate, location, maxAttendees, organizer, isVip, vipTokenAddress, vipMinBalance, bannerUrl } = body;
+        const {
+            name,
+            description,
+            date,
+            endDate,
+            location,
+            maxAttendees,
+            organizer,
+            organizerEmail,
+            organizerDisplayName,
+            isVip,
+            vipTokenAddress,
+            vipMinBalance,
+            bannerUrl,
+            isBlockchain,
+        } = body;
 
-        if (!name || !date || !organizer) {
-            return NextResponse.json({ error: 'Name, date, and organizer are required' }, { status: 400 });
+        if (!name || !date) {
+            return NextResponse.json({ error: 'Name and date are required' }, { status: 400 });
+        }
+
+        const wallet = typeof organizer === 'string' && ADDR.test(organizer.trim()) ? organizer.trim() : '';
+        const emailRaw = typeof organizerEmail === 'string' ? organizerEmail.trim() : '';
+        const displayName =
+            typeof organizerDisplayName === 'string' ? organizerDisplayName.trim() : '';
+
+        let organizerField: string;
+        if (wallet) {
+            organizerField = wallet;
+        } else if (emailRaw && EMAIL.test(emailRaw)) {
+            organizerField = makeEmailOrganizerId(emailRaw);
+        } else {
+            return NextResponse.json(
+                { error: 'Connect a wallet or provide a valid organizer email and name / company.' },
+                { status: 400 }
+            );
+        }
+
+        if (!wallet && !displayName) {
+            return NextResponse.json(
+                { error: 'Your name or company name is required when creating without a wallet.' },
+                { status: 400 }
+            );
+        }
+
+        const blockchain = isBlockchain !== false;
+        if (blockchain && !wallet) {
+            return NextResponse.json(
+                { error: 'Blockchain events require a connected wallet. Turn off blockchain mode for email-only events.' },
+                { status: 400 }
+            );
         }
 
         const event = await createEvent({
@@ -47,12 +99,27 @@ export async function POST(request: Request) {
             endDate: endDate || undefined,
             location: location || '',
             maxAttendees: typeof maxAttendees === 'number' && maxAttendees > 0 ? maxAttendees : undefined,
-            organizer,
+            organizer: organizerField,
+            organizerDisplayName: displayName || undefined,
             isVip: !!isVip,
             vipTokenAddress: vipTokenAddress || '',
             vipMinBalance: vipMinBalance || '',
             bannerUrl: bannerUrl || undefined,
+            isBlockchain: blockchain,
         });
+
+        if (!wallet && emailRaw) {
+            try {
+                await sendOrganizerEventCreatedEmail({
+                    to: emailRaw.toLowerCase(),
+                    event,
+                    displayName: displayName || 'Organizer',
+                });
+            } catch (mailErr) {
+                console.error('Organizer confirmation email failed:', mailErr);
+            }
+        }
+
         return NextResponse.json(event, { status: 201 });
     } catch (error) {
         const raw =

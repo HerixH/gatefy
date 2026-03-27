@@ -42,7 +42,7 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-4 lg:p-8">
+        <div className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-4 lg:p-8">
             <div className="relative w-full max-w-xl border border-white/10 bg-black overflow-hidden">
                 <div className="p-6 lg:p-8 flex items-center justify-between border-b border-white/5">
                     <div className="flex items-center gap-4">

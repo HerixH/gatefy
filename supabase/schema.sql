@@ -16,7 +16,9 @@ create table if not exists public.events (
   is_vip boolean default false,
   vip_token_address text default '',
   vip_min_balance text default '1',
-  banner_url text
+  banner_url text,
+  is_blockchain boolean default true,
+  organizer_display_name text
 );
 
 -- If table already exists, run: alter table public.events add column if not exists end_date timestamptz; alter table public.events add column if not exists max_attendees integer;
@@ -94,18 +96,33 @@ create table if not exists public.claim_codes (
 
 create table if not exists public.attendance (
   id bigserial primary key,
-  wallet text not null,
+  wallet text,
+  email text,
   code text not null,
   checked_in_at timestamptz default now(),
-  event_id text
+  event_id text,
+  constraint attendance_wallet_or_email_check check (wallet is not null or email is not null)
 );
 
+create unique index if not exists unique_attendance_event_email
+  on public.attendance (event_id, lower(email)) where email is not null;
+
+-- Registrations: wallet-only, email-only, or wallet + email + name (blockchain events collect name + email on signup).
 create table if not exists public.registrations (
+  id bigserial primary key,
   event_id text not null,
-  wallet text not null,
+  wallet text,
+  email text,
+  name text,
   registered_at timestamptz default now(),
-  primary key (event_id, wallet)
+  constraint registrations_identifier_check check (wallet is not null or email is not null)
 );
+
+-- Unique per event: wallet (blockchain) or email (normal)
+create unique index if not exists unique_registration_wallet
+  on public.registrations(event_id, wallet) where wallet is not null;
+create unique index if not exists unique_registration_email
+  on public.registrations(event_id, lower(email)) where email is not null;
 
 alter table public.claim_codes enable row level security;
 alter table public.attendance enable row level security;

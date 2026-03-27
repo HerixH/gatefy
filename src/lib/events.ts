@@ -13,7 +13,10 @@ export interface Event {
     date: string;
     endDate?: string;
     location: string;
+    /** Wallet `0x…` or `email:user@domain` for email-based organizers */
     organizer: string;
+    /** Display name or company when organizer is email-based */
+    organizerDisplayName?: string;
     verificationCode: string;
     createdAt: string;
     attendeeCount: number;
@@ -22,6 +25,7 @@ export interface Event {
     vipTokenAddress?: string;
     vipMinBalance?: string;
     bannerUrl?: string;
+    isBlockchain?: boolean;
 }
 
 type EventRow = {
@@ -40,7 +44,16 @@ type EventRow = {
     vip_token_address: string | null;
     vip_min_balance: string | null;
     banner_url: string | null;
+    is_blockchain: boolean | null;
+    organizer_display_name: string | null;
 };
+
+/** DB / drivers may return boolean or string; null/undefined defaults to wallet (blockchain) mode. */
+export function normalizeIsBlockchain(value: unknown): boolean {
+    if (value === false || value === 'false' || value === 0) return false;
+    if (value === true || value === 'true' || value === 1) return true;
+    return true;
+}
 
 function rowToEvent(r: EventRow): Event {
     return {
@@ -59,6 +72,8 @@ function rowToEvent(r: EventRow): Event {
         vipTokenAddress: r.vip_token_address ?? '',
         vipMinBalance: r.vip_min_balance ?? '',
         bannerUrl: r.banner_url ?? undefined,
+        isBlockchain: normalizeIsBlockchain(r.is_blockchain),
+        organizerDisplayName: r.organizer_display_name ?? undefined,
     };
 }
 
@@ -110,6 +125,8 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
             vip_token_address: event.vipTokenAddress ?? '',
             vip_min_balance: event.vipMinBalance ?? '',
             banner_url: (data as Event & { bannerUrl?: string }).bannerUrl ?? null,
+            is_blockchain: event.isBlockchain ?? true,
+            organizer_display_name: event.organizerDisplayName ?? null,
         });
         if (error) throw error;
         return event;
@@ -145,6 +162,19 @@ export async function incrementAttendee(eventId: string): Promise<void> {
             // Ignore on read-only FS (Vercel)
         }
     }
+}
+
+export async function getEventById(eventId: string): Promise<Event | undefined> {
+    const id = eventId.trim();
+    if (!id) return undefined;
+    if (isSupabaseConfigured) {
+        const supabase = getSupabase();
+        const { data, error } = await supabase.from('events').select('*').eq('id', id).maybeSingle();
+        if (error) throw error;
+        return data ? rowToEvent(data as EventRow) : undefined;
+    }
+    const events = await getEvents();
+    return events.find((e) => e.id.toLowerCase() === id.toLowerCase());
 }
 
 export async function getEventByCode(code: string): Promise<Event | undefined> {

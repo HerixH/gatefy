@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { peekCode, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
-import { isRegistered } from '@/lib/registrations';
+import { isRegistered, isRegisteredByEmail } from '@/lib/registrations';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { base } from 'viem/chains';
 
@@ -16,7 +16,8 @@ const MINIMAL_ERC20_ABI = parseAbi([
 
 export async function POST(request: Request) {
     try {
-        const { code, wallet } = await request.json();
+        const { code, wallet, email: emailRaw } = await request.json();
+        const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
 
         if (!code) {
             return NextResponse.json({ error: 'Code is required' }, { status: 400 });
@@ -31,13 +32,29 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, message: 'Invalid or already used code.' }, { status: 400 });
         }
 
-        // 3. Check for registration
-        if (event && wallet && wallet !== '0xDEV') {
-            if (!(await isRegistered(event.id, wallet))) {
-                return NextResponse.json({
-                    success: false,
-                    message: 'Verification Denied: You must register for this event first.'
-                }, { status: 403 });
+        // 3. Check for registration (wallet events vs email-only events)
+        if (event) {
+            const isEmailMode = event.isBlockchain === false;
+            if (isEmailMode) {
+                if (!email) {
+                    return NextResponse.json({
+                        success: false,
+                        message: 'Enter the email you used to register, or connect a wallet if you registered with one.',
+                    }, { status: 400 });
+                }
+                if (!(await isRegisteredByEmail(event.id, email))) {
+                    return NextResponse.json({
+                        success: false,
+                        message: 'Verification denied: register for this event with this email first.',
+                    }, { status: 403 });
+                }
+            } else if (wallet && wallet !== '0xDEV') {
+                if (!(await isRegistered(event.id, wallet))) {
+                    return NextResponse.json({
+                        success: false,
+                        message: 'Verification Denied: You must register for this event first.',
+                    }, { status: 403 });
+                }
             }
         }
 
@@ -69,8 +86,14 @@ export async function POST(request: Request) {
             }
         }
 
-        // 4. Actually mark code as used / record attendance
-        const { success, newCheckin } = await verifyCode(code, wallet, event?.id);
+        // 5. Mark code used / record attendance — email-only events store email, not wallet
+        const emailMode = event?.isBlockchain === false;
+        const { success, newCheckin } = await verifyCode(
+            code,
+            emailMode ? undefined : wallet,
+            event?.id,
+            emailMode ? email || undefined : undefined
+        );
 
         if (success) {
             if (event && newCheckin) {

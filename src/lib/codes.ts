@@ -12,7 +12,8 @@ export interface ClaimCode {
 }
 
 export interface AttendanceRecord {
-    wallet: string;
+    wallet?: string | null;
+    email?: string | null;
     code: string;
     checkedInAt: string;
     eventId?: string;
@@ -72,11 +73,14 @@ export async function peekCode(code: string): Promise<ClaimCode | undefined> {
 export async function verifyCode(
     code: string,
     wallet?: string,
-    eventId?: string
+    eventId?: string,
+    email?: string
 ): Promise<{ success: boolean; newCheckin: boolean }> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured.');
     const supabase = getSupabase();
     let newCheckin = false;
+
+    const cleanEmail = email?.trim().toLowerCase();
 
     if (!eventId) {
         const { data: codes, error: fetchErr } = await supabase.from('claim_codes').select('*').eq('code', code).eq('used', false);
@@ -97,6 +101,15 @@ export async function verifyCode(
             const { data: existing } = await supabase.from('attendance').select('id').eq('wallet', wallet.toLowerCase()).eq('event_id', eventId).limit(1);
             if (existing?.length) return { success: true, newCheckin: false };
         }
+        if (cleanEmail) {
+            const { data: existing } = await supabase
+                .from('attendance')
+                .select('id')
+                .eq('event_id', eventId)
+                .ilike('email', cleanEmail)
+                .limit(1);
+            if (existing?.length) return { success: true, newCheckin: false };
+        }
     }
 
     if (wallet) {
@@ -104,6 +117,23 @@ export async function verifyCode(
         if (!dup?.length) {
             const { error: insErr } = await supabase.from('attendance').insert({
                 wallet: wallet.toLowerCase(),
+                code,
+                event_id: eventId ?? null,
+            });
+            if (!insErr) newCheckin = true;
+        }
+    } else if (cleanEmail) {
+        const { data: dup } = await supabase
+            .from('attendance')
+            .select('id')
+            .eq('event_id', eventId ?? null)
+            .ilike('email', cleanEmail)
+            .eq('code', code)
+            .limit(1);
+        if (!dup?.length) {
+            const { error: insErr } = await supabase.from('attendance').insert({
+                wallet: null,
+                email: cleanEmail,
                 code,
                 event_id: eventId ?? null,
             });
@@ -120,7 +150,8 @@ export async function getAttendance(): Promise<AttendanceRecord[]> {
     const { data, error } = await supabase.from('attendance').select('*').order('checked_in_at', { ascending: false });
     if (error) throw error;
     return (data ?? []).map(r => ({
-        wallet: r.wallet,
+        wallet: r.wallet ?? null,
+        email: r.email ?? null,
         code: r.code,
         checkedInAt: r.checked_in_at,
         eventId: r.event_id ?? undefined,

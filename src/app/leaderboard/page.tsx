@@ -9,20 +9,17 @@ type Tab = 'attendees' | 'organizers';
 
 interface LeaderboardAttendee {
     rank: number;
-    wallet: string;
+    displayLabel: string;
+    basescanAddress: string | null;
     eventCount: number;
 }
 
 interface LeaderboardOrganizer {
     rank: number;
-    wallet: string;
+    displayLabel: string;
+    basescanAddress: string | null;
     eventCount: number;
     totalAttendees: number;
-}
-
-function truncateWallet(w: string) {
-    if (!w || w.length < 14) return w;
-    return `${w.slice(0, 6)}...${w.slice(-4)}`;
 }
 
 export default function LeaderboardPage() {
@@ -124,23 +121,43 @@ export default function LeaderboardPage() {
                                     {attendees.length === 0 ? (
                                         <p className="text-white/40 text-sm py-12 text-center">No attendance records yet. Be the first to verify at an event.</p>
                                     ) : (
-                                        attendees.map((a, i) => (
-                                            <a
-                                                key={a.wallet}
-                                                href={`https://basescan.org/address/${a.wallet}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="flex items-center justify-between py-4 px-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10 transition-colors cursor-pointer block"
-                                            >
-                                                <div className="flex items-center gap-4">
-                                                    <span className={`text-lg font-black w-8 ${i < 3 ? 'text-white' : 'text-white/50'}`}>
-                                                        #{a.rank}
-                                                    </span>
-                                                    <span className="font-mono text-sm text-white/90">{truncateWallet(a.wallet)}</span>
+                                        attendees.map((a, i) => {
+                                            const rowClass =
+                                                'flex items-center justify-between py-4 px-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10 transition-colors block';
+                                            const inner = (
+                                                <>
+                                                    <div className="flex items-center gap-4 min-w-0">
+                                                        <span className={`text-lg font-black w-8 shrink-0 ${i < 3 ? 'text-white' : 'text-white/50'}`}>
+                                                            #{a.rank}
+                                                        </span>
+                                                        <span
+                                                            className={`text-sm text-white/90 truncate ${a.basescanAddress ? 'font-mono' : 'font-sans font-medium'}`}
+                                                        >
+                                                            {a.displayLabel}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-sm font-bold text-white/70 shrink-0">{a.eventCount} events</span>
+                                                </>
+                                            );
+                                            return a.basescanAddress ? (
+                                                <a
+                                                    key={`${a.rank}-${a.basescanAddress}`}
+                                                    href={`https://basescan.org/address/${a.basescanAddress}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className={`${rowClass} cursor-pointer`}
+                                                >
+                                                    {inner}
+                                                </a>
+                                            ) : (
+                                                <div
+                                                    key={`${a.rank}-${a.displayLabel}`}
+                                                    className={`${rowClass} cursor-default`}
+                                                >
+                                                    {inner}
                                                 </div>
-                                                <span className="text-sm font-bold text-white/70">{a.eventCount} events</span>
-                                            </a>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </motion.div>
                             ) : (
@@ -154,26 +171,46 @@ export default function LeaderboardPage() {
                                     {organizers.length === 0 ? (
                                         <p className="text-white/40 text-sm py-12 text-center">No organisers yet. Create your first event to get on the board.</p>
                                     ) : (
-                                        organizers.map((o, i) => (
-                                            <a
-                                                key={o.wallet}
-                                                href={`https://basescan.org/address/${o.wallet}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="flex items-center justify-between py-4 px-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10 transition-colors cursor-pointer block"
-                                            >
-                                                <div className="flex items-center gap-4">
-                                                    <span className={`text-lg font-black w-8 ${i < 3 ? 'text-white' : 'text-white/50'}`}>
-                                                        #{o.rank}
-                                                    </span>
-                                                    <span className="font-mono text-sm text-white/90">{truncateWallet(o.wallet)}</span>
+                                        organizers.map((o, i) => {
+                                            const rowClass =
+                                                'flex items-center justify-between py-4 px-4 border border-white/5 bg-white/[0.02] hover:bg-white/[0.06] hover:border-white/10 transition-colors block';
+                                            const inner = (
+                                                <>
+                                                    <div className="flex items-center gap-4 min-w-0">
+                                                        <span className={`text-lg font-black w-8 shrink-0 ${i < 3 ? 'text-white' : 'text-white/50'}`}>
+                                                            #{o.rank}
+                                                        </span>
+                                                        <span
+                                                            className={`text-sm text-white/90 truncate ${o.basescanAddress ? 'font-mono' : 'font-sans font-medium'}`}
+                                                        >
+                                                            {o.displayLabel}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <span className="text-sm font-bold text-white/70 block">{o.totalAttendees} attendees</span>
+                                                        <span className="text-[10px] text-white/40">{o.eventCount} events</span>
+                                                    </div>
+                                                </>
+                                            );
+                                            return o.basescanAddress ? (
+                                                <a
+                                                    key={`${o.rank}-${o.basescanAddress}`}
+                                                    href={`https://basescan.org/address/${o.basescanAddress}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className={`${rowClass} cursor-pointer`}
+                                                >
+                                                    {inner}
+                                                </a>
+                                            ) : (
+                                                <div
+                                                    key={`${o.rank}-${o.displayLabel}`}
+                                                    className={`${rowClass} cursor-default`}
+                                                >
+                                                    {inner}
                                                 </div>
-                                                <div className="text-right">
-                                                    <span className="text-sm font-bold text-white/70 block">{o.totalAttendees} attendees</span>
-                                                    <span className="text-[10px] text-white/40">{o.eventCount} events</span>
-                                                </div>
-                                            </a>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </motion.div>
                             )}

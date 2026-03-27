@@ -2,13 +2,14 @@
 
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Scanner } from '@/components/Scanner';
+import { isEventOrganizer, formatOrganizerShort } from '@/lib/event-organizer';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -39,6 +40,7 @@ interface Event {
   endDate?: string;
   location: string;
   organizer: string;
+  organizerDisplayName?: string;
   verificationCode: string;
   createdAt: string;
   attendeeCount: number;
@@ -48,6 +50,7 @@ interface Event {
   vipTokenAddress?: string;
   vipMinBalance?: string;
   bannerUrl?: string;
+  isBlockchain?: boolean;
 }
 
 function HomeContent() {
@@ -73,15 +76,34 @@ function HomeContent() {
   const [isUserRegistered, setIsUserRegistered] = useState(false);
   const [isUserVerified, setIsUserVerified] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [normalSignupEmail, setNormalSignupEmail] = useState('');
+  const [normalSignupName, setNormalSignupName] = useState('');
+  /** Wallet (blockchain) registration: email + first name or org name */
+  const [blockchainSignupEmail, setBlockchainSignupEmail] = useState('');
+  const [blockchainSignupName, setBlockchainSignupName] = useState('');
   const [attendees, setAttendees] = useState<any[]>([]);
-  const [registrations, setRegistrations] = useState<{ wallet: string; registeredAt: string }[]>([]);
+  const [registrations, setRegistrations] = useState<{ wallet?: string; email?: string; name?: string; registeredAt: string }[]>([]);
   const [loadingAttendees, setLoadingAttendees] = useState(false);
+  /** Server-backed registration row for the selected event (name / email / wallet). */
+  const [eventRegProfile, setEventRegProfile] = useState<{
+    email?: string | null;
+    name?: string | null;
+    wallet?: string | null;
+  } | null>(null);
+  const [databaseConfigured, setDatabaseConfigured] = useState<boolean | null>(null);
+  /** Email used to create events without a wallet (session). */
+  const [organizerSessionEmail, setOrganizerSessionEmail] = useState<string | null>(null);
+
+  const orgCtx = useMemo(
+    () => ({ address: address ?? null, organizerSessionEmail }),
+    [address, organizerSessionEmail]
+  );
 
   const { writeContract, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
   const { isSuccess: isTxConfirmed, isLoading: isTxConfirming } = useWaitForTransactionReceipt({ hash: txHash });
 
   const refetchOrganizerLists = () => {
-    if (!selectedEvent || !address || selectedEvent.organizer.toLowerCase() !== address.toLowerCase()) return;
+    if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return;
     setLoadingAttendees(true);
     Promise.all([
       fetch(`/api/events/attendees?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then(r => r.json()),
@@ -101,44 +123,129 @@ function HomeContent() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    fetch('/api/app-config', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => setDatabaseConfigured(!!d.databaseConfigured))
+      .catch(() => setDatabaseConfigured(false));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setOrganizerSessionEmail(sessionStorage.getItem('gatefy-organizer-email'));
+  }, []);
+
+  useEffect(() => {
+    setBlockchainSignupEmail('');
+    setBlockchainSignupName('');
+  }, [selectedEvent?.id]);
+
+  useEffect(() => {
+    if (showCreateEvent && !address) {
+      setForm(f => (f.isBlockchain ? { ...f, isBlockchain: false } : f));
+    }
+  }, [showCreateEvent, address]);
+
   // Check registration, verification status, and fetch attendees when event selected
   useEffect(() => {
-    if (selectedEvent && address) {
-      // 1. Check registration
-      fetch(`/api/register?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(data => setIsUserRegistered(!!data.registered))
-        .catch(() => setIsUserRegistered(false));
-
-      // 2. Check if user has already verified for this event
-      fetch(`/api/events/verified?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(data => setIsUserVerified(!!data.verified))
-        .catch(() => setIsUserVerified(false));
-
-      // 3. Fetch attendees and registrations if owner (no cache so list is up to date)
-      if (selectedEvent.organizer.toLowerCase() === address.toLowerCase()) {
-        setLoadingAttendees(true);
-        Promise.all([
-          fetch(`/api/events/attendees?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then(r => r.json()),
-          fetch(`/api/events/registrations?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then(r => r.json()),
-        ])
-          .then(([attendeesData, regsData]) => {
-            setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
-            setRegistrations(Array.isArray(regsData) ? regsData : []);
-          })
-          .finally(() => setLoadingAttendees(false));
-      } else {
-        setAttendees([]);
-        setRegistrations([]);
-      }
-    } else {
+    if (!selectedEvent) {
       setIsUserRegistered(false);
       setIsUserVerified(false);
       setAttendees([]);
       setRegistrations([]);
+      setEventRegProfile(null);
+      return;
     }
-  }, [selectedEvent, address]);
+
+    const isOwner = isEventOrganizer(selectedEvent.organizer, orgCtx);
+
+    if (address) {
+      if (selectedEvent.isBlockchain !== false) {
+        fetch(`/api/register?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
+          .then((r) => r.json())
+          .then((data) => {
+            setIsUserRegistered(!!data.registered);
+            if (data.registered) {
+              setEventRegProfile({
+                email: data.email ?? null,
+                name: data.name ?? null,
+                wallet: data.wallet ?? address,
+              });
+            } else {
+              setEventRegProfile(null);
+            }
+          })
+          .catch(() => {
+            setIsUserRegistered(false);
+            setEventRegProfile(null);
+          });
+
+        fetch(`/api/events/verified?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
+          .then((r) => r.json())
+          .then((data) => setIsUserVerified(!!data.verified))
+          .catch(() => setIsUserVerified(false));
+      } else {
+        // Email-mode event: registration comes from sessionStorage below, not wallet
+        setIsUserVerified(false);
+      }
+    } else if (selectedEvent.isBlockchain !== false) {
+      setIsUserRegistered(false);
+      setEventRegProfile(null);
+      setIsUserVerified(false);
+    } else {
+      setIsUserVerified(false);
+    }
+
+    if (isOwner) {
+      setLoadingAttendees(true);
+      Promise.all([
+        fetch(`/api/events/attendees?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/events/registrations?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then((r) => r.json()),
+      ])
+        .then(([attendeesData, regsData]) => {
+          setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
+          setRegistrations(Array.isArray(regsData) ? regsData : []);
+        })
+        .finally(() => setLoadingAttendees(false));
+    } else {
+      setAttendees([]);
+      setRegistrations([]);
+    }
+
+    // For non-blockchain events: check if stored email is registered (from previous signup)
+    if (selectedEvent.isBlockchain === false && typeof window !== 'undefined') {
+      const stored = sessionStorage.getItem(`gatefy-reg-${selectedEvent.id}`);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as { email?: string; name?: string };
+          const email = parsed.email;
+          if (email) {
+            fetch(`/api/register?eventId=${selectedEvent.id}&email=${encodeURIComponent(email)}`, { cache: 'no-store' })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data.registered) {
+                  setIsUserRegistered(true);
+                  setEventRegProfile({
+                    email: data.email ?? email,
+                    name: data.name ?? parsed.name ?? null,
+                    wallet: data.wallet ?? null,
+                  });
+                  return fetch(
+                    `/api/events/verified?eventId=${selectedEvent.id}&email=${encodeURIComponent(email)}`,
+                    { cache: 'no-store' }
+                  )
+                    .then((r2) => r2.json())
+                    .then((v) => setIsUserVerified(!!v.verified));
+                }
+                setIsUserVerified(false);
+              });
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, [selectedEvent, address, orgCtx]);
 
   // Watch for confirmed payment → call vip-imprint API
   useEffect(() => {
@@ -209,6 +316,9 @@ function HomeContent() {
     vipTokenAddress: '',
     vipMinBalance: '1',
     bannerUrl: '' as string,
+    isBlockchain: true,
+    organizerEmail: '',
+    organizerDisplayName: '',
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -252,17 +362,36 @@ function HomeContent() {
   };
 
   const handleScan = async (data: string) => {
-    if (!address) {
+    const ev = selectedEvent;
+    let regEmail: string | undefined;
+    if (typeof window !== 'undefined' && ev?.id) {
+      try {
+        const raw = sessionStorage.getItem(`gatefy-reg-${ev.id}`);
+        if (raw) regEmail = JSON.parse(raw).email as string | undefined;
+      } catch {
+        /* ignore */
+      }
+    }
+    const emailMode = ev?.isBlockchain === false;
+    if (emailMode && !regEmail) {
+      setShowScanner(false);
+      showWalletToast('Register with your email for this event first, then verify.');
+      return;
+    }
+    if (!emailMode && !address) {
       setShowScanner(false);
       showWalletToast('Connect your wallet to verify attendance — use the button in the top right.');
       return;
     }
     setScanning(true);
     try {
+      const body: Record<string, string> = { code: data };
+      if (address) body.wallet = address;
+      if (emailMode && regEmail) body.email = regEmail.trim().toLowerCase();
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: data, wallet: address }),
+        body: JSON.stringify(body),
       });
       const result = await res.json();
       if (result.success) {
@@ -285,25 +414,46 @@ function HomeContent() {
 
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!address) return;
     setCreating(true);
     setCreateError('');
     try {
+      if (form.isBlockchain && !address) {
+        setCreateError('Connect a wallet for blockchain events, or switch registration to email (no wallet).');
+        setCreating(false);
+        return;
+      }
+      if (!address && (!form.organizerEmail.trim() || !form.organizerDisplayName.trim())) {
+        setCreateError('Enter your email and your name or company name to create an event without a wallet.');
+        setCreating(false);
+        return;
+      }
       // datetime-local returns YYYY-MM-DDTHH:mm (no timezone). Convert to ISO so the user's
       // local time is stored correctly; otherwise Postgres treats it as server (UTC) time.
       const dateIso = form.date ? new Date(form.date).toISOString() : form.date;
       const endDateIso = form.endDate ? new Date(form.endDate).toISOString() : form.endDate;
+      const payload: Record<string, unknown> = {
+        name: form.name,
+        description: form.description,
+        date: dateIso,
+        endDate: endDateIso || undefined,
+        location: form.location,
+        maxAttendees: form.maxAttendees ? parseInt(form.maxAttendees, 10) : undefined,
+        isVip: form.isVip,
+        vipTokenAddress: form.vipTokenAddress,
+        vipMinBalance: form.vipMinBalance,
+        bannerUrl: form.bannerUrl || undefined,
+        isBlockchain: form.isBlockchain,
+      };
+      if (address) {
+        payload.organizer = address;
+      } else {
+        payload.organizerEmail = form.organizerEmail.trim();
+        payload.organizerDisplayName = form.organizerDisplayName.trim();
+      }
       const res = await fetch('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          date: dateIso,
-          endDate: endDateIso || undefined,
-          organizer: address,
-          bannerUrl: form.bannerUrl || undefined,
-          maxAttendees: form.maxAttendees ? parseInt(form.maxAttendees, 10) : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const newEvent: Event = await res.json();
@@ -318,7 +468,15 @@ function HomeContent() {
           vipTokenAddress: '',
           vipMinBalance: '1',
           bannerUrl: '',
+          isBlockchain: true,
+          organizerEmail: '',
+          organizerDisplayName: '',
         });
+        if (!address && form.organizerEmail.trim()) {
+          const em = form.organizerEmail.trim().toLowerCase();
+          sessionStorage.setItem('gatefy-organizer-email', em);
+          setOrganizerSessionEmail(em);
+        }
         setShowCreateEvent(false);
         setCreatedEvent(newEvent); // show QR download modal
         await fetchEvents();
@@ -450,10 +608,232 @@ function HomeContent() {
       ? Math.max(0, ev.maxAttendees - getRegisteredCount(ev))
       : null;
 
-  const handleRegister = async () => {
+  /** Organizer QR, verification code, and manifest — shown for wallet events when connected and for email events without requiring a wallet. */
+  const renderOrganizerEventPanel = () => {
+    if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
+    const ev = selectedEvent;
+    return (
+      <>
+        <div className="space-y-6 p-6 border border-white/[0.08] bg-white/[0.02]">
+          <div className="flex flex-col md:flex-row items-center gap-8">
+            <div className="bg-white p-3 border border-white/20 shrink-0">
+              <QRCodeCanvas
+                id={`organizer-qr-${ev.id}`}
+                value={ev.verificationCode}
+                size={120}
+                level="H"
+                imageSettings={{
+                  src: "/logo-black.png",
+                  x: undefined,
+                  y: undefined,
+                  height: 24,
+                  width: 24,
+                  excavate: true,
+                }}
+              />
+            </div>
+
+            <div className="flex-1 space-y-4 text-center md:text-left">
+              <div className="space-y-1">
+                <p className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Protocol Access Code</p>
+                <code className="text-2xl font-mono text-accent tracking-[0.2em] block">{ev.verificationCode}</code>
+              </div>
+
+              <div className="flex flex-wrap justify-center md:justify-start gap-4">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadQR(ev, `organizer-qr-${ev.id}`)}
+                  className="px-4 py-2 bg-white text-black hover:bg-neutral-200 transition-all text-[9px] tracking-[0.2em] uppercase font-bold"
+                >
+                  Download QR
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(ev.verificationCode);
+                  }}
+                  className="px-4 py-2 border border-white/10 hover:bg-white/5 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white/40 hover:text-white"
+                >
+                  Copy Code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(getRegistrationLink(ev));
+                    showWalletToast('Registration link copied to clipboard.');
+                  }}
+                  className="px-4 py-2 bg-white/10 border border-white/20 hover:bg-white/20 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white"
+                >
+                  Copy Registration Link
+                </button>
+              </div>
+            </div>
+          </div>
+          <p className="text-[8px] tracking-[0.1em] uppercase text-white/10 font-medium text-center md:text-left">Share the registration link for sign-ups. Download the QR (includes event details) for check-in at the event.</p>
+        </div>
+
+        <div className="space-y-6">
+          {isPast(ev.date, ev.endDate) ? (
+            <>
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">Past event — visitor summary</p>
+                <button
+                  type="button"
+                  onClick={refetchOrganizerLists}
+                  disabled={loadingAttendees}
+                  className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
+                >
+                  {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
+                </button>
+              </div>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Verified visitors</p>
+                    <span className="text-[9px] font-mono text-green-500/80">{attendees.length}</span>
+                  </div>
+                  <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
+                    {loadingAttendees ? (
+                      <div className="p-4 text-center">
+                        <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
+                      </div>
+                    ) : attendees.length > 0 ? (
+                      <div className="divide-y divide-white/[0.04]">
+                        {attendees.map((a, i) => (
+                          <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                            <div className="space-y-0.5 min-w-0">
+                              <p className="text-[10px] font-mono text-white/70 truncate">
+                                {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || '—')}
+                              </p>
+                              <p className="text-[8px] font-mono text-white/25">
+                                {new Date(a.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                            <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-6 text-center">
+                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">No verified check-ins</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                    <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Unverified (registered only)</p>
+                    <span className="text-[9px] font-mono text-white/40">
+                      {registrations.filter(r =>
+                        !attendees.some(a => (a.wallet?.toLowerCase() === r.wallet?.toLowerCase()) || (a.email?.toLowerCase() === r.email?.toLowerCase()))
+                      ).length}
+                    </span>
+                  </div>
+                  <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
+                    {loadingAttendees ? (
+                      <div className="p-4 text-center">
+                        <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
+                      </div>
+                    ) : (() => {
+                      const unverified = registrations.filter(r =>
+                        !attendees.some(a => (a.wallet?.toLowerCase() === r.wallet?.toLowerCase()) || (a.email?.toLowerCase() === r.email?.toLowerCase()))
+                      );
+                      return unverified.length > 0 ? (
+                        <div className="divide-y divide-white/[0.04]">
+                          {unverified.map((r, i) => (
+                            <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                              <div className="space-y-0.5 min-w-0">
+                                <p className="text-[10px] text-white/70 truncate font-sans font-medium">
+                                  {r.wallet
+                                    ? `${r.wallet.slice(0, 10)}...${r.wallet.slice(-8)}`
+                                    : (r.name || r.email || '—')}
+                                </p>
+                                {r.name && r.email ? (
+                                  <p className="text-[8px] font-mono text-white/35 truncate">{r.email}</p>
+                                ) : null}
+                                <p className="text-[8px] font-mono text-white/20">
+                                  Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                                </p>
+                              </div>
+                              <span className="text-[8px] uppercase tracking-widest text-white/20 font-bold shrink-0 ml-2">No check-in</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-6 text-center">
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">Everyone who registered checked in</p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between border-b border-white/10 pb-2 flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Attendee Manifest</p>
+                  <span className="text-[9px] font-mono text-white/40">{attendees.length} Verified</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={refetchOrganizerLists}
+                  disabled={loadingAttendees}
+                  className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
+                >
+                  {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
+                </button>
+              </div>
+              <div className="max-h-[200px] overflow-y-auto border border-white/[0.04] bg-white/[0.01]">
+                {loadingAttendees ? (
+                  <div className="p-4 text-center">
+                    <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Syncing...</span>
+                  </div>
+                ) : attendees.length > 0 ? (
+                  <div className="divide-y divide-white/[0.04]">
+                    {attendees.map((a, i) => (
+                      <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02] transition-colors">
+                        <div className="space-y-0.5">
+                          <p className="text-[10px] font-mono text-white/70 group-hover:text-white transition-colors">
+                            {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || a.name || '—')}
+                          </p>
+                          <p className="text-[8px] font-mono text-white/20">
+                            {new Date(a.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        <span className="text-[8px] uppercase tracking-widest text-white/10 group-hover:text-green-400/40 transition-colors font-bold">Auth_Pass</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/20 italic">No verifications yet</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </>
+    );
+  };
+
+  const handleRegisterBlockchain = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedEvent) return;
     if (!address) {
       showWalletToast('Connect your wallet to register — use the button in the top right.');
+      return;
+    }
+    const nameTrim = blockchainSignupName.trim();
+    const emailTrim = blockchainSignupEmail.trim();
+    if (!nameTrim) {
+      showWalletToast('Enter your first name or organization name.');
+      return;
+    }
+    if (!emailTrim) {
+      showWalletToast('Enter your email.');
       return;
     }
     setRegistering(true);
@@ -461,11 +841,70 @@ function HomeContent() {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: selectedEvent.id, wallet: address }),
+        body: JSON.stringify({
+          eventId: selectedEvent.id,
+          wallet: address,
+          email: emailTrim,
+          name: nameTrim,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
         setIsUserRegistered(true);
+        setEventRegProfile({
+          email: emailTrim,
+          name: nameTrim,
+          wallet: address,
+        });
+        const list = await fetchEvents();
+        const updated = list.find((e) => e.id === selectedEvent.id);
+        if (updated) setSelectedEvent(updated);
+      } else if (data.error === 'Already registered') {
+        setIsUserRegistered(true);
+      } else {
+        showWalletToast(data.error || 'Registration failed. Please try again.');
+      }
+    } catch {
+      showWalletToast('Network error during registration. Please try again.');
+    } finally {
+      setRegistering(false);
+    }
+  };
+
+  const handleRegisterNormal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent) return;
+    const email = normalSignupEmail.trim();
+    const nameTrim = normalSignupName.trim();
+    if (!email) {
+      showWalletToast('Please enter your email.');
+      return;
+    }
+    if (!nameTrim) {
+      showWalletToast('Enter your first name or organization name.');
+      return;
+    }
+    setRegistering(true);
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: selectedEvent.id, email, name: nameTrim }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsUserRegistered(true);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            `gatefy-reg-${selectedEvent.id}`,
+            JSON.stringify({ email, name: nameTrim })
+          );
+        }
+        setEventRegProfile({
+          email,
+          name: nameTrim,
+          wallet: null,
+        });
         const list = await fetchEvents();
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
@@ -483,9 +922,9 @@ function HomeContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground grid-bg selection:bg-white selection:text-black overflow-x-hidden">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 py-4 lg:px-12 lg:py-8 pointer-events-none bg-gradient-to-b from-black to-transparent">
-        <div className="flex items-center gap-3 pointer-events-auto cursor-default">
+      {/* Header / Navigation */}
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 sm:gap-4 px-4 py-4 sm:px-6 lg:px-12 lg:py-6 pointer-events-none bg-gradient-to-b from-black to-transparent">
+        <Link href="/" className="flex items-center gap-2 sm:gap-3 pointer-events-auto cursor-pointer group shrink-0 min-w-0">
           <svg width="36" height="36" viewBox="0 0 28 28" fill="none" className="shrink-0">
             <defs>
               <filter id="nav-glow" x="-40%" y="-40%" width="180%" height="180%">
@@ -502,18 +941,37 @@ function HomeContent() {
               <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
             </g>
           </svg>
-          {/* Wordmark */}
           <div className="flex flex-col leading-none gap-[3px]">
-            <span className="text-base lg:text-lg font-black tracking-[0.3em] uppercase text-white">GATE</span>
+            <span className="text-base lg:text-lg font-black tracking-[0.3em] uppercase text-white group-hover:text-white/90">GATE</span>
             <span className="text-[8px] lg:text-[9px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
           </div>
-        </div>
+        </Link>
 
+        <nav className="flex flex-1 items-center justify-center gap-2 sm:gap-5 md:gap-8 pointer-events-auto min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1">
+          <Link
+            href="/#events"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+          >
+            Events
+          </Link>
+          <Link
+            href="/about"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+          >
+            About
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+          >
+            Leaderboard
+          </Link>
+        </nav>
 
-        <div className="pointer-events-auto scale-75 sm:scale-90 lg:scale-100 origin-right">
+        <div className="pointer-events-auto shrink-0 scale-[0.72] sm:scale-90 lg:scale-100 origin-right">
           <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
         </div>
-      </nav>
+      </header>
 
       {/* Wallet toast — never triggers connect modal */}
       <AnimatePresence>
@@ -568,20 +1026,18 @@ function HomeContent() {
                   <span className="tracking-[0.2em] uppercase text-sm font-bold">Initiate Scan</span>
                 </button>
 
-                {isConnected && (
-                  <button
-                    onClick={() => setShowCreateEvent(true)}
-                    className="px-8 py-5 lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
-                  >
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold">Create Event</span>
-                  </button>
-                )}
-
-                {!isConnected && (
-                  <div className="px-8 py-5 lg:py-4 border border-white/5 flex items-center justify-center opacity-40 cursor-not-allowed">
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold">Connect to Create Event</span>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateEvent(true);
+                    if (!address) {
+                      setForm(f => ({ ...f, isBlockchain: false }));
+                    }
+                  }}
+                  className="px-8 py-5 lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
+                >
+                  <span className="tracking-[0.2em] uppercase text-sm font-bold">Create Event</span>
+                </button>
               </div>
 
             </div>
@@ -589,12 +1045,75 @@ function HomeContent() {
 
           {/* Right: Events Panel */}
           <motion.div
+            id="events"
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1.2, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="space-y-8 pb-12 lg:sticky lg:top-32"
+            className="space-y-8 pb-12 lg:sticky lg:top-32 scroll-mt-28 lg:scroll-mt-36"
           >
             {/* Live Events */}
+            {/* Session: DB status + wallet + email registration (this event) */}
+            <div className="border border-white/5 bg-white/[0.02] backdrop-blur-3xl p-4 space-y-3">
+              <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Your session</p>
+              <div className="space-y-2 text-[9px] font-mono tracking-wider">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-white/40 uppercase tracking-[0.2em]">Database</span>
+                  {databaseConfigured === null ? (
+                    <span className="text-white/30">…</span>
+                  ) : databaseConfigured ? (
+                    <span className="text-emerald-500/90 flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
+                      Connected
+                    </span>
+                  ) : (
+                    <span className="text-amber-500/90">Not configured</span>
+                  )}
+                </div>
+                {isConnected && address && (
+                  <div className="flex items-start justify-between gap-2 pt-1 border-t border-white/[0.06]">
+                    <span className="text-white/40 uppercase tracking-[0.2em] shrink-0">Wallet</span>
+                    <span className="text-white/80 text-right break-all">
+                      {address.slice(0, 6)}...{address.slice(-4)}
+                    </span>
+                  </div>
+                )}
+                {organizerSessionEmail && (
+                  <div className="flex items-start justify-between gap-2 pt-1 border-t border-white/[0.06]">
+                    <span className="text-white/40 uppercase tracking-[0.2em] shrink-0">Organizer</span>
+                    <span className="text-white/70 text-right break-all text-[9px]">{organizerSessionEmail}</span>
+                  </div>
+                )}
+                {selectedEvent?.isBlockchain === false &&
+                  eventRegProfile?.email &&
+                  isUserRegistered && (
+                    <div className="pt-1 border-t border-white/[0.06] space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-white/40 uppercase tracking-[0.2em]">Registered</span>
+                        <span className="text-white/70 text-right break-all">{eventRegProfile.email}</span>
+                      </div>
+                      {eventRegProfile.name ? (
+                        <p className="text-[10px] text-white/90 font-sans font-medium tracking-tight pl-0">
+                          {eventRegProfile.name}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                {selectedEvent && selectedEvent.isBlockchain !== false && isUserRegistered && (
+                  <div className="pt-1 border-t border-white/[0.06] space-y-1">
+                    <span className="text-emerald-500/85 text-[9px] uppercase tracking-[0.2em] font-bold">
+                      Registered for this event
+                    </span>
+                    {eventRegProfile?.name ? (
+                      <p className="text-[10px] text-white/85 font-sans tracking-tight">{eventRegProfile.name}</p>
+                    ) : null}
+                    {eventRegProfile?.email ? (
+                      <p className="text-[9px] font-mono text-white/45 break-all">{eventRegProfile.email}</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Live Events</p>
@@ -637,12 +1156,15 @@ function HomeContent() {
                               {ev.isVip && (
                                 <span className="text-[7px] bg-yellow-500/10 text-yellow-500 px-1 border border-yellow-500/20 font-black tracking-widest uppercase shrink-0">VIP</span>
                               )}
+                              {ev.isBlockchain === false && (
+                                <span className="text-[7px] bg-white/10 text-white/80 px-1 border border-white/20 font-black tracking-widest uppercase shrink-0">Email</span>
+                              )}
                               <p className="text-sm font-bold tracking-tight truncate uppercase">{ev.name}</p>
                             </div>
                             {ev.location ? (
-                              <p className="text-[9px] tracking-[0.2em] uppercase text-secondary/40 font-bold truncate pl-3">{ev.location} // {ev.organizer.slice(0, 6)}...{ev.organizer.slice(-4)}</p>
+                              <p className="text-[9px] tracking-[0.2em] uppercase text-secondary/40 font-bold truncate pl-3">{ev.location} // {formatOrganizerShort(ev)}</p>
                             ) : (
-                              <p className="text-[9px] tracking-[0.2em] uppercase text-secondary/40 font-bold truncate pl-3">ORG: {ev.organizer.slice(0, 6)}...{ev.organizer.slice(-4)}</p>
+                              <p className="text-[9px] tracking-[0.2em] uppercase text-secondary/40 font-bold truncate pl-3">ORG: {formatOrganizerShort(ev)}</p>
                             )}
                           </div>
                           <div className="text-right shrink-0">
@@ -662,29 +1184,33 @@ function HomeContent() {
             </div>
 
             {/* User Uploads (Managed Events) — filtered by connected wallet so each wallet sees only its own events */}
-            {isConnected && address && (
+            {(((isConnected && address) || organizerSessionEmail)) && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex flex-col gap-0.5">
                     <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Your Uploads</p>
                     <p className="text-[8px] font-mono text-white/40 tracking-wider">
-                      This wallet: {address.slice(0, 6)}...{address.slice(-4)}
+                      {address
+                        ? `Wallet: ${address.slice(0, 6)}...${address.slice(-4)}`
+                        : organizerSessionEmail
+                          ? `Email: ${organizerSessionEmail}`
+                          : ''}
                     </p>
                   </div>
                   <span className="text-[9px] font-mono text-white/70 tracking-widest">
-                    {events.filter(ev => ev.organizer?.toLowerCase() === address.toLowerCase()).length} Total
+                    {events.filter(ev => isEventOrganizer(ev.organizer, orgCtx)).length} Total
                   </span>
                 </div>
 
                 <div className="border border-white/5 bg-white/[0.01] backdrop-blur-3xl overflow-hidden">
-                  {events.filter(ev => ev.organizer?.toLowerCase() === address.toLowerCase()).length === 0 ? (
+                  {events.filter(ev => isEventOrganizer(ev.organizer, orgCtx)).length === 0 ? (
                     <div className="p-8 flex flex-col items-center justify-center text-center gap-4">
                       <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30">No uploads found</p>
                     </div>
                   ) : (
                     <div className="divide-y divide-white/[0.05]">
                       {events
-                        .filter(ev => ev.organizer?.toLowerCase() === address.toLowerCase())
+                        .filter(ev => isEventOrganizer(ev.organizer, orgCtx))
                         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Show newest uploads first
                         .map((ev, i) => (
                           <motion.button
@@ -707,7 +1233,7 @@ function HomeContent() {
                                   )}
                                   <p className="text-[11px] font-bold tracking-tight truncate opacity-70">{ev.name}</p>
                                 </div>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">Managed Asset // {ev.organizer.slice(0, 6)}...{ev.organizer.slice(-4)}</p>
+                                <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">Managed Asset // {formatOrganizerShort(ev)}</p>
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="text-[8px] font-mono text-secondary/40">{formatDateTime(ev.date)}</p>
@@ -765,10 +1291,21 @@ function HomeContent() {
               {/* Modal Header with Cancel */}
               <div className="p-6 lg:p-8 flex items-center justify-between border-b border-white/5 shrink-0">
                 <div>
-                  <p className="text-[9px] tracking-[0.4em] uppercase text-secondary/40 font-bold mb-1">Wallet Connected</p>
-                  <span className="text-[10px] font-mono text-secondary/60 tracking-widest">
-                    {address?.slice(0, 6)}...{address?.slice(-4)}
-                  </span>
+                  {address ? (
+                    <>
+                      <p className="text-[9px] tracking-[0.4em] uppercase text-secondary/40 font-bold mb-1">Wallet connected</p>
+                      <span className="text-[10px] font-mono text-secondary/60 tracking-widest">
+                        {address.slice(0, 6)}...{address.slice(-4)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-[9px] tracking-[0.4em] uppercase text-emerald-400/80 font-bold mb-1">No wallet</p>
+                      <span className="text-[10px] text-white/50 leading-relaxed max-w-[220px] block">
+                        Create with your email &amp; name below. Email-mode events only (no wallet signup).
+                      </span>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -785,6 +1322,37 @@ function HomeContent() {
                   <h2 className="text-2xl font-bold tracking-tighter mb-1">New Event</h2>
                   <p className="text-[10px] uppercase tracking-[0.25em] text-secondary/30 font-bold">Protocol registration</p>
                 </div>
+
+                {!address && (
+                  <div className="space-y-4 p-4 border border-emerald-500/20 bg-emerald-500/[0.04] rounded-sm">
+                    <p className="text-[9px] tracking-[0.25em] uppercase text-emerald-400/90 font-bold">Organizer (no wallet)</p>
+                    <div className="space-y-2">
+                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Your email *</label>
+                      <input
+                        type="email"
+                        required={!address}
+                        value={form.organizerEmail}
+                        onChange={e => setForm(f => ({ ...f, organizerEmail: e.target.value }))}
+                        placeholder="you@company.com"
+                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Your name or company *</label>
+                      <input
+                        type="text"
+                        required={!address}
+                        value={form.organizerDisplayName}
+                        onChange={e => setForm(f => ({ ...f, organizerDisplayName: e.target.value }))}
+                        placeholder="Jane Doe or Acme Inc."
+                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm"
+                      />
+                    </div>
+                    <p className="text-[8px] text-white/35 leading-relaxed">
+                      We&apos;ll send a confirmation with your verification code. You&apos;ll manage this event in this browser until you connect a wallet.
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-5">
                   <div className="space-y-2">
@@ -906,6 +1474,44 @@ function HomeContent() {
                   </div>
 
                   <div className="pt-4 border-t border-white/5 space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="space-y-1 min-w-0">
+                        <label className="text-[9px] tracking-[0.3em] uppercase text-white font-bold block">
+                          {form.isBlockchain ? 'Registration: wallet' : 'Registration: email'}
+                        </label>
+                        <p className="text-[8px] text-white/30 uppercase tracking-widest font-mono leading-relaxed">
+                          {form.isBlockchain
+                            ? 'Attendees connect a wallet to register & verify'
+                            : 'Attendees sign up with email only — no wallet'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!address}
+                        role="switch"
+                        aria-checked={form.isBlockchain}
+                        aria-label="Toggle blockchain wallet registration versus email signup"
+                        title={!address ? 'Connect a wallet to enable blockchain (wallet) registration for attendees' : undefined}
+                        onClick={() => setForm(f => ({ ...f, isBlockchain: !f.isBlockchain }))}
+                        className={`w-10 h-5 shrink-0 relative transition-colors duration-300 ${form.isBlockchain ? 'bg-accent' : 'bg-emerald-600/80'} ${!address ? 'opacity-40 cursor-not-allowed' : ''}`}
+                      >
+                        <div className={`absolute top-1 w-3 h-3 bg-black transition-all duration-300 ${form.isBlockchain ? 'left-6' : 'left-1'}`} />
+                      </button>
+                    </div>
+                    <p className="text-[9px] text-white/50 leading-relaxed border border-white/10 bg-white/[0.03] px-3 py-2">
+                      {!address ? (
+                        <>
+                          <span className="font-bold text-white/70">Without a wallet</span>, events use{' '}
+                          <span className="text-emerald-400/90">email registration</span> for attendees. Connect a wallet to offer wallet-based registration.
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-bold text-white/70">Email signup</span> appears on the event page when this is set to{' '}
+                          <span className="text-emerald-400/90">email</span> (toggle left). Default is wallet mode.
+                        </>
+                      )}
+                    </p>
+
                     <div className="flex items-center justify-between">
                       <div className="space-y-1">
                         <label className="text-[9px] tracking-[0.3em] uppercase text-white font-bold block">VIP Access Gate</label>
@@ -1034,6 +1640,12 @@ function HomeContent() {
                     <span className="text-[9px] tracking-[0.3em] uppercase text-yellow-500 font-bold">VIP</span>
                   </div>
                 )}
+                {selectedEvent.isBlockchain === false && (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="w-1.5 h-1.5 bg-white/50 rounded-full" />
+                    <span className="text-[9px] tracking-[0.3em] uppercase text-white/70 font-bold">Email signup</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setSelectedEvent(null)}
@@ -1111,7 +1723,109 @@ function HomeContent() {
                   )}
                 </div>
 
-                {!isConnected ? (
+                {/* Non-blockchain event: normal email signup (no wallet required) */}
+                {selectedEvent.isBlockchain === false ? (
+                  <div className="space-y-6">
+                    {renderOrganizerEventPanel()}
+                    {!isUserRegistered ? (
+                      isPast(selectedEvent.date, selectedEvent.endDate) ? (
+                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
+                          <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
+                        </div>
+                      ) : (
+                        <form onSubmit={handleRegisterNormal} className="space-y-4 p-4 border border-white/10 bg-white/[0.02]">
+                          <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Sign up with email</p>
+                          <div className="space-y-2">
+                            <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">Email *</label>
+                            <input
+                              type="email"
+                              required
+                              value={normalSignupEmail}
+                              onChange={e => setNormalSignupEmail(e.target.value)}
+                              placeholder="you@example.com"
+                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
+                              First name or organization name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={normalSignupName}
+                              onChange={e => setNormalSignupName(e.target.value)}
+                              placeholder="Jane Doe or Acme Inc."
+                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={registering}
+                            className="w-full py-4 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
+                          >
+                            {registering ? 'Processing...' : 'Register for Event'}
+                          </button>
+                        </form>
+                      )
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center space-y-2">
+                          <div className="flex items-center justify-center gap-2">
+                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">You&apos;re registered</p>
+                          </div>
+                          {eventRegProfile?.name && (
+                            <p className="text-sm text-white/90 font-medium tracking-tight">{eventRegProfile.name}</p>
+                          )}
+                          {eventRegProfile?.email && (
+                            <p className="text-[10px] font-mono text-white/45 break-all">{eventRegProfile.email}</p>
+                          )}
+                          {isConnected && address && (
+                            <p className="text-[9px] font-mono text-white/35 pt-1 border-t border-white/[0.06]">
+                              Wallet: {address.slice(0, 6)}...{address.slice(-4)}
+                            </p>
+                          )}
+                          <p className="text-[9px] text-white/25">Scan the event QR at the door to verify attendance.</p>
+                        </div>
+
+                        {isPast(selectedEvent.date, selectedEvent.endDate) ? (
+                          <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
+                            <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
+                          </div>
+                        ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
+                          isUserVerified ? (
+                            <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                                <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
+                              </div>
+                              <p className="text-[9px] text-white/25 mt-1">You have checked in for this event.</p>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setShowScanner(true)}
+                              className="btn-premium w-full py-4 group"
+                            >
+                              <div className="flex items-center justify-center gap-3">
+                                <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
+                                <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
+                              </div>
+                            </button>
+                          )
+                        ) : (
+                          <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
+                            <p className="text-[9px] text-white/30 mt-1">Event starts {formatDateTime(selectedEvent.date)}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : !isConnected ? (
                   <button
                     type="button"
                     onClick={() => openConnectModal?.()}
@@ -1121,201 +1835,7 @@ function HomeContent() {
                   </button>
                 ) : (
                   <div className="space-y-6">
-                    {/* Access Code for Organizer */}
-                    {address?.toLowerCase() === selectedEvent.organizer.toLowerCase() && (
-                      <div className="space-y-6 p-6 border border-white/[0.08] bg-white/[0.02]">
-                        <div className="flex flex-col md:flex-row items-center gap-8">
-                          <div className="bg-white p-3 border border-white/20 shrink-0">
-                            <QRCodeCanvas
-                              id={`organizer-qr-${selectedEvent.id}`}
-                              value={selectedEvent.verificationCode}
-                              size={120}
-                              level="H"
-                              imageSettings={{
-                                src: "/logo-black.png",
-                                x: undefined,
-                                y: undefined,
-                                height: 24,
-                                width: 24,
-                                excavate: true,
-                              }}
-                            />
-                          </div>
-
-                          <div className="flex-1 space-y-4 text-center md:text-left">
-                            <div className="space-y-1">
-                              <p className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Protocol Access Code</p>
-                              <code className="text-2xl font-mono text-accent tracking-[0.2em] block">{selectedEvent.verificationCode}</code>
-                            </div>
-
-                            <div className="flex flex-wrap justify-center md:justify-start gap-4">
-                              <button
-                                onClick={() => handleDownloadQR(selectedEvent, `organizer-qr-${selectedEvent.id}`)}
-                                className="px-4 py-2 bg-white text-black hover:bg-neutral-200 transition-all text-[9px] tracking-[0.2em] uppercase font-bold"
-                              >
-                                Download QR
-                              </button>
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(selectedEvent.verificationCode);
-                                }}
-                                className="px-4 py-2 border border-white/10 hover:bg-white/5 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white/40 hover:text-white"
-                              >
-                                Copy Code
-                              </button>
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(getRegistrationLink(selectedEvent));
-                                  showWalletToast('Registration link copied to clipboard.');
-                                }}
-                                className="px-4 py-2 bg-white/10 border border-white/20 hover:bg-white/20 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white"
-                              >
-                                Copy Registration Link
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="text-[8px] tracking-[0.1em] uppercase text-white/10 font-medium text-center md:text-left">Share the registration link for sign-ups. Download the QR (includes event details) for check-in at the event.</p>
-                      </div>
-                    )}
-
-                    {/* Attendee / Visitor lists for Organizer */}
-                    {address?.toLowerCase() === selectedEvent.organizer.toLowerCase() && (
-                      <div className="space-y-6">
-                        {isPast(selectedEvent.date, selectedEvent.endDate) ? (
-                          <>
-                            <div className="flex items-center justify-between gap-4">
-                              <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">Past event — visitor summary</p>
-                              <button
-                                type="button"
-                                onClick={refetchOrganizerLists}
-                                disabled={loadingAttendees}
-                                className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
-                              >
-                                {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
-                              </button>
-                            </div>
-                            <div className="grid gap-6 sm:grid-cols-2">
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                                  <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Verified visitors</p>
-                                  <span className="text-[9px] font-mono text-green-500/80">{attendees.length}</span>
-                                </div>
-                                <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
-                                  {loadingAttendees ? (
-                                    <div className="p-4 text-center">
-                                      <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
-                                    </div>
-                                  ) : attendees.length > 0 ? (
-                                    <div className="divide-y divide-white/[0.04]">
-                                      {attendees.map((a, i) => (
-                                        <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
-                                          <div className="space-y-0.5 min-w-0">
-                                            <p className="text-[10px] font-mono text-white/70 truncate">
-                                              {a.wallet.slice(0, 10)}...{a.wallet.slice(-8)}
-                                            </p>
-                                            <p className="text-[8px] font-mono text-white/25">
-                                              {new Date(a.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                                            </p>
-                                          </div>
-                                          <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div className="p-6 text-center">
-                                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">No verified check-ins</p>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                                  <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Unverified (registered only)</p>
-                                  <span className="text-[9px] font-mono text-white/40">
-                                    {registrations.filter(r => !attendees.some(a => a.wallet?.toLowerCase() === r.wallet?.toLowerCase())).length}
-                                  </span>
-                                </div>
-                                <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
-                                  {loadingAttendees ? (
-                                    <div className="p-4 text-center">
-                                      <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
-                                    </div>
-                                  ) : (() => {
-                                    const unverified = registrations.filter(r => !attendees.some(a => a.wallet?.toLowerCase() === r.wallet?.toLowerCase()));
-                                    return unverified.length > 0 ? (
-                                      <div className="divide-y divide-white/[0.04]">
-                                        {unverified.map((r, i) => (
-                                          <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
-                                            <div className="space-y-0.5 min-w-0">
-                                              <p className="text-[10px] font-mono text-white/50 truncate">
-                                                {r.wallet.slice(0, 10)}...{r.wallet.slice(-8)}
-                                              </p>
-                                              <p className="text-[8px] font-mono text-white/20">
-                                                Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                                              </p>
-                                            </div>
-                                            <span className="text-[8px] uppercase tracking-widest text-white/20 font-bold shrink-0 ml-2">No check-in</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div className="p-6 text-center">
-                                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">Everyone who registered checked in</p>
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between border-b border-white/10 pb-2 flex-wrap gap-2">
-                              <div className="flex items-center gap-3">
-                                <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Attendee Manifest</p>
-                                <span className="text-[9px] font-mono text-white/40">{attendees.length} Verified</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={refetchOrganizerLists}
-                                disabled={loadingAttendees}
-                                className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
-                              >
-                                {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
-                              </button>
-                            </div>
-                            <div className="max-h-[200px] overflow-y-auto border border-white/[0.04] bg-white/[0.01]">
-                              {loadingAttendees ? (
-                                <div className="p-4 text-center">
-                                  <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Syncing...</span>
-                                </div>
-                              ) : attendees.length > 0 ? (
-                                <div className="divide-y divide-white/[0.04]">
-                                  {attendees.map((a, i) => (
-                                    <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02] transition-colors">
-                                      <div className="space-y-0.5">
-                                        <p className="text-[10px] font-mono text-white/70 group-hover:text-white transition-colors">
-                                          {a.wallet.slice(0, 10)}...{a.wallet.slice(-8)}
-                                        </p>
-                                        <p className="text-[8px] font-mono text-white/20">
-                                          {new Date(a.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
-                                      </div>
-                                      <span className="text-[8px] uppercase tracking-widest text-white/10 group-hover:text-green-400/40 transition-colors font-bold">Auth_Pass</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="p-8 text-center">
-                                  <p className="text-[10px] uppercase tracking-[0.2em] text-white/20 italic">No verifications yet</p>
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
+                    {renderOrganizerEventPanel()}
 
                     {/* Action Button: Register first, then Verify only when event has started and is not past */}
                     {!isUserRegistered ? (
@@ -1325,15 +1845,50 @@ function HomeContent() {
                           <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
                         </div>
                       ) : (
-                        <button
-                          disabled={registering}
-                          onClick={handleRegister}
-                          className="w-full py-4 bg-white text-black hover:bg-neutral-200 transition-all group flex items-center justify-center gap-3"
+                        <form
+                          onSubmit={handleRegisterBlockchain}
+                          className="space-y-4 p-4 border border-white/10 bg-white/[0.02]"
                         >
-                          <span className="tracking-[0.2em] uppercase text-sm font-bold">
-                            {registering ? 'Processing...' : 'Register for Event'}
-                          </span>
-                        </button>
+                          <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">
+                            Register with wallet
+                          </p>
+                          <p className="text-[9px] text-white/35 leading-relaxed">
+                            Connect your wallet, then add how we should list you and your email for confirmations.
+                          </p>
+                          <div className="space-y-2">
+                            <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
+                              First name or organization name *
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={blockchainSignupName}
+                              onChange={e => setBlockchainSignupName(e.target.value)}
+                              placeholder="Jane Doe or Acme Inc."
+                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">Email *</label>
+                            <input
+                              type="email"
+                              required
+                              value={blockchainSignupEmail}
+                              onChange={e => setBlockchainSignupEmail(e.target.value)}
+                              placeholder="you@example.com"
+                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={registering}
+                            className="w-full py-4 bg-white text-black hover:bg-neutral-200 transition-all group flex items-center justify-center gap-3 disabled:opacity-50"
+                          >
+                            <span className="tracking-[0.2em] uppercase text-sm font-bold">
+                              {registering ? 'Processing...' : 'Register for Event'}
+                            </span>
+                          </button>
+                        </form>
                       )
                     ) : isPast(selectedEvent.date, selectedEvent.endDate) ? (
                       <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
@@ -1351,7 +1906,8 @@ function HomeContent() {
                         </div>
                       ) : (
                         <button
-                          onClick={() => { setSelectedEvent(null); setShowScanner(true); }}
+                          type="button"
+                          onClick={() => setShowScanner(true)}
                           className="btn-premium w-full py-4 group"
                         >
                           <div className="flex items-center justify-center gap-3">
