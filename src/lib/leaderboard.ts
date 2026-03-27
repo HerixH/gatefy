@@ -6,20 +6,26 @@ import { isEmailOrganizerId } from './event-organizer';
 
 export interface LeaderboardAttendee {
     rank: number;
-    /** Wallet check-in: shortened address; email check-in: registration name (org / first name), never raw email */
+    /** Registration name / shortened wallet — never raw email */
     displayLabel: string;
-    /** Set when the row is a wallet — used for Basescan link */
-    basescanAddress: string | null;
+    /** Email-based check-ins vs wallet-based */
+    participantType: 'wallet' | 'email';
+    /** Distinct events with recorded attendance */
     eventCount: number;
 }
 
 export interface LeaderboardOrganizer {
     rank: number;
-    /** Wallet: shortened 0x; email-based organiser: organisation / display name (not email) */
     displayLabel: string;
-    basescanAddress: string | null;
+    organizerType: 'wallet' | 'email';
+    /** Events created under this organiser id */
     eventCount: number;
+    /** Sum of verified check-ins across those events */
     totalAttendees: number;
+    /** How many hosted events are email-signup (non-wallet) events */
+    emailSignupEvents: number;
+    /** How many hosted events use wallet registration */
+    walletSignupEvents: number;
 }
 
 function truncateWalletAddr(w: string): string {
@@ -65,9 +71,8 @@ export async function getLeaderboardAttendees(limit = 50): Promise<LeaderboardAt
 
     return sorted.map((s, i) => {
         let displayLabel: string;
-        let basescanAddress: string | null = null;
+        const participantType: 'wallet' | 'email' = s.wallet ? 'wallet' : 'email';
         if (s.wallet) {
-            basescanAddress = s.wallet;
             displayLabel = truncateWalletAddr(s.wallet);
         } else if (s.email) {
             displayLabel = emailToName.get(s.email) ?? 'Guest';
@@ -77,7 +82,7 @@ export async function getLeaderboardAttendees(limit = 50): Promise<LeaderboardAt
         return {
             rank: i + 1,
             displayLabel,
-            basescanAddress,
+            participantType,
             eventCount: s.eventCount,
         };
     });
@@ -87,13 +92,26 @@ export async function getLeaderboardOrganizers(limit = 50): Promise<LeaderboardO
     const events = await getEvents();
     const byOrganizer = new Map<
         string,
-        { eventCount: number; totalAttendees: number; displayName?: string }
+        {
+            eventCount: number;
+            totalAttendees: number;
+            displayName?: string;
+            emailSignupEvents: number;
+            walletSignupEvents: number;
+        }
     >();
     for (const e of events) {
         const o = e.organizer.toLowerCase();
-        const cur = byOrganizer.get(o) ?? { eventCount: 0, totalAttendees: 0 };
+        const cur = byOrganizer.get(o) ?? {
+            eventCount: 0,
+            totalAttendees: 0,
+            emailSignupEvents: 0,
+            walletSignupEvents: 0,
+        };
         cur.eventCount += 1;
         cur.totalAttendees += e.attendeeCount ?? 0;
+        if (e.isBlockchain === false) cur.emailSignupEvents += 1;
+        else cur.walletSignupEvents += 1;
         if (!cur.displayName && e.organizerDisplayName?.trim()) {
             cur.displayName = e.organizerDisplayName.trim();
         }
@@ -105,17 +123,18 @@ export async function getLeaderboardOrganizers(limit = 50): Promise<LeaderboardO
         .slice(0, limit);
     return sorted.map((s, i) => {
         const isEmail = isEmailOrganizerId(s.organizerId);
+        const organizerType: 'wallet' | 'email' = isEmail ? 'email' : 'wallet';
         const displayLabel = isEmail
             ? (s.displayName ?? 'Organiser')
             : truncateWalletAddr(s.organizerId);
-        const basescanAddress =
-            !isEmail && s.organizerId.startsWith('0x') ? s.organizerId : null;
         return {
             rank: i + 1,
             displayLabel,
-            basescanAddress,
+            organizerType,
             eventCount: s.eventCount,
             totalAttendees: s.totalAttendees,
+            emailSignupEvents: s.emailSignupEvents,
+            walletSignupEvents: s.walletSignupEvents,
         };
     });
 }
