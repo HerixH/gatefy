@@ -172,7 +172,7 @@ export default function AdminDashboard() {
             .filter(
                 id =>
                     (groupedAttendance[id]?.length ?? 0) > 0 ||
-                    registrations.some(r => r.eventId.toLowerCase() === id.toLowerCase())
+                    registrations.some(r => (r.eventId ?? '').toLowerCase() === id.toLowerCase())
             ),
     ];
     if ((groupedAttendance[LEGACY_EVENT_KEY]?.length ?? 0) > 0) {
@@ -182,9 +182,11 @@ export default function AdminDashboard() {
     function getRegisteredOnly(eventId: string): Registration[] {
         if (eventId === LEGACY_EVENT_KEY) return [];
         const verifiedRecords = groupedAttendance[eventId] || [];
-        const attendedWallets = new Set(verifiedRecords.map(r => r.wallet.toLowerCase()));
+        const attendedWallets = new Set(verifiedRecords.map(r => (r.wallet ?? '').toLowerCase()));
         return registrations.filter(
-            r => r.eventId.toLowerCase() === eventId.toLowerCase() && !attendedWallets.has(r.wallet.toLowerCase())
+            r =>
+                (r.eventId ?? '').toLowerCase() === eventId.toLowerCase() &&
+                !attendedWallets.has((r.wallet ?? '').toLowerCase())
         );
     }
 
@@ -206,11 +208,14 @@ export default function AdminDashboard() {
         });
         registrations.forEach(reg => {
             const attended = attendance.some(
-                a => a.eventId && reg.eventId.toLowerCase() === a.eventId.toLowerCase() && a.wallet.toLowerCase() === reg.wallet.toLowerCase()
+                a =>
+                    a.eventId &&
+                    (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
+                    (a.wallet ?? '').toLowerCase() === (reg.wallet ?? '').toLowerCase()
             );
             if (!attended) {
                 rows.push({
-                    Event: events.find(e => e.id.toLowerCase() === reg.eventId.toLowerCase())?.name ?? reg.eventId,
+                    Event: events.find(e => e.id.toLowerCase() === (reg.eventId ?? '').toLowerCase())?.name ?? reg.eventId,
                     Wallet: reg.wallet,
                     Status: 'Registered only',
                     'Auth Code': '-',
