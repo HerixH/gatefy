@@ -8,10 +8,44 @@ import {
 } from '@/lib/registrations';
 import { getEventById } from '@/lib/events';
 import { sendRegistrationConfirmationEmail } from '@/lib/email';
+import { verifyUsdcTicketPayment } from '@/lib/usdc-payment';
 
 export const dynamic = 'force-dynamic';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TREASURY = (process.env.TREASURY_WALLET || process.env.NEXT_PUBLIC_TREASURY_ADDRESS || '').trim();
+
+function ticketPrice(ev: { ticketPriceUsdc?: number } | null | undefined): number {
+    if (!ev?.ticketPriceUsdc) return 0;
+    const n = Number(ev.ticketPriceUsdc);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+async function resolvePaidTicketOpts(
+    price: number,
+    body: { paymentTxHash?: string; mobileMoneyReference?: string }
+): Promise<
+    | { ok: true; payment?: { txHash?: string; mobileRef?: string }; paymentLabel?: string }
+    | { ok: false; error: string; status: number }
+> {
+    if (price <= 0) return { ok: true, payment: undefined };
+    const txHash = typeof body.paymentTxHash === 'string' ? body.paymentTxHash.trim() : '';
+    const mobileRef = typeof body.mobileMoneyReference === 'string' ? body.mobileMoneyReference.trim() : '';
+    if (txHash) {
+        const v = await verifyUsdcTicketPayment(txHash, price, TREASURY);
+        if (!v.ok) return { ok: false, error: v.error || 'Payment verification failed', status: 400 };
+        return { ok: true, payment: { txHash }, paymentLabel: 'USDC on Base' };
+    }
+    if (mobileRef.length >= 4) {
+        return { ok: true, payment: { mobileRef }, paymentLabel: 'mobile money' };
+    }
+    return {
+        ok: false,
+        error:
+            'This event requires a paid ticket: pay with USDC on Base and paste the transaction hash, or use mobile money per the organizer’s instructions and enter your payment reference.',
+        status: 400,
+    };
+}
 
 export async function POST(request: Request) {
     try {
@@ -24,6 +58,9 @@ export async function POST(request: Request) {
 
         const nameStr = typeof name === 'string' ? name.trim() : '';
         const emailStr = typeof email === 'string' ? email.trim() : '';
+
+        const ev = await getEventById(String(eventId).trim());
+        const price = ticketPrice(ev);
 
         // Blockchain (wallet) signup — collect email + first name / org name (must run before email-only branch)
         if (wallet) {
@@ -56,24 +93,37 @@ export async function POST(request: Request) {
                 );
             }
 
-            const success = await registerForEvent(eventId, cleanWallet, {
-                email: emailStr,
-                name: nameStr,
-            });
+            const paid = await resolvePaidTicketOpts(price, body);
+            if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
+
+            const success = await registerForEvent(
+                eventId,
+                cleanWallet,
+                {
+                    email: emailStr,
+                    name: nameStr,
+                },
+                paid.payment
+            );
             if (success) {
+                let emailSent = false;
+                let emailSkipped = false;
                 try {
-                    const ev = await getEventById(eventId);
                     if (ev) {
-                        await sendRegistrationConfirmationEmail({
+                        const r = await sendRegistrationConfirmationEmail({
                             to: emailStr.toLowerCase(),
                             event: ev,
                             attendeeName: nameStr,
+                            ticketPriceUsdc: price > 0 ? price : undefined,
+                            paymentLabel: paid.paymentLabel,
                         });
+                        emailSent = r.ok;
+                        emailSkipped = !!r.skipped;
                     }
                 } catch (mailErr) {
                     console.error('Registration confirmation email failed:', mailErr);
                 }
-                return NextResponse.json({ success: true });
+                return NextResponse.json({ success: true, emailSent, emailSkipped });
             }
             return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
         }
@@ -92,21 +142,30 @@ export async function POST(request: Request) {
             if (await isRegisteredByEmail(eventId, emailStr)) {
                 return NextResponse.json({ error: 'Already registered' }, { status: 400 });
             }
-            const success = await registerForEventWithEmail(eventId, emailStr, nameStr);
+
+            const paid = await resolvePaidTicketOpts(price, body);
+            if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
+
+            const success = await registerForEventWithEmail(eventId, emailStr, nameStr, paid.payment);
             if (success) {
+                let emailSent = false;
+                let emailSkipped = false;
                 try {
-                    const ev = await getEventById(eventId);
                     if (ev) {
-                        await sendRegistrationConfirmationEmail({
+                        const r = await sendRegistrationConfirmationEmail({
                             to: emailStr.toLowerCase(),
                             event: ev,
                             attendeeName: nameStr,
+                            ticketPriceUsdc: price > 0 ? price : undefined,
+                            paymentLabel: paid.paymentLabel,
                         });
+                        emailSent = r.ok;
+                        emailSkipped = !!r.skipped;
                     }
                 } catch (mailErr) {
                     console.error('Registration confirmation email failed:', mailErr);
                 }
-                return NextResponse.json({ success: true });
+                return NextResponse.json({ success: true, emailSent, emailSkipped });
             }
             return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
         }

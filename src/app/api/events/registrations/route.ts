@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getRegistrations } from '@/lib/registrations';
+import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,9 +8,32 @@ export async function GET(request: Request) {
     try {
         const { searchParams } = new URL(request.url);
         const eventId = searchParams.get('eventId');
+        const organizerWallet = searchParams.get('organizerWallet');
+        const organizerEmail = searchParams.get('organizerEmail');
 
         if (!eventId) {
             return NextResponse.json({ error: 'Event ID is required' }, { status: 400 });
+        }
+
+        if (!organizerWallet?.trim() && !organizerEmail?.trim()) {
+            return NextResponse.json(
+                { error: 'organizerWallet or organizerEmail is required for this endpoint' },
+                { status: 403 }
+            );
+        }
+
+        const event = await findEventByIdCaseInsensitive(eventId);
+        if (!event) {
+            return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+        }
+
+        if (
+            !serverOrganizerMatchesEvent(event.organizer, {
+                organizerWallet,
+                organizerEmail,
+            })
+        ) {
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
 
         const all = await getRegistrations();

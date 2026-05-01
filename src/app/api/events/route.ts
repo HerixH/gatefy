@@ -54,8 +54,19 @@ export async function POST(request: Request) {
             vipMinBalance,
             bannerUrl,
             isBlockchain,
+            ticketPriceUsdc,
+            mobileMoneyInstructions,
         } = body;
 
+        let ticketPrice: number | undefined;
+        if (ticketPriceUsdc != null && ticketPriceUsdc !== '') {
+            const n = typeof ticketPriceUsdc === 'number' ? ticketPriceUsdc : parseFloat(String(ticketPriceUsdc));
+            if (Number.isFinite(n) && n > 0) ticketPrice = n;
+        }
+        const mmInstr =
+            typeof mobileMoneyInstructions === 'string' && mobileMoneyInstructions.trim()
+                ? mobileMoneyInstructions.trim()
+                : undefined;
         if (!name || !date) {
             return NextResponse.json({ error: 'Name and date are required' }, { status: 400 });
         }
@@ -106,6 +117,8 @@ export async function POST(request: Request) {
             vipMinBalance: vipMinBalance || '',
             bannerUrl: bannerUrl || undefined,
             isBlockchain: blockchain,
+            ticketPriceUsdc: ticketPrice,
+            mobileMoneyInstructions: mmInstr,
         });
 
         if (!wallet && emailRaw) {

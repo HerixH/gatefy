@@ -18,7 +18,9 @@ create table if not exists public.events (
   vip_min_balance text default '1',
   banner_url text,
   is_blockchain boolean default true,
-  organizer_display_name text
+  organizer_display_name text,
+  ticket_price_usdc numeric,
+  mobile_money_instructions text
 );
 
 -- If table already exists, run: alter table public.events add column if not exists end_date timestamptz; alter table public.events add column if not exists max_attendees integer;
@@ -115,6 +117,10 @@ create table if not exists public.registrations (
   email text,
   name text,
   registered_at timestamptz default now(),
+  payment_status text default 'none',
+  payment_tx_hash text,
+  payment_reference text,
+  paid_at timestamptz,
   constraint registrations_identifier_check check (wallet is not null or email is not null)
 );
 
@@ -123,6 +129,14 @@ create unique index if not exists unique_registration_wallet
   on public.registrations(event_id, wallet) where wallet is not null;
 create unique index if not exists unique_registration_email
   on public.registrations(event_id, lower(email)) where email is not null;
+
+comment on column public.events.ticket_price_usdc is 'Optional USDC price per ticket on Base mainnet; null/0 = free.';
+comment on column public.events.mobile_money_instructions is 'Organizer text: MTN/Airtel numbers, account name, amount in local currency, etc.';
+comment on column public.registrations.payment_status is 'none | paid_crypto | paid_mobile';
+comment on column public.registrations.payment_tx_hash is 'Base USDC transfer tx hash when paid_crypto';
+comment on column public.registrations.payment_reference is 'Mobile-money transaction id / reference when paid_mobile';
+
+-- If you created events/registrations before paid tickets existed, run supabase/patches/02_tickets_payments.sql once.
 
 alter table public.claim_codes enable row level security;
 alter table public.attendance enable row level security;

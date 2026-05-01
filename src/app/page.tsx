@@ -5,11 +5,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useConfig } from 'wagmi';
+import { waitForTransactionReceipt } from '@wagmi/core';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Scanner } from '@/components/Scanner';
-import { isEventOrganizer, formatOrganizerShort } from '@/lib/event-organizer';
+import {
+  isEventOrganizer,
+  formatOrganizerShort,
+  isEmailOrganizerId,
+} from '@/lib/event-organizer';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -51,6 +56,8 @@ interface Event {
   vipMinBalance?: string;
   bannerUrl?: string;
   isBlockchain?: boolean;
+  ticketPriceUsdc?: number;
+  mobileMoneyInstructions?: string;
 }
 
 function HomeContent() {
@@ -78,6 +85,7 @@ function HomeContent() {
   const [registering, setRegistering] = useState(false);
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
+  const [normalPayRef, setNormalPayRef] = useState('');
   /** Wallet (blockchain) registration: email + first name or org name */
   const [blockchainSignupEmail, setBlockchainSignupEmail] = useState('');
   const [blockchainSignupName, setBlockchainSignupName] = useState('');
@@ -93,21 +101,35 @@ function HomeContent() {
   const [databaseConfigured, setDatabaseConfigured] = useState<boolean | null>(null);
   /** Email used to create events without a wallet (session). */
   const [organizerSessionEmail, setOrganizerSessionEmail] = useState<string | null>(null);
+  /** Draft for “Sign in as organizer” (email-hosted events — wallet parity). */
+  const [organizerSignInDraft, setOrganizerSignInDraft] = useState('');
 
   const orgCtx = useMemo(
     () => ({ address: address ?? null, organizerSessionEmail }),
     [address, organizerSessionEmail]
   );
 
-  const { writeContract, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
+  /** Required on `/api/events/registrations` and `/api/events/attendees` (organizer-only). */
+  const organizerListAuthSuffix = useMemo(() => {
+    if (address) return `&organizerWallet=${encodeURIComponent(address)}`;
+    if (organizerSessionEmail) return `&organizerEmail=${encodeURIComponent(organizerSessionEmail)}`;
+    return '';
+  }, [address, organizerSessionEmail]);
+
+  const { writeContract, writeContractAsync, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
   const { isSuccess: isTxConfirmed, isLoading: isTxConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const wagmiConfig = useConfig();
 
   const refetchOrganizerLists = () => {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return;
+    if (!organizerListAuthSuffix) {
+      showWalletToast('Sign in with the same wallet or browser session you used to create this event.');
+      return;
+    }
     setLoadingAttendees(true);
     Promise.all([
-      fetch(`/api/events/attendees?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then(r => r.json()),
-      fetch(`/api/events/registrations?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then(r => r.json()),
+      fetch(`/api/events/attendees?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then(r => r.json()),
+      fetch(`/api/events/registrations?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then(r => r.json()),
     ])
       .then(([attendeesData, regsData]) => {
         setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
@@ -136,6 +158,7 @@ function HomeContent() {
   }, []);
 
   useEffect(() => {
+    setNormalPayRef('');
     setBlockchainSignupEmail('');
     setBlockchainSignupName('');
   }, [selectedEvent?.id]);
@@ -197,10 +220,15 @@ function HomeContent() {
     }
 
     if (isOwner) {
+      if (!organizerListAuthSuffix) {
+        setAttendees([]);
+        setRegistrations([]);
+        return;
+      }
       setLoadingAttendees(true);
       Promise.all([
-        fetch(`/api/events/attendees?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then((r) => r.json()),
-        fetch(`/api/events/registrations?eventId=${selectedEvent.id}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/events/attendees?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/events/registrations?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then((r) => r.json()),
       ])
         .then(([attendeesData, regsData]) => {
           setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
@@ -319,6 +347,8 @@ function HomeContent() {
     isBlockchain: true,
     organizerEmail: '',
     organizerDisplayName: '',
+    ticketPriceUsdc: '' as string,
+    mobileMoneyInstructions: '' as string,
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -359,6 +389,43 @@ function HomeContent() {
   const showWalletToast = (msg: string) => {
     setWalletToast(msg);
     setTimeout(() => setWalletToast(null), 4000);
+  };
+
+  const ORG_SESSION_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const commitOrganizerEmailSession = (raw: string, opts?: { silent?: boolean }) => {
+    const em = raw.trim().toLowerCase();
+    if (!ORG_SESSION_EMAIL_RE.test(em)) {
+      showWalletToast('Enter a valid organizer email.');
+      return false;
+    }
+    try {
+      sessionStorage.setItem('gatefy-organizer-email', em);
+    } catch {
+      showWalletToast('Could not save organizer session (storage blocked).');
+      return false;
+    }
+    setOrganizerSessionEmail(em);
+    setOrganizerSignInDraft('');
+    if (!opts?.silent) {
+      showWalletToast('Organizer session active — host tools unlocked for your email events.');
+    }
+    return true;
+  };
+
+  const clearOrganizerEmailSession = () => {
+    try {
+      sessionStorage.removeItem('gatefy-organizer-email');
+    } catch {
+      /* ignore */
+    }
+    setOrganizerSessionEmail(null);
+    showWalletToast('Organizer email signed out.');
+  };
+
+  const handleOrganizerSignInSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    commitOrganizerEmailSession(organizerSignInDraft);
   };
 
   const handleScan = async (data: string) => {
@@ -444,6 +511,13 @@ function HomeContent() {
         bannerUrl: form.bannerUrl || undefined,
         isBlockchain: form.isBlockchain,
       };
+      const t = form.ticketPriceUsdc.trim();
+      if (t) {
+        const n = parseFloat(t);
+        if (Number.isFinite(n) && n > 0) payload.ticketPriceUsdc = n;
+      }
+      const mm = form.mobileMoneyInstructions.trim();
+      if (mm) payload.mobileMoneyInstructions = mm;
       if (address) {
         payload.organizer = address;
       } else {
@@ -471,11 +545,11 @@ function HomeContent() {
           isBlockchain: true,
           organizerEmail: '',
           organizerDisplayName: '',
+          ticketPriceUsdc: '',
+          mobileMoneyInstructions: '',
         });
         if (!address && form.organizerEmail.trim()) {
-          const em = form.organizerEmail.trim().toLowerCase();
-          sessionStorage.setItem('gatefy-organizer-email', em);
-          setOrganizerSessionEmail(em);
+          commitOrganizerEmailSession(form.organizerEmail.trim(), { silent: true });
         }
         setShowCreateEvent(false);
         setCreatedEvent(newEvent); // show QR download modal
@@ -608,7 +682,92 @@ function HomeContent() {
       ? Math.max(0, ev.maxAttendees - getRegisteredCount(ev))
       : null;
 
+  const registrantMatchesCheckIn = (
+    r: { wallet?: string | null; email?: string | null },
+    a: { wallet?: string | null; email?: string | null }
+  ) =>
+    (a.wallet &&
+      r.wallet &&
+      String(a.wallet).toLowerCase() === String(r.wallet).toLowerCase()) ||
+    (a.email && r.email && String(a.email).toLowerCase() === String(r.email).toLowerCase());
+
+  const exportOrganizerRosterCsv = () => {
+    if (!selectedEvent) return;
+    const unverified = registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a)));
+    type Row = { Status: string; Identity: string; Name: string; Email: string; Code: string; Timestamp: string };
+    const rows: Row[] = [];
+    attendees.forEach((a: { wallet?: string; email?: string; checkedInAt: string; code?: string }) => {
+      rows.push({
+        Status: 'Verified',
+        Identity: a.wallet?.trim() || a.email?.trim() || '—',
+        Name: '—',
+        Email: (a.email ?? '').trim() || '—',
+        Code: (a.code ?? '').trim() || '—',
+        Timestamp: new Date(a.checkedInAt).toLocaleString('en-GB'),
+      });
+    });
+    unverified.forEach(r => {
+      rows.push({
+        Status: 'Registered only',
+        Identity: r.wallet?.trim() || r.email?.trim() || '—',
+        Name: (r.name ?? '').trim() || '—',
+        Email: (r.email ?? '').trim() || '—',
+        Code: '-',
+        Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
+      });
+    });
+    if (rows.length === 0) {
+      showWalletToast('Nothing to export yet.');
+      return;
+    }
+    const headers = Object.keys(rows[0]) as (keyof Row)[];
+    const esc = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+    const csv = [headers.join(','), ...rows.map(row => headers.map(h => esc(row[h])).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `gatefy-${selectedEvent.name.replace(/\s+/g, '-').toLowerCase().slice(0, 40)}-roster.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
   /** Organizer QR, verification code, and manifest — shown for wallet events when connected and for email events without requiring a wallet. */
+  const renderEmailOrganizerAccessGate = () => {
+    if (!selectedEvent || !isEmailOrganizerId(selectedEvent.organizer)) return null;
+    if (isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
+    // Only before go-live: hide from attendees once the event is live or finished
+    if (!isUpcoming(selectedEvent.date, selectedEvent.endDate)) return null;
+    return (
+      <div className="p-4 border border-amber-500/25 bg-gradient-to-br from-amber-500/[0.08] to-transparent space-y-3">
+        <p className="text-[10px] uppercase tracking-[0.25em] text-amber-400/95 font-black">Organizer sign-in</p>
+        <p className="text-[11px] text-white/75 leading-relaxed">
+          This event is tied to an <strong className="text-white font-semibold">email organizer account</strong>. Sign in with the{' '}
+          <strong className="text-white font-semibold">same email you used when you created the event</strong> — then you get the same
+          host tools as wallet organizers (check-in QR, attendee list, CSV export).
+        </p>
+        <form onSubmit={handleOrganizerSignInSubmit} className="flex flex-col sm:flex-row gap-2 pt-1">
+          <input
+            type="email"
+            value={organizerSignInDraft}
+            onChange={e => setOrganizerSignInDraft(e.target.value)}
+            placeholder="Organizer email"
+            autoComplete="email"
+            className="flex-1 min-w-0 bg-black/50 border border-white/15 px-3 py-2.5 text-sm font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-amber-400/40"
+          />
+          <button
+            type="submit"
+            className="px-4 py-2.5 bg-white text-black text-[9px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200 shrink-0"
+          >
+            Sign in
+          </button>
+        </form>
+        <p className="text-[8px] text-white/35">
+          Tip: you can also sign in from <span className="text-white/50 font-bold">Your session</span> in the sidebar.
+        </p>
+      </div>
+    );
+  };
+
   const renderOrganizerEventPanel = () => {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
     const ev = selectedEvent;
@@ -673,147 +832,117 @@ function HomeContent() {
         </div>
 
         <div className="space-y-6">
-          {isPast(ev.date, ev.endDate) ? (
-            <>
-              <div className="flex items-center justify-between gap-4">
-                <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">Past event — visitor summary</p>
-                <button
-                  type="button"
-                  onClick={refetchOrganizerLists}
-                  disabled={loadingAttendees}
-                  className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
-                >
-                  {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
-                </button>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">
+                {isPast(ev.date, ev.endDate) ? 'Past event — visitor summary' : 'Registration & check-in roster'}
+              </p>
+              <p className="text-[9px] text-white/25 mt-1 font-mono">
+                {registrations.length} registered · {attendees.length} verified
+                {!organizerListAuthSuffix ? ' — connect the organizer wallet or use the same browser after email signup' : ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={exportOrganizerRosterCsv}
+                className="px-4 py-2 bg-white text-black hover:bg-neutral-200 transition-all text-[9px] tracking-[0.2em] uppercase font-bold"
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={refetchOrganizerLists}
+                disabled={loadingAttendees || !organizerListAuthSuffix}
+                className="px-4 py-2 border border-white/10 hover:bg-white/5 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white/50 hover:text-white disabled:opacity-50"
+              >
+                {loadingAttendees ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Verified check-ins</p>
+                <span className="text-[9px] font-mono text-green-500/80">{attendees.length}</span>
               </div>
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                    <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Verified visitors</p>
-                    <span className="text-[9px] font-mono text-green-500/80">{attendees.length}</span>
-                  </div>
-                  <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
-                    {loadingAttendees ? (
-                      <div className="p-4 text-center">
-                        <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
-                      </div>
-                    ) : attendees.length > 0 ? (
-                      <div className="divide-y divide-white/[0.04]">
-                        {attendees.map((a, i) => (
-                          <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
-                            <div className="space-y-0.5 min-w-0">
-                              <p className="text-[10px] font-mono text-white/70 truncate">
-                                {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || '—')}
-                              </p>
-                              <p className="text-[8px] font-mono text-white/25">
-                                {new Date(a.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                              </p>
-                            </div>
-                            <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="p-6 text-center">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">No verified check-ins</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                    <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Unverified (registered only)</p>
-                    <span className="text-[9px] font-mono text-white/40">
-                      {registrations.filter(r =>
-                        !attendees.some(a => (a.wallet?.toLowerCase() === r.wallet?.toLowerCase()) || (a.email?.toLowerCase() === r.email?.toLowerCase()))
-                      ).length}
-                    </span>
-                  </div>
-                  <div className="max-h-[220px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
-                    {loadingAttendees ? (
-                      <div className="p-4 text-center">
-                        <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
-                      </div>
-                    ) : (() => {
-                      const unverified = registrations.filter(r =>
-                        !attendees.some(a => (a.wallet?.toLowerCase() === r.wallet?.toLowerCase()) || (a.email?.toLowerCase() === r.email?.toLowerCase()))
-                      );
-                      return unverified.length > 0 ? (
-                        <div className="divide-y divide-white/[0.04]">
-                          {unverified.map((r, i) => (
-                            <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
-                              <div className="space-y-0.5 min-w-0">
-                                <p className="text-[10px] text-white/70 truncate font-sans font-medium">
-                                  {r.wallet
-                                    ? `${r.wallet.slice(0, 10)}...${r.wallet.slice(-8)}`
-                                    : (r.name || r.email || '—')}
-                                </p>
-                                {r.name && r.email ? (
-                                  <p className="text-[8px] font-mono text-white/35 truncate">{r.email}</p>
-                                ) : null}
-                                <p className="text-[8px] font-mono text-white/20">
-                                  Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
-                                </p>
-                              </div>
-                              <span className="text-[8px] uppercase tracking-widest text-white/20 font-bold shrink-0 ml-2">No check-in</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="p-6 text-center">
-                          <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">Everyone who registered checked in</p>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between border-b border-white/10 pb-2 flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                  <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Attendee Manifest</p>
-                  <span className="text-[9px] font-mono text-white/40">{attendees.length} Verified</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={refetchOrganizerLists}
-                  disabled={loadingAttendees}
-                  className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/50 hover:text-white disabled:opacity-50"
-                >
-                  {loadingAttendees ? 'Refreshing…' : 'Refresh list'}
-                </button>
-              </div>
-              <div className="max-h-[200px] overflow-y-auto border border-white/[0.04] bg-white/[0.01]">
+              <div className="max-h-[280px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
                 {loadingAttendees ? (
                   <div className="p-4 text-center">
-                    <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Syncing...</span>
+                    <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
                   </div>
                 ) : attendees.length > 0 ? (
                   <div className="divide-y divide-white/[0.04]">
                     {attendees.map((a, i) => (
-                      <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02] transition-colors">
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] font-mono text-white/70 group-hover:text-white transition-colors">
-                            {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || a.name || '—')}
+                      <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                        <div className="space-y-0.5 min-w-0">
+                          <p className="text-[10px] font-mono text-white/70 truncate">
+                            {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || '—')}
                           </p>
-                          <p className="text-[8px] font-mono text-white/20">
-                            {new Date(a.checkedInAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                          {a.code ? (
+                            <p className="text-[8px] font-mono text-blue-400/70 truncate">{a.code}</p>
+                          ) : null}
+                          <p className="text-[8px] font-mono text-white/25">
+                            {new Date(a.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                           </p>
                         </div>
-                        <span className="text-[8px] uppercase tracking-widest text-white/10 group-hover:text-green-400/40 transition-colors font-bold">Auth_Pass</span>
+                        <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="p-8 text-center">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/20 italic">No verifications yet</p>
+                  <div className="p-6 text-center">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">No verified check-ins yet</p>
                   </div>
                 )}
               </div>
-            </>
-          )}
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Registered — not verified</p>
+                <span className="text-[9px] font-mono text-white/40">
+                  {registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a))).length}
+                </span>
+              </div>
+              <div className="max-h-[280px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
+                {loadingAttendees ? (
+                  <div className="p-4 text-center">
+                    <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
+                  </div>
+                ) : (() => {
+                  const unverified = registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a)));
+                  return unverified.length > 0 ? (
+                    <div className="divide-y divide-white/[0.04]">
+                      {unverified.map((r, i) => (
+                        <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="text-[10px] text-white/70 truncate font-sans font-medium">
+                              {r.wallet
+                                ? `${r.wallet.slice(0, 10)}...${r.wallet.slice(-8)}`
+                                : (r.name || r.email || '—')}
+                            </p>
+                            {r.name && r.email ? (
+                              <p className="text-[8px] font-mono text-white/35 truncate">{r.email}</p>
+                            ) : null}
+                            <p className="text-[8px] font-mono text-white/20">
+                              Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                            </p>
+                          </div>
+                          <span className="text-[8px] uppercase tracking-widest text-amber-400/50 font-bold shrink-0 ml-2">Pending</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-center">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">
+                        {registrations.length === 0 ? 'No registrations yet' : 'All registrants have checked in'}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
         </div>
       </>
     );
@@ -836,8 +965,24 @@ function HomeContent() {
       showWalletToast('Enter your email.');
       return;
     }
+    const price = selectedEvent.ticketPriceUsdc ?? 0;
     setRegistering(true);
     try {
+      let paymentTxHash: string | undefined;
+      if (price > 0) {
+        if (DEV_MODE) {
+          paymentTxHash = `0xDEV${Date.now().toString(16)}`;
+        } else {
+          const hash = await writeContractAsync({
+            address: USDC_ADDRESS,
+            abi: ERC20_ABI,
+            functionName: 'transfer',
+            args: [TREASURY_ADDRESS, parseUnits(String(price), 6)],
+          });
+          await waitForTransactionReceipt(wagmiConfig, { hash });
+          paymentTxHash = hash;
+        }
+      }
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -846,10 +991,18 @@ function HomeContent() {
           wallet: address,
           email: emailTrim,
           name: nameTrim,
+          ...(paymentTxHash ? { paymentTxHash } : {}),
         }),
       });
       const data = await res.json();
       if (res.ok) {
+        if (data.emailSkipped) {
+          showWalletToast(
+            'Registered. Add RESEND_API_KEY to send confirmation emails.'
+          );
+        } else if (data.emailSent) {
+          showWalletToast('Registered — check your email for confirmation.');
+        }
         setIsUserRegistered(true);
         setEventRegProfile({
           email: emailTrim,
@@ -864,8 +1017,11 @@ function HomeContent() {
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
       }
-    } catch {
-      showWalletToast('Network error during registration. Please try again.');
+    } catch (err) {
+      console.error(err);
+      showWalletToast(
+        err instanceof Error ? err.message : 'Payment or registration failed. Please try again.'
+      );
     } finally {
       setRegistering(false);
     }
@@ -884,15 +1040,35 @@ function HomeContent() {
       showWalletToast('Enter your first name or organization name.');
       return;
     }
+    const price = selectedEvent.ticketPriceUsdc ?? 0;
+    if (price > 0) {
+      const ref = normalPayRef.trim();
+      if (ref.length < 4) {
+        showWalletToast('Enter your mobile-money payment reference after paying (see instructions above).');
+        return;
+      }
+    }
     setRegistering(true);
     try {
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: selectedEvent.id, email, name: nameTrim }),
+        body: JSON.stringify({
+          eventId: selectedEvent.id,
+          email,
+          name: nameTrim,
+          ...(price > 0 && normalPayRef.trim()
+            ? { mobileMoneyReference: normalPayRef.trim() }
+            : {}),
+        }),
       });
       const data = await res.json();
       if (res.ok) {
+        if (data.emailSkipped) {
+          showWalletToast('Registered. Add RESEND_API_KEY to send confirmation emails.');
+        } else if (data.emailSent) {
+          showWalletToast('Registered — check your email for confirmation.');
+        }
         setIsUserRegistered(true);
         if (typeof window !== 'undefined') {
           sessionStorage.setItem(
@@ -1077,12 +1253,46 @@ function HomeContent() {
                     </span>
                   </div>
                 )}
-                {organizerSessionEmail && (
-                  <div className="flex items-start justify-between gap-2 pt-1 border-t border-white/[0.06]">
-                    <span className="text-white/40 uppercase tracking-[0.2em] shrink-0">Organizer</span>
-                    <span className="text-white/70 text-right break-all text-[9px]">{organizerSessionEmail}</span>
-                  </div>
-                )}
+                <div className="pt-2 border-t border-white/[0.06] space-y-2">
+                  <span className="text-white/40 uppercase tracking-[0.2em] text-[9px] block font-bold">
+                    Organizer (email-hosted events)
+                  </span>
+                  <p className="text-[8px] text-white/25 leading-relaxed">
+                    Same role as connecting a wallet for on-chain events — sign in to unlock QR, roster, and export for events you created with this email.
+                  </p>
+                  {organizerSessionEmail ? (
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-white/40 uppercase tracking-[0.2em] shrink-0 text-[8px]">Signed in</span>
+                        <span className="text-white/75 text-right break-all text-[9px] font-mono">{organizerSessionEmail}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={clearOrganizerEmailSession}
+                        className="text-[8px] font-bold tracking-[0.2em] uppercase text-white/35 hover:text-white border border-white/10 px-2 py-1.5 w-full"
+                      >
+                        Sign out organizer
+                      </button>
+                    </div>
+                  ) : (
+                    <form onSubmit={handleOrganizerSignInSubmit} className="space-y-2">
+                      <input
+                        type="email"
+                        value={organizerSignInDraft}
+                        onChange={e => setOrganizerSignInDraft(e.target.value)}
+                        placeholder="you@company.com"
+                        autoComplete="email"
+                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-[11px] font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                      />
+                      <button
+                        type="submit"
+                        className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200"
+                      >
+                        Sign in as organizer
+                      </button>
+                    </form>
+                  )}
+                </div>
                 {selectedEvent?.isBlockchain === false &&
                   eventRegProfile?.email &&
                   isUserRegistered && (
@@ -1301,8 +1511,8 @@ function HomeContent() {
                   ) : (
                     <>
                       <p className="text-[9px] tracking-[0.4em] uppercase text-emerald-400/80 font-bold mb-1">No wallet</p>
-                      <span className="text-[10px] text-white/50 leading-relaxed max-w-[220px] block">
-                        Create with your email &amp; name below. Email-mode events only (no wallet signup).
+                      <span className="text-[10px] text-white/50 leading-relaxed max-w-[240px] block">
+                        Use the organizer email sign-in (sidebar) to unlock host tools — same idea as connecting a wallet for on-chain events.
                       </span>
                     </>
                   )}
@@ -1349,8 +1559,15 @@ function HomeContent() {
                       />
                     </div>
                     <p className="text-[8px] text-white/35 leading-relaxed">
-                      We&apos;ll send a confirmation with your verification code. You&apos;ll manage this event in this browser until you connect a wallet.
+                      Your email is your <span className="text-white/55 font-semibold">organizer account</span> — like a wallet for hosts. After you create an event, we save it on this device so you can open QR, roster, and export without signing in again.
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => commitOrganizerEmailSession(form.organizerEmail)}
+                      className="w-full py-2 border border-white/15 text-[8px] font-bold tracking-[0.2em] uppercase text-white/60 hover:text-white hover:border-white/25 transition-colors"
+                    >
+                      Save organizer email on this device (before or after creating)
+                    </button>
                   </div>
                 )}
 
@@ -1409,6 +1626,37 @@ function HomeContent() {
                       onChange={e => setForm(f => ({ ...f, maxAttendees: e.target.value }))}
                       placeholder="Leave empty for unlimited"
                       className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
+                    />
+                  </div>
+
+                  <div className="space-y-2 p-4 border border-white/10 bg-white/[0.02] rounded-sm">
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
+                      Ticket price (USDC on Base) — optional
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={form.ticketPriceUsdc}
+                      onChange={e => setForm(f => ({ ...f, ticketPriceUsdc: e.target.value }))}
+                      placeholder="0 = free"
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm [color-scheme:dark]"
+                    />
+                    <p className="text-[8px] text-white/30 leading-relaxed">
+                      Wallet registrants pay this amount in USDC to your treasury. For email-only events, add mobile-money instructions so attendees can pay locally and paste a reference.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
+                      Mobile money instructions (optional)
+                    </label>
+                    <textarea
+                      value={form.mobileMoneyInstructions}
+                      onChange={e => setForm(f => ({ ...f, mobileMoneyInstructions: e.target.value }))}
+                      placeholder="For attendees paying with MTN / Airtel MoMo: number, amount in local currency, what reference to use…"
+                      rows={3}
+                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm resize-none"
                     />
                   </div>
 
@@ -1723,9 +1971,27 @@ function HomeContent() {
                   )}
                 </div>
 
+                {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && (
+                  <div className="p-4 border border-blue-500/25 bg-blue-500/[0.06] space-y-2">
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400/95 font-black">Ticket</p>
+                    <p className="text-[11px] text-white/80 leading-relaxed">
+                      <strong className="text-white">{selectedEvent.ticketPriceUsdc} USDC</strong> on Base when you register with a wallet.
+                      {selectedEvent.mobileMoneyInstructions
+                        ? ' You can also follow the mobile-money steps below and submit a reference when signing up with email.'
+                        : ' Add mobile-money instructions when creating the event if you want local payments.'}
+                    </p>
+                    {selectedEvent.mobileMoneyInstructions ? (
+                      <div className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed border border-white/10 p-3 bg-black/40 font-sans">
+                        {selectedEvent.mobileMoneyInstructions}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
                 {/* Non-blockchain event: normal email signup (no wallet required) */}
                 {selectedEvent.isBlockchain === false ? (
                   <div className="space-y-6">
+                    {renderEmailOrganizerAccessGate()}
                     {renderOrganizerEventPanel()}
                     {!isUserRegistered ? (
                       isPast(selectedEvent.date, selectedEvent.endDate) ? (
@@ -1760,6 +2026,21 @@ function HomeContent() {
                               className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                             />
                           </div>
+                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && (
+                            <div className="space-y-2">
+                              <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
+                                Mobile-money reference * (after payment)
+                              </label>
+                              <input
+                                type="text"
+                                required
+                                value={normalPayRef}
+                                onChange={e => setNormalPayRef(e.target.value)}
+                                placeholder="Transaction ID from your provider"
+                                className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                              />
+                            </div>
+                          )}
                           <button
                             type="submit"
                             disabled={registering}
@@ -1835,6 +2116,7 @@ function HomeContent() {
                   </button>
                 ) : (
                   <div className="space-y-6">
+                    {renderEmailOrganizerAccessGate()}
                     {renderOrganizerEventPanel()}
 
                     {/* Action Button: Register first, then Verify only when event has started and is not past */}
@@ -1854,6 +2136,11 @@ function HomeContent() {
                           </p>
                           <p className="text-[9px] text-white/35 leading-relaxed">
                             Connect your wallet, then add how we should list you and your email for confirmations.
+                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
+                              <span className="block mt-2 text-amber-400/90">
+                                This ticket costs {selectedEvent.ticketPriceUsdc} USDC on Base — your wallet will be prompted to pay when you register.
+                              </span>
+                            ) : null}
                           </p>
                           <div className="space-y-2">
                             <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">

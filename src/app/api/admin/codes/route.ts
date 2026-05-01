@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { generateCode, getCodes } from '@/lib/codes';
+import { verifyAdminCookieFromStore } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+    if (!(await verifyAdminCookieFromStore())) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     try {
         const codes = await getCodes();
         return NextResponse.json(codes, {
@@ -15,6 +19,9 @@ export async function GET() {
 }
 
 export async function POST() {
+    if (!(await verifyAdminCookieFromStore())) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     try {
         const code = await generateCode();
         return NextResponse.json({ code });

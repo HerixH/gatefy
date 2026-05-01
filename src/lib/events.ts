@@ -26,6 +26,10 @@ export interface Event {
     vipMinBalance?: string;
     bannerUrl?: string;
     isBlockchain?: boolean;
+    /** USDC on Base per ticket; undefined / 0 = free registration */
+    ticketPriceUsdc?: number;
+    /** Organizer instructions for mobile money (MTN MoMo, etc.) */
+    mobileMoneyInstructions?: string;
 }
 
 type EventRow = {
@@ -46,6 +50,8 @@ type EventRow = {
     banner_url: string | null;
     is_blockchain: boolean | null;
     organizer_display_name: string | null;
+    ticket_price_usdc?: number | string | null;
+    mobile_money_instructions?: string | null;
 };
 
 /** DB / drivers may return boolean or string; null/undefined defaults to wallet (blockchain) mode. */
@@ -53,6 +59,25 @@ export function normalizeIsBlockchain(value: unknown): boolean {
     if (value === false || value === 'false' || value === 0) return false;
     if (value === true || value === 'true' || value === 1) return true;
     return true;
+}
+
+/** Coerce DB numeric/string to finite USDC price or undefined. */
+function parseTicketPrice(v: unknown): number | undefined {
+    if (v == null || v === '') return undefined;
+    const n = typeof v === 'number' ? v : parseFloat(String(v));
+    if (!Number.isFinite(n) || n <= 0) return undefined;
+    return n;
+}
+
+const MISSING_PAID_TICKET_COLUMNS_HINT =
+    'Paid ticket fields require DB columns. In Supabase Dashboard → SQL Editor, run:\n\n' +
+    'alter table public.events add column if not exists ticket_price_usdc numeric;\n' +
+    'alter table public.events add column if not exists mobile_money_instructions text;\n' +
+    "notify pgrst, 'reload schema';\n";
+
+function isMissingPaidTicketColumnError(err: { message?: string }): boolean {
+    const m = err.message ?? '';
+    return m.includes('schema cache') && (m.includes('ticket_price_usdc') || m.includes('mobile_money_instructions'));
 }
 
 function rowToEvent(r: EventRow): Event {
@@ -74,6 +99,8 @@ function rowToEvent(r: EventRow): Event {
         bannerUrl: r.banner_url ?? undefined,
         isBlockchain: normalizeIsBlockchain(r.is_blockchain),
         organizerDisplayName: r.organizer_display_name ?? undefined,
+        ticketPriceUsdc: parseTicketPrice(r.ticket_price_usdc),
+        mobileMoneyInstructions: r.mobile_money_instructions?.trim() || undefined,
     };
 }
 
@@ -109,6 +136,12 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
 
     if (isSupabaseConfigured) {
         const supabase = getSupabase();
+        const usdcPrice = parseTicketPrice(event.ticketPriceUsdc);
+        const momo = event.mobileMoneyInstructions?.trim();
+        const ticketCols: Record<string, string | number> = {};
+        if (usdcPrice !== undefined) ticketCols.ticket_price_usdc = usdcPrice;
+        if (momo) ticketCols.mobile_money_instructions = momo;
+
         const { error } = await supabase.from('events').insert({
             id: event.id,
             name: event.name,
@@ -127,8 +160,12 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
             banner_url: (data as Event & { bannerUrl?: string }).bannerUrl ?? null,
             is_blockchain: event.isBlockchain ?? true,
             organizer_display_name: event.organizerDisplayName ?? null,
+            ...ticketCols,
         });
-        if (error) throw error;
+        if (error) {
+            if (isMissingPaidTicketColumnError(error)) throw new Error(MISSING_PAID_TICKET_COLUMNS_HINT);
+            throw error;
+        }
         return event;
     }
 

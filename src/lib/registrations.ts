@@ -71,7 +71,8 @@ export async function getRegistrationForEvent(
 export async function registerForEvent(
     eventId: string,
     wallet: string,
-    details?: { email?: string; name?: string }
+    details?: { email?: string; name?: string },
+    payment?: { txHash?: string; mobileRef?: string }
 ): Promise<boolean> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     const cleanEventId = eventId.trim().toLowerCase();
@@ -83,17 +84,42 @@ export async function registerForEvent(
     const email = details?.email?.trim().toLowerCase();
     const displayName = details?.name?.trim() || null;
 
-    const { error } = await getSupabase().from('registrations').insert({
+    const paidAt = new Date().toISOString();
+    let payment_status = 'none';
+    let payment_tx_hash: string | null = null;
+    let payment_reference: string | null = null;
+    if (payment?.txHash?.trim()) {
+        payment_status = 'paid_crypto';
+        payment_tx_hash = payment.txHash.trim();
+    } else if (payment?.mobileRef?.trim()) {
+        payment_status = 'paid_mobile';
+        payment_reference = payment.mobileRef.trim();
+    }
+
+    const insertRow: Record<string, unknown> = {
         event_id: cleanEventId,
         wallet: cleanWallet,
         email: email || null,
         name: displayName,
-    });
+    };
+    if (payment_status !== 'none') {
+        insertRow.payment_status = payment_status;
+        insertRow.payment_tx_hash = payment_tx_hash;
+        insertRow.payment_reference = payment_reference;
+        insertRow.paid_at = paidAt;
+    }
+
+    const { error } = await getSupabase().from('registrations').insert(insertRow);
     if (error) throw error;
     return true;
 }
 
-export async function registerForEventWithEmail(eventId: string, email: string, name?: string): Promise<boolean> {
+export async function registerForEventWithEmail(
+    eventId: string,
+    email: string,
+    name?: string,
+    payment?: { txHash?: string; mobileRef?: string }
+): Promise<boolean> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     const cleanEventId = eventId.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
@@ -101,11 +127,31 @@ export async function registerForEventWithEmail(eventId: string, email: string, 
     const { data: existing } = await getSupabase().from('registrations').select('event_id').eq('event_id', cleanEventId).ilike('email', cleanEmail).maybeSingle();
     if (existing) return false;
 
-    const { error } = await getSupabase().from('registrations').insert({
+    const paidAt = new Date().toISOString();
+    let payment_status = 'none';
+    let payment_tx_hash: string | null = null;
+    let payment_reference: string | null = null;
+    if (payment?.txHash?.trim()) {
+        payment_status = 'paid_crypto';
+        payment_tx_hash = payment.txHash.trim();
+    } else if (payment?.mobileRef?.trim()) {
+        payment_status = 'paid_mobile';
+        payment_reference = payment.mobileRef.trim();
+    }
+
+    const insertRow: Record<string, unknown> = {
         event_id: cleanEventId,
         email: cleanEmail,
         name: name?.trim() || null,
-    });
+    };
+    if (payment_status !== 'none') {
+        insertRow.payment_status = payment_status;
+        insertRow.payment_tx_hash = payment_tx_hash;
+        insertRow.payment_reference = payment_reference;
+        insertRow.paid_at = paidAt;
+    }
+
+    const { error } = await getSupabase().from('registrations').insert(insertRow);
     if (error) throw error;
     return true;
 }

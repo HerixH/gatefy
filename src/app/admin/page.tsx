@@ -1,25 +1,19 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 
-interface ClaimCode {
-    code: string;
-    used: boolean;
-    createdAt: string;
-    usedAt?: string;
-    usedBy?: string;
-}
-
 interface AttendanceRecord {
-    wallet: string;
+    wallet?: string | null;
+    email?: string | null;
     code: string;
     checkedInAt: string;
     eventId?: string;
 }
 
-interface Event {
+interface DashboardEvent {
     id: string;
     name: string;
     description: string;
@@ -29,67 +23,94 @@ interface Event {
     verificationCode: string;
     createdAt: string;
     attendeeCount: number;
+    registrationCount?: number;
+    maxAttendees?: number;
     isVip?: boolean;
     vipTokenAddress?: string;
     vipMinBalance?: string;
+    isBlockchain?: boolean;
 }
 
 interface Registration {
     eventId: string;
-    wallet: string;
+    wallet: string | null;
+    email: string | null;
+    name: string | null;
     registeredAt: string;
 }
 
-const ADMIN_PASSWORD = 'gatefy-admin-2026';
-
-type Tab = 'overview' | 'attendance' | 'events' | 'codes';
+type Tab = 'overview' | 'attendance' | 'events';
 
 export default function AdminDashboard() {
     const [authed, setAuthed] = useState(false);
+    const [sessionChecked, setSessionChecked] = useState(false);
+    const [adminConfigured, setAdminConfigured] = useState(true);
     const [password, setPassword] = useState('');
     const [authError, setAuthError] = useState(false);
     const [tab, setTab] = useState<Tab>('overview');
-    const [codes, setCodes] = useState<ClaimCode[]>([]);
     const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
     const [registrations, setRegistrations] = useState<Registration[]>([]);
-    const [events, setEvents] = useState<Event[]>([]);
+    const [events, setEvents] = useState<DashboardEvent[]>([]);
     const [attendanceCollapsed, setAttendanceCollapsed] = useState<Record<string, boolean>>({});
-    const [loading, setLoading] = useState(false);
-    const [generatedCode, setGeneratedCode] = useState<string | null>(null);
-    const [selectedEventQR, setSelectedEventQR] = useState<Event | null>(null);
+    const [selectedEventQR, setSelectedEventQR] = useState<DashboardEvent | null>(null);
+    const [selectedEventDetail, setSelectedEventDetail] = useState<DashboardEvent | null>(null);
 
     // Interactivity: Search & Filter
     const [searchQuery, setSearchQuery] = useState('');
     const [filterType, setFilterType] = useState<'all' | 'vip' | 'regular'>('all');
 
     useEffect(() => {
-        if (authed) {
-            fetchCodes();
-            fetchAttendance();
-            fetchRegistrations();
-            fetchEvents();
-        }
+        fetch('/api/admin/session', { credentials: 'include' })
+            .then(r => r.json())
+            .then((d: { authenticated?: boolean; configured?: boolean }) => {
+                if (d.configured === false) setAdminConfigured(false);
+                if (d.authenticated) setAuthed(true);
+            })
+            .catch(() => {})
+            .finally(() => setSessionChecked(true));
+    }, []);
+
+    useEffect(() => {
+        if (!authed) return;
+        fetchAttendance();
+        fetchRegistrations();
+        fetchEvents();
     }, [authed]);
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (password === ADMIN_PASSWORD) {
-            setAuthed(true);
-            setAuthError(false);
-        } else {
+        setAuthError(false);
+        try {
+            const res = await fetch('/api/admin/session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ password }),
+            });
+            if (res.ok) {
+                setAuthed(true);
+                setPassword('');
+            } else {
+                setAuthError(true);
+                setPassword('');
+            }
+        } catch {
             setAuthError(true);
             setPassword('');
         }
     };
 
-    const fetchCodes = async () => {
-        const res = await fetch('/api/admin/codes', { cache: 'no-store' });
-        const data = await res.json();
-        if (Array.isArray(data)) setCodes(data);
+    const handleLogout = async () => {
+        await fetch('/api/admin/session', { method: 'DELETE', credentials: 'include' });
+        setAuthed(false);
     };
 
     const fetchAttendance = async () => {
-        const res = await fetch('/api/admin/attendance', { cache: 'no-store' });
+        const res = await fetch('/api/admin/attendance', { cache: 'no-store', credentials: 'include' });
+        if (res.status === 401) {
+            setAuthed(false);
+            return;
+        }
         const data = await res.json();
         if (Array.isArray(data)) setAttendance(data);
     };
@@ -101,25 +122,14 @@ export default function AdminDashboard() {
     };
 
     const fetchRegistrations = async () => {
-        const res = await fetch('/api/admin/registrations', { cache: 'no-store' });
+        const res = await fetch('/api/admin/registrations', { cache: 'no-store', credentials: 'include' });
+        if (res.status === 401) {
+            setAuthed(false);
+            return;
+        }
         const data = await res.json();
         if (Array.isArray(data)) setRegistrations(data);
     };
-
-    const handleGenerate = async () => {
-        setLoading(true);
-        try {
-            const res = await fetch('/api/admin/codes', { method: 'POST' });
-            const data = await res.json();
-            setGeneratedCode(data.code);
-            await fetchCodes();
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const usedCount = codes.filter(c => c.used).length;
-    const activeCount = codes.filter(c => !c.used).length;
 
     // Export Logic
     const exportToCSV = (data: any[], filename: string) => {
@@ -153,7 +163,8 @@ export default function AdminDashboard() {
     });
 
     const filteredAttendance = attendance.filter(record =>
-        record.wallet?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (record.wallet ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (record.email ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         record.code.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -182,12 +193,22 @@ export default function AdminDashboard() {
     function getRegisteredOnly(eventId: string): Registration[] {
         if (eventId === LEGACY_EVENT_KEY) return [];
         const verifiedRecords = groupedAttendance[eventId] || [];
-        const attendedWallets = new Set(verifiedRecords.map(r => (r.wallet ?? '').toLowerCase()));
-        return registrations.filter(
-            r =>
-                (r.eventId ?? '').toLowerCase() === eventId.toLowerCase() &&
-                !attendedWallets.has((r.wallet ?? '').toLowerCase())
+        const attendedWallets = new Set(
+            verifiedRecords.map(r => (r.wallet ?? '').toLowerCase()).filter(Boolean)
         );
+        const attendedEmails = new Set(
+            verifiedRecords.map(r => (r.email ?? '').toLowerCase()).filter(Boolean)
+        );
+        return registrations.filter(r => {
+            if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
+            if (r.wallet?.trim()) {
+                return !attendedWallets.has(r.wallet.toLowerCase());
+            }
+            if (r.email?.trim()) {
+                return !attendedEmails.has(r.email.toLowerCase());
+            }
+            return false;
+        });
     }
 
     const toggleAttendanceSection = (eventId: string) => {
@@ -195,28 +216,41 @@ export default function AdminDashboard() {
     };
 
     const exportAttendanceReport = () => {
-        const rows: { Event: string; Wallet: string; Status: string; 'Auth Code': string; Timestamp: string }[] = [];
-        const eventName = (id: string) => (id === LEGACY_EVENT_KEY ? 'Legacy / Direct Imprints' : (events.find(e => e.id === id || e.id.toLowerCase() === id)?.name ?? id));
+        const rows: { Event: string; Identity: string; Status: string; 'Auth Code': string; Timestamp: string }[] = [];
+        const eventName = (id: string) => (id === LEGACY_EVENT_KEY ? 'Legacy check-ins' : (events.find(e => e.id === id || e.id.toLowerCase() === id)?.name ?? id));
         attendance.forEach(record => {
+            const id = record.wallet?.trim() || record.email?.trim() || '—';
             rows.push({
                 Event: eventName(record.eventId || LEGACY_EVENT_KEY),
-                Wallet: record.wallet || 'Anonymous_Origin',
+                Identity: id,
                 Status: 'Verified',
                 'Auth Code': record.code,
                 Timestamp: new Date(record.checkedInAt).toLocaleString('en-GB'),
             });
         });
         registrations.forEach(reg => {
-            const attended = attendance.some(
-                a =>
-                    a.eventId &&
-                    (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
-                    (a.wallet ?? '').toLowerCase() === (reg.wallet ?? '').toLowerCase()
-            );
-            if (!attended) {
+            const regWallet = reg.wallet;
+            const walletHit =
+                !!regWallet &&
+                attendance.some(
+                    a =>
+                        a.eventId &&
+                        (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
+                        (a.wallet ?? '').toLowerCase() === regWallet.toLowerCase()
+                );
+            const regEmail = reg.email;
+            const emailHit =
+                !!regEmail &&
+                attendance.some(
+                    a =>
+                        a.eventId &&
+                        (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
+                        (a.email ?? '').toLowerCase() === regEmail.toLowerCase()
+                );
+            if (!walletHit && !emailHit) {
                 rows.push({
                     Event: events.find(e => e.id.toLowerCase() === (reg.eventId ?? '').toLowerCase())?.name ?? reg.eventId,
-                    Wallet: reg.wallet,
+                    Identity: reg.wallet?.trim() || reg.email?.trim() || '—',
                     Status: 'Registered only',
                     'Auth Code': '-',
                     Timestamp: new Date(reg.registeredAt).toLocaleString('en-GB'),
@@ -227,12 +261,66 @@ export default function AdminDashboard() {
         exportToCSV(rows, 'gatefy-attendance-report.csv');
     };
 
-    const filteredCodes = codes.filter(c =>
-        c.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.usedBy?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const shortIdentity = (wallet?: string | null, email?: string | null) => {
+        const raw = wallet?.trim() || email?.trim() || '—';
+        if (raw.length <= 24) return raw;
+        return `${raw.slice(0, 10)}…${raw.slice(-8)}`;
+    };
+
+    const getVerifiedForEvent = (eventId: string) =>
+        attendance
+            .filter(a => a.eventId && a.eventId.toLowerCase() === eventId.toLowerCase())
+            .sort((x, y) => new Date(y.checkedInAt).getTime() - new Date(x.checkedInAt).getTime());
+
+    const getRegisteredOnlyForEvent = (eventId: string): Registration[] => {
+        const verified = getVerifiedForEvent(eventId);
+        const attendedWallets = new Set(verified.map(r => (r.wallet ?? '').toLowerCase()).filter(Boolean));
+        const attendedEmails = new Set(verified.map(r => (r.email ?? '').toLowerCase()).filter(Boolean));
+        return registrations.filter(r => {
+            if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
+            if (r.wallet?.trim()) return !attendedWallets.has(r.wallet.toLowerCase());
+            if (r.email?.trim()) return !attendedEmails.has(r.email.toLowerCase());
+            return false;
+        });
+    };
+
+    const exportEventRoster = (ev: DashboardEvent) => {
+        const verified = getVerifiedForEvent(ev.id);
+        const onlyReg = getRegisteredOnlyForEvent(ev.id);
+        const rows: { Status: string; Identity: string; Name: string; Email: string; Code: string; Timestamp: string }[] = [];
+        verified.forEach(v => {
+            rows.push({
+                Status: 'Verified',
+                Identity: v.wallet?.trim() || v.email?.trim() || '—',
+                Name: '—',
+                Email: (v.email ?? '').trim() || '—',
+                Code: v.code,
+                Timestamp: new Date(v.checkedInAt).toLocaleString('en-GB'),
+            });
+        });
+        onlyReg.forEach(r => {
+            rows.push({
+                Status: 'Registered only',
+                Identity: r.wallet?.trim() || r.email?.trim() || '—',
+                Name: (r.name ?? '').trim() || '—',
+                Email: (r.email ?? '').trim() || '—',
+                Code: '-',
+                Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
+            });
+        });
+        if (rows.length === 0) return;
+        exportToCSV(rows, `gatefy-roster-${ev.name.replace(/\s+/g, '-').toLowerCase().slice(0, 40)}.csv`);
+    };
 
     // ── LOGIN SCREEN ────────────────────────────────────────────────────────
+    if (!sessionChecked) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] text-white/40 text-[10px] uppercase tracking-widest">
+                Loading…
+            </div>
+        );
+    }
+
     if (!authed) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-[#0a0a0a] relative overflow-hidden">
@@ -277,6 +365,11 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="bg-white/[0.03] border border-white/10 p-10 backdrop-blur-xl">
+                        {!adminConfigured && (
+                            <p className="text-[9px] tracking-[0.2em] uppercase text-amber-400/90 font-bold mb-6 leading-relaxed">
+                                Server misconfiguration: add <span className="font-mono">ADMIN_DASHBOARD_PASSWORD</span> to <span className="font-mono">.env.local</span>, then restart the dev server.
+                            </p>
+                        )}
                         <form onSubmit={handleLogin} className="space-y-8">
                             <div className="space-y-3">
                                 <label className="block text-[9px] tracking-[0.35em] uppercase text-white/30 font-bold">Authorization Key</label>
@@ -296,10 +389,13 @@ export default function AdminDashboard() {
                                     )}
                                 </AnimatePresence>
                             </div>
-                            <button type="submit" className="w-full bg-white text-black py-4 text-xs tracking-[0.25em] uppercase font-bold hover:bg-white/90 transition-colors active:scale-[0.98]">
+                            <button type="submit" disabled={!adminConfigured} className="w-full bg-white text-black py-4 text-xs tracking-[0.25em] uppercase font-bold hover:bg-white/90 transition-colors active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none">
                                 Authenticate
                             </button>
                         </form>
+                        <p className="mt-8 text-center">
+                            <Link href="/" className="text-[9px] tracking-[0.3em] uppercase text-white/30 hover:text-white font-bold">← Back to site</Link>
+                        </p>
                     </div>
                 </motion.div>
             </div>
@@ -310,7 +406,8 @@ export default function AdminDashboard() {
         <div className="min-h-screen bg-[#070707] text-white selection:bg-white selection:text-black">
             {/* Header / Nav */}
             <header className="fixed top-0 left-0 right-0 z-[100] h-16 flex items-center px-6 lg:px-12 border-b border-white/[0.04] bg-black/80 backdrop-blur-3xl">
-                <div className="flex items-center gap-3 mr-16">
+                <div className="flex items-center gap-3 mr-8 lg:mr-16">
+                    <Link href="/" className="text-[8px] tracking-[0.25em] uppercase text-white/35 hover:text-white font-bold hidden sm:inline">Home</Link>
                     <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="shrink-0">
                         <defs>
                             <filter id="admin-glow" x="-40%" y="-40%" width="180%" height="180%">
@@ -331,7 +428,7 @@ export default function AdminDashboard() {
                 </div>
 
                 <nav className="hidden md:flex items-center gap-2">
-                    {(['overview', 'attendance', 'events', 'codes'] as Tab[]).map(t => (
+                    {(['overview', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
                             onClick={() => { setTab(t); setSearchQuery(''); }}
@@ -345,7 +442,7 @@ export default function AdminDashboard() {
                 </nav>
 
                 <div className="md:hidden flex items-center gap-1 overflow-x-auto no-scrollbar">
-                    {(['overview', 'attendance', 'events', 'codes'] as Tab[]).map(t => (
+                    {(['overview', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
                             onClick={() => { setTab(t); setSearchQuery(''); }}
@@ -363,7 +460,7 @@ export default function AdminDashboard() {
                         <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
                         <span className="text-[9px] tracking-[0.25em] uppercase text-white/40 font-bold">Terminal Auth: Active</span>
                     </div>
-                    <button onClick={() => setAuthed(false)} className="text-[9px] tracking-[0.25em] uppercase text-white/30 hover:text-red-400 transition-colors font-bold">Logout</button>
+                    <button type="button" onClick={handleLogout} className="text-[9px] tracking-[0.25em] uppercase text-white/30 hover:text-red-400 transition-colors font-bold">Logout</button>
                 </div>
             </header>
 
@@ -385,46 +482,13 @@ export default function AdminDashboard() {
                                 <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Verification Events</p>
                             </motion.div>
 
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
-                                    <p className="text-2xl font-bold mb-1">{events.length}</p>
-                                    <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Pools</p>
-                                </div>
-                                <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
-                                    <p className="text-2xl font-bold mb-1">{activeCount}</p>
-                                    <p className="text-[8px] tracking-[0.2em] uppercase text-green-500/50 font-bold">V-Codes</p>
-                                </div>
+                            <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
+                                <p className="text-2xl font-bold mb-1">{events.length}</p>
+                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Pools</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="space-y-6">
-                        <p className="text-[10px] uppercase tracking-[0.4em] font-black text-white/20">Protocol Actions</p>
-                        <button
-                            onClick={handleGenerate}
-                            disabled={loading}
-                            className="w-full bg-white text-black py-4 text-[10px] tracking-[0.3em] uppercase font-black hover:bg-neutral-200 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-3"
-                        >
-                            {loading ? 'Processing...' : (
-                                <>
-                                    <span>+</span>
-                                    <span>Create Imprint</span>
-                                </>
-                            )}
-                        </button>
-
-                        <AnimatePresence>
-                            {generatedCode && (
-                                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="p-6 border border-blue-500/20 bg-blue-500/[0.03]">
-                                    <div className="bg-white p-2 mb-4">
-                                        <QRCodeCanvas value={generatedCode} size={250} style={{ width: '100%', height: 'auto' }} />
-                                    </div>
-                                    <p className="text-center font-mono text-xl tracking-[0.3em] mb-4">{generatedCode}</p>
-                                    <button onClick={() => setGeneratedCode(null)} className="w-full text-[8px] tracking-[0.3em] uppercase text-blue-400 font-bold border border-blue-500/20 py-2">Dismiss Buffer</button>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
                 </aside>
 
                 {/* Main Dynamic Panel */}
@@ -440,13 +504,9 @@ export default function AdminDashboard() {
                                 className="w-full bg-white/[0.02] border border-white/[0.06] px-8 py-5 text-sm font-mono tracking-widest placeholder:text-white/30 focus:outline-none focus:border-white/20 transition-all font-bold"
                             />
                             <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-4">
-                                {(tab === 'attendance' || tab === 'codes') && (
+                                {tab === 'attendance' && (
                                     <button
-                                        onClick={() =>
-                                            tab === 'attendance'
-                                                ? exportAttendanceReport()
-                                                : exportToCSV(filteredCodes, 'gatefy-codes-export.csv')
-                                        }
+                                        onClick={() => exportAttendanceReport()}
                                         className="px-4 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors bg-white text-black hover:bg-neutral-200 mr-2"
                                     >
                                         Export CSV
@@ -490,7 +550,7 @@ export default function AdminDashboard() {
                                                         <div className="flex items-center gap-4">
                                                             <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" />
                                                             <div>
-                                                                <p className="text-[11px] font-mono text-white/80">{act.wallet.slice(0, 12)}...{act.wallet.slice(-8)}</p>
+                                                                <p className="text-[11px] font-mono text-white/80">{shortIdentity(act.wallet, act.email)}</p>
                                                                 <p className="text-[8px] tracking-[0.2em] uppercase text-white/20 font-bold mt-1">Presence Verified @ {act.code}</p>
                                                             </div>
                                                         </div>
@@ -504,21 +564,27 @@ export default function AdminDashboard() {
                                     <div className="space-y-6">
                                         <p className="text-[10px] uppercase tracking-[0.4em] font-black text-white/20">Event Pool Density</p>
                                         <div className="border border-white/[0.04] bg-white/[0.01] p-8 space-y-8">
-                                            {events.slice(0, 3).map(ev => (
+                                            {events.slice(0, 3).map(ev => {
+                                                const cap = ev.maxAttendees && ev.maxAttendees > 0 ? ev.maxAttendees : 100;
+                                                const pct = Math.min((ev.attendeeCount / cap) * 100, 100);
+                                                return (
                                                 <div key={ev.id} className="space-y-3">
                                                     <div className="flex justify-between items-end">
                                                         <p className="text-xs font-bold tracking-tight uppercase">{ev.name}</p>
-                                                        <p className="text-[10px] font-mono text-white/40">{ev.attendeeCount} / 100</p>
+                                                        <p className="text-[10px] font-mono text-white/40">
+                                                            {ev.attendeeCount}
+                                                            {ev.maxAttendees != null && ev.maxAttendees > 0 ? ` / ${ev.maxAttendees}` : ' verified'}
+                                                        </p>
                                                     </div>
                                                     <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
                                                         <motion.div
                                                             initial={{ width: 0 }}
-                                                            animate={{ width: `${Math.min((ev.attendeeCount / 100) * 100, 100)}%` }}
+                                                            animate={{ width: `${pct}%` }}
                                                             className="absolute inset-y-0 left-0 bg-white"
                                                         />
                                                     </div>
                                                 </div>
-                                            ))}
+                                            );})}
                                             {events.length === 0 && <p className="text-[10px] text-white/10 italic text-center py-12">No active pools</p>}
                                         </div>
                                     </div>
@@ -531,7 +597,7 @@ export default function AdminDashboard() {
                             <motion.div key="attendance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
                                 <div className="border border-white/[0.06] overflow-hidden">
                                     <div className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-4 border-b border-white/[0.08] bg-white/[0.03]">
-                                        <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Entity Pointer (Wallet)</span>
+                                        <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Wallet / email</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Event / Source</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Auth Code</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Timestamp</span>
@@ -563,7 +629,7 @@ export default function AdminDashboard() {
                                                                 </span>
                                                                 <div className="flex flex-col">
                                                                     <span className="text-[9px] tracking-[0.4em] uppercase text-white/50 font-black">
-                                                                        {ev?.name || 'Legacy / Direct Imprints'}
+                                                                        {ev?.name || 'Legacy check-ins'}
                                                                     </span>
                                                                     {ev && (
                                                                         <span className="text-[9px] font-mono text-white/30">
@@ -596,11 +662,11 @@ export default function AdminDashboard() {
                                                                             className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-5 items-center hover:bg-white/[0.01] transition-colors group border-t border-white/[0.02]"
                                                                         >
                                                                             <span className="font-mono text-xs text-white/60 group-hover:text-white transition-colors">
-                                                                                {record.wallet || 'Anonymous_Origin'}
+                                                                                {shortIdentity(record.wallet, record.email)}
                                                                             </span>
                                                                             <span className="text-[10px] uppercase tracking-wider text-white/40">
                                                                                 {record.eventId
-                                                                                    ? (events.find(e => e.id === record.eventId)?.name || 'Direct_Imprint')
+                                                                                    ? (events.find(e => e.id === record.eventId)?.name || 'Unscoped')
                                                                                     : 'Legacy_Entry'}
                                                                             </span>
                                                                             <span className="font-mono text-sm tracking-[0.2em] text-blue-400 font-bold">{record.code}</span>
@@ -623,7 +689,7 @@ export default function AdminDashboard() {
                                                                                     className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-4 items-center hover:bg-white/[0.01] transition-colors group border-t border-white/[0.02]"
                                                                                 >
                                                                                     <span className="font-mono text-xs text-white/50 group-hover:text-white/70 transition-colors">
-                                                                                        {reg.wallet}
+                                                                                        {shortIdentity(reg.wallet, reg.email)}
                                                                                     </span>
                                                                                     <span className="text-[10px] uppercase tracking-wider text-amber-400/60">
                                                                                         {ev?.name ?? reg.eventId}
@@ -652,41 +718,54 @@ export default function AdminDashboard() {
 
                         {/* EVENTS TAB */}
                         {tab === 'events' && (
-                            <motion.div key="events" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
-                                <div className="grid grid-cols-1 gap-4">
+                            <motion.div key="events" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-2">
+                                <div className="grid grid-cols-1 gap-2">
                                     {filteredEvents.map((ev, i) => (
                                         <motion.div
                                             key={ev.id}
+                                            role="button"
+                                            tabIndex={0}
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ delay: i * 0.05 }}
-                                            className="p-8 border border-white/[0.06] bg-white/[0.01] group hover:bg-white/[0.03] transition-all flex items-center justify-between"
+                                            onClick={() => setSelectedEventDetail(ev)}
+                                            onKeyDown={e => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.preventDefault();
+                                                    setSelectedEventDetail(ev);
+                                                }
+                                            }}
+                                            className="px-4 py-3 border border-white/[0.06] bg-white/[0.01] group hover:bg-white/[0.06] transition-all flex items-center justify-between gap-4 cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-white/30"
                                         >
-                                            <div className="space-y-4">
-                                                <div className="flex items-center gap-4">
-                                                    <div className={`w-1 h-1 rounded-full ${new Date(ev.date) >= new Date() ? 'bg-green-500 animate-pulse' : 'bg-white/20'}`} />
-                                                    <h3 className="text-xl font-bold tracking-tight group-hover:tracking-wider transition-all uppercase">{ev.name}</h3>
-                                                    {ev.isVip && <span className="text-[8px] px-2 py-0.5 border border-yellow-500/30 text-yellow-500 font-black tracking-widest uppercase bg-yellow-500/5">VIP Exclusive</span>}
+                                            <div className="space-y-2 min-w-0">
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <div className={`w-1 h-1 shrink-0 rounded-full ${new Date(ev.date) >= new Date() ? 'bg-green-500 animate-pulse' : 'bg-white/20'}`} />
+                                                    <h3 className="text-sm font-bold tracking-tight group-hover:tracking-wide transition-all uppercase truncate">{ev.name}</h3>
+                                                    {ev.isVip && <span className="text-[7px] px-1.5 py-0.5 border border-yellow-500/30 text-yellow-500 font-black tracking-widest uppercase bg-yellow-500/5">VIP Exclusive</span>}
                                                 </div>
-                                                <div className="flex gap-8">
-                                                    <div className="space-y-1">
-                                                        <p className="text-[8px] uppercase tracking-[0.2em] text-white/30 font-bold">Location</p>
-                                                        <p className="text-[10px] font-mono text-white/60 uppercase">{ev.location || 'N/A'}</p>
+                                                <div className="flex flex-wrap gap-x-5 gap-y-1">
+                                                    <div className="space-y-0.5">
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Location</p>
+                                                        <p className="text-[9px] font-mono text-white/60 uppercase">{ev.location || 'N/A'}</p>
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        <p className="text-[8px] uppercase tracking-[0.2em] text-white/30 font-bold">Organizer</p>
-                                                        <p className="text-[10px] font-mono text-white/60">{ev.organizer.slice(0, 8)}...{ev.organizer.slice(-6)}</p>
+                                                    <div className="space-y-0.5">
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Organizer</p>
+                                                        <p className="text-[9px] font-mono text-white/60">{ev.organizer.slice(0, 8)}...{ev.organizer.slice(-6)}</p>
                                                     </div>
-                                                    <div className="space-y-1">
-                                                        <p className="text-[8px] uppercase tracking-[0.2em] text-white/30 font-bold">Pool Stats</p>
-                                                        <p className="text-[10px] font-mono text-white/60">{ev.attendeeCount} Verified</p>
+                                                    <div className="space-y-0.5">
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Pool Stats</p>
+                                                        <p className="text-[9px] font-mono text-white/60">{ev.attendeeCount} Verified</p>
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="flex gap-4">
+                                            <div className="shrink-0">
                                                 <button
-                                                    onClick={() => setSelectedEventQR(ev)}
-                                                    className="px-6 py-3 border border-white/10 hover:bg-white hover:text-black text-[9px] font-black tracking-[0.3em] uppercase transition-all"
+                                                    type="button"
+                                                    onClick={e => {
+                                                        e.stopPropagation();
+                                                        setSelectedEventQR(ev);
+                                                    }}
+                                                    className="px-3 py-1.5 border border-white/10 hover:bg-white hover:text-black text-[8px] font-black tracking-[0.25em] uppercase transition-all whitespace-nowrap"
                                                 >
                                                     Pool QR
                                                 </button>
@@ -700,37 +779,129 @@ export default function AdminDashboard() {
                             </motion.div>
                         )}
 
-                        {/* CODES TAB */}
-                        {tab === 'codes' && (
-                            <motion.div key="codes" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
-                                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
-                                    {filteredCodes.map((code, i) => (
-                                        <motion.div
-                                            key={code.code}
-                                            initial={{ opacity: 0, scale: 0.95 }}
-                                            animate={{ opacity: 1, scale: 1 }}
-                                            transition={{ delay: i * 0.02 }}
-                                            className={`p-6 border transition-all ${code.used ? 'border-red-500/10 bg-red-500/[0.01] opacity-50' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/20'}`}
-                                        >
-                                            <div className="flex justify-between items-start mb-6">
-                                                <span className={`text-[8px] px-2 py-0.5 font-black uppercase tracking-widest ${code.used ? 'text-red-500/40 border border-red-500/10' : 'text-green-500 border border-green-500/20'}`}>
-                                                    {code.used ? 'Consumed' : 'Active'}
-                                                </span>
-                                                <button onClick={() => setGeneratedCode(code.code)} className="text-[9px] text-white/10 hover:text-blue-400 transition-colors uppercase font-mono font-bold">View QR</button>
-                                            </div>
-                                            <p className="font-mono text-xl tracking-[0.3em] font-medium truncate mb-4 font-bold">{code.code}</p>
-                                            <div className="pt-4 border-t border-white/[0.04] space-y-1">
-                                                <p className="text-[7px] uppercase tracking-widest text-white/20 font-bold">Owner</p>
-                                                <p className="text-[10px] font-mono text-white/40 truncate">{code.usedBy || 'System_Pending'}</p>
-                                            </div>
-                                        </motion.div>
-                                    ))}
-                                </div>
-                            </motion.div>
-                        )}
                     </AnimatePresence>
                 </main>
             </div>
+
+            {/* Event roster — registrations & verified */}
+            <AnimatePresence>
+                {selectedEventDetail && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[290] bg-black/90 backdrop-blur-3xl flex items-center justify-center p-4 sm:p-8"
+                        onClick={e => e.target === e.currentTarget && setSelectedEventDetail(null)}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 20 }}
+                            className="w-full max-w-3xl max-h-[90vh] border border-white/10 bg-[#0a0a0a] flex flex-col shadow-2xl"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <div className="shrink-0 p-5 sm:p-6 border-b border-white/[0.06] flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0 space-y-1">
+                                    <p className="text-[9px] tracking-[0.45em] uppercase text-blue-400/90 font-black">Event roster</p>
+                                    <h2 className="text-xl sm:text-2xl font-black tracking-tight uppercase truncate">{selectedEventDetail.name}</h2>
+                                    <p className="text-[10px] font-mono text-white/35">
+                                        {selectedEventDetail.location || '—'} · {new Date(selectedEventDetail.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                    </p>
+                                    <p className="text-[9px] font-mono text-white/25 truncate" title={selectedEventDetail.organizer}>
+                                        Organizer {selectedEventDetail.organizer}
+                                    </p>
+                                </div>
+                                <div className="flex flex-wrap gap-2 sm:justify-end">
+                                    <button
+                                        type="button"
+                                        onClick={() => exportEventRoster(selectedEventDetail)}
+                                        className="px-3 py-2 bg-white text-black text-[8px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200"
+                                    >
+                                        Export CSV
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedEventQR(selectedEventDetail);
+                                        }}
+                                        className="px-3 py-2 border border-white/15 text-[8px] font-black tracking-[0.2em] uppercase text-white/70 hover:bg-white/5"
+                                    >
+                                        Pool QR
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedEventDetail(null)}
+                                        className="px-3 py-2 text-[8px] font-black tracking-[0.2em] uppercase text-white/40 hover:text-white"
+                                    >
+                                        Close
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="shrink-0 px-5 sm:px-6 py-3 border-b border-white/[0.04] flex flex-wrap gap-3 text-[9px] font-mono text-white/50">
+                                <span className="text-white/80 font-bold">
+                                    {registrations.filter(r => (r.eventId ?? '').toLowerCase() === selectedEventDetail.id.toLowerCase()).length} registered
+                                </span>
+                                <span>·</span>
+                                <span>{getVerifiedForEvent(selectedEventDetail.id).length} verified</span>
+                                <span>·</span>
+                                <span className="text-amber-400/90">{getRegisteredOnlyForEvent(selectedEventDetail.id).length} pending check-in</span>
+                                {selectedEventDetail.maxAttendees != null && selectedEventDetail.maxAttendees > 0 && (
+                                    <>
+                                        <span>·</span>
+                                        <span>Cap {selectedEventDetail.maxAttendees}</span>
+                                    </>
+                                )}
+                            </div>
+
+                            <div className="flex-1 min-h-0 overflow-y-auto">
+                                <div className="p-5 sm:p-6 space-y-8 pb-10">
+                                    <section>
+                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">Verified check-ins</h3>
+                                        {getVerifiedForEvent(selectedEventDetail.id).length === 0 ? (
+                                            <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">No verified entries yet</p>
+                                        ) : (
+                                            <ul className="border border-white/[0.06] divide-y divide-white/[0.04]">
+                                                {getVerifiedForEvent(selectedEventDetail.id).map((row, idx) => (
+                                                    <li key={`${row.code}-${idx}`} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[10px] font-mono hover:bg-white/[0.02]">
+                                                        <span className="text-white/80">{shortIdentity(row.wallet, row.email)}</span>
+                                                        <span className="text-blue-400/90 font-bold tracking-wider">{row.code}</span>
+                                                        <span className="text-white/30">
+                                                            {new Date(row.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </section>
+
+                                    <section>
+                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">Registered — not verified</h3>
+                                        {getRegisteredOnlyForEvent(selectedEventDetail.id).length === 0 ? (
+                                            <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">Everyone registered has checked in (or no registrations)</p>
+                                        ) : (
+                                            <ul className="border border-white/[0.06] divide-y divide-white/[0.04]">
+                                                {getRegisteredOnlyForEvent(selectedEventDetail.id).map((reg, idx) => (
+                                                    <li key={`${reg.email ?? ''}-${reg.wallet ?? ''}-${idx}`} className="px-4 py-3 flex flex-col gap-1 text-[10px] font-mono hover:bg-white/[0.02]">
+                                                        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                                            <span className="text-white/80">{shortIdentity(reg.wallet, reg.email)}</span>
+                                                            {reg.name?.trim() && <span className="text-white/50">{reg.name}</span>}
+                                                        </div>
+                                                        {(reg.email?.trim()) && <span className="text-white/35 text-[9px]">{reg.email}</span>}
+                                                        <span className="text-white/25 text-[9px]">
+                                                            Registered {new Date(reg.registeredAt).toLocaleString('en-GB')}
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </section>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Event QR Modal */}
             <AnimatePresence>
@@ -808,33 +979,4 @@ export default function AdminDashboard() {
             </AnimatePresence>
         </div>
     );
-}
-
-interface ClaimCode {
-    code: string;
-    used: boolean;
-    createdAt: string;
-    usedAt?: string;
-    usedBy?: string;
-}
-
-interface AttendanceRecord {
-    wallet: string;
-    code: string;
-    checkedInAt: string;
-}
-
-interface Event {
-    id: string;
-    name: string;
-    description: string;
-    date: string;
-    location: string;
-    organizer: string;
-    verificationCode: string;
-    createdAt: string;
-    attendeeCount: number;
-    isVip?: boolean;
-    vipTokenAddress?: string;
-    vipMinBalance?: string;
 }
