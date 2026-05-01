@@ -20,6 +20,7 @@
         "framer-motion": "^12.34.3",
         "lucide-react": "^0.575.0",
         "next": "16.1.6",
+        "qrcode": "^1.5.4",
         "qrcode.react": "^4.2.0",
         "react": "19.2.3",
         "react-dom": "19.2.3",
@@ -30,6 +31,7 @@
     "devDependencies": {
         "@tailwindcss/postcss": "^4",
         "@types/node": "^20",
+        "@types/qrcode": "^1.5.6",
         "@types/react": "^19",
         "@types/react-dom": "^19",
         "babel-plugin-react-compiler": "1.0.0",

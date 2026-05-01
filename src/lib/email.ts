@@ -1,6 +1,9 @@
 import type { Event } from './events';
+import QRCode from 'qrcode';
 
 const RESEND_URL = 'https://api.resend.com/emails';
+
+const DEFAULT_FROM = 'Gate Protocol <onboarding@resend.dev>';
 
 /** Colors aligned with `globals.css` (dark UI). */
 const C = {
@@ -21,7 +24,23 @@ function appOrigin(): string {
 }
 
 function brandName(): string {
-    return process.env.EMAIL_BRAND_NAME?.trim() || 'Gatefy';
+    return process.env.EMAIL_BRAND_NAME?.trim() || 'Gate Protocol';
+}
+
+/** Same payload as in-app organizer `QRCodeCanvas` — raw verification code for door scanners. */
+async function qrPngDataUrlForEmail(code: string): Promise<string | null> {
+    try {
+        return await QRCode.toDataURL(code.trim(), {
+            errorCorrectionLevel: 'M',
+            type: 'image/png',
+            width: 216,
+            margin: 2,
+            color: { dark: '#0a0a0a', light: '#ffffff' },
+        });
+    } catch (e) {
+        console.warn('[email] QRCode.toDataURL failed', e);
+        return null;
+    }
 }
 
 function formatEventWhen(ev: Event): string {
@@ -93,7 +112,7 @@ function emailShell(opts: { preheader: string; innerHtml: string }): string {
       <td align="center" style="padding:40px 20px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
           <tr>
-            <td style="padding:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:${C.muted};">
+            <td style="padding:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;font-weight:600;letter-spacing:0.02em;color:${C.text};">
               ${bn}
             </td>
           </tr>
@@ -126,18 +145,33 @@ function detailRow(label: string, value: string): string {
 </table>`;
 }
 
-function verificationCodeBlock(code: string): string {
+function verificationCodeBlock(code: string, qrDataUrl: string | null): string {
     const c = escapeHtml(code);
+    const qrHtml = qrDataUrl
+        ? `
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px auto 0;">
+  <tr>
+    <td align="center" style="background-color:${C.white};border-radius:12px;padding:12px;line-height:0;">
+      <img src="${qrDataUrl}" width="168" height="168" alt="" role="presentation"
+        style="display:block;width:168px;height:168px;border:0;outline:none;text-decoration:none;" />
+    </td>
+  </tr>
+</table>
+<p style="margin:10px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;line-height:1.45;color:${C.muted};text-align:center;">
+  Scan the QR at the door — it matches the code above (same data as the host’s Gate Protocol QR).
+</p>`
+        : '';
     return `
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 0;">
   <tr>
-    <td style="background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;padding:20px 22px;text-align:center;">
+    <td style="background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;padding:20px 22px 24px;text-align:center;">
       <p style="margin:0 0 6px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:${C.muted};">
         Check-in code
       </p>
       <p style="margin:0;font-family:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,monospace;font-size:22px;font-weight:700;letter-spacing:0.18em;color:${C.text};">
         ${c}
       </p>
+      ${qrHtml}
     </td>
   </tr>
 </table>
@@ -156,11 +190,12 @@ export async function sendRegistrationConfirmationEmail(opts: {
     paymentLabel?: string;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
     const key = process.env.RESEND_API_KEY?.trim();
-    const from = process.env.EMAIL_FROM?.trim() || 'Gatefy <onboarding@resend.dev>';
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
 
     const { to, event, attendeeName, ticketPriceUsdc, paymentLabel } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const qrDataUrl = await qrPngDataUrlForEmail(event.verificationCode);
 
     const subject = `You're registered · ${event.name}`;
     const ticketLine =
@@ -177,7 +212,7 @@ export async function sendRegistrationConfirmationEmail(opts: {
         event.location ? `Where: ${event.location}` : '',
         '',
         `Verification / check-in code: ${event.verificationCode}`,
-        '(Show this at the door or keep it for your records.)',
+        '(HTML version includes a QR with the same code for scanning at the door.)',
         '',
         `Event link: ${link}`,
         '',
@@ -210,7 +245,7 @@ ${
 }
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${verificationCodeBlock(event.verificationCode)}
+${verificationCodeBlock(event.verificationCode, qrDataUrl)}
 ${bulletproofButtonHref(link, 'View event details')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Prefer a plain link?
@@ -254,10 +289,11 @@ export async function sendOrganizerEventCreatedEmail(opts: {
     displayName: string;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
     const key = process.env.RESEND_API_KEY?.trim();
-    const from = process.env.EMAIL_FROM?.trim() || 'Gatefy <onboarding@resend.dev>';
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
     const { to, event, displayName } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const qrDataUrl = await qrPngDataUrlForEmail(event.verificationCode);
 
     const subject = `Event is live · ${event.name}`;
     const text = [
@@ -269,6 +305,7 @@ export async function sendOrganizerEventCreatedEmail(opts: {
         event.location ? `Where: ${event.location}` : '',
         '',
         `Verification code (check-in): ${event.verificationCode}`,
+        '(HTML version includes a matching QR for sharing with staff or signage.)',
         `Share link: ${link}`,
         '',
         `— ${brandName()}`,
@@ -286,7 +323,7 @@ export async function sendOrganizerEventCreatedEmail(opts: {
 </p>
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${verificationCodeBlock(event.verificationCode)}
+${verificationCodeBlock(event.verificationCode, qrDataUrl)}
 ${bulletproofButtonHref(link, 'Open event page')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Share URL:
