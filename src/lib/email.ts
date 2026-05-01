@@ -4,6 +4,9 @@ import QRCode from 'qrcode';
 
 const RESEND_URL = 'https://api.resend.com/emails';
 
+/** CID for inline QR PNG — email clients block `data:` URLs; Resend maps this to `<img src="cid:…">`. */
+const CHECKIN_QR_CONTENT_ID = 'gate-protocol-checkin-qr';
+
 const DEFAULT_FROM = 'Gate Protocol <onboarding@resend.dev>';
 
 /** Colors aligned with `globals.css` (dark UI). */
@@ -28,20 +31,30 @@ function brandName(): string {
     return getBrandDisplayName();
 }
 
-/** Same payload as in-app organizer `QRCodeCanvas` — raw verification code for door scanners. */
-async function qrPngDataUrlForEmail(code: string): Promise<string | null> {
+/** PNG as raw base64 for Resend `attachments[].content` (not a data: URL). */
+async function qrPngBase64ForEmail(code: string): Promise<string | null> {
     try {
-        return await QRCode.toDataURL(code.trim(), {
+        const buf = await QRCode.toBuffer(code.trim(), {
             errorCorrectionLevel: 'M',
-            type: 'image/png',
+            type: 'png',
             width: 216,
             margin: 2,
             color: { dark: '#0a0a0a', light: '#ffffff' },
         });
+        return buf.toString('base64');
     } catch (e) {
-        console.warn('[email] QRCode.toDataURL failed', e);
+        console.warn('[email] QRCode.toBuffer failed', e);
         return null;
     }
+}
+
+function inlineCheckinQrAttachment(qrBase64: string): { content: string; filename: string; content_id: string; content_type: string } {
+    return {
+        content: qrBase64,
+        filename: 'check-in-qr.png',
+        content_id: CHECKIN_QR_CONTENT_ID,
+        content_type: 'image/png',
+    };
 }
 
 function formatEventWhen(ev: Event): string {
@@ -146,14 +159,14 @@ function detailRow(label: string, value: string): string {
 </table>`;
 }
 
-function verificationCodeBlock(code: string, qrDataUrl: string | null): string {
+function verificationCodeBlock(code: string, qrImgSrc: string | null): string {
     const c = escapeHtml(code);
-    const qrHtml = qrDataUrl
+    const qrHtml = qrImgSrc
         ? `
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:18px auto 0;">
   <tr>
     <td align="center" style="background-color:${C.white};border-radius:12px;padding:12px;line-height:0;">
-      <img src="${qrDataUrl}" width="168" height="168" alt="" role="presentation"
+      <img src="${escapeHtml(qrImgSrc)}" width="168" height="168" alt="Check-in QR code"
         style="display:block;width:168px;height:168px;border:0;outline:none;text-decoration:none;" />
     </td>
   </tr>
@@ -196,7 +209,8 @@ export async function sendRegistrationConfirmationEmail(opts: {
     const { to, event, attendeeName, ticketPriceUsdc, paymentLabel } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
-    const qrDataUrl = await qrPngDataUrlForEmail(event.verificationCode);
+    const qrBase64 = await qrPngBase64ForEmail(event.verificationCode);
+    const qrImgSrc = qrBase64 ? `cid:${CHECKIN_QR_CONTENT_ID}` : null;
 
     const subject = `You're registered · ${event.name}`;
     const ticketLine =
@@ -246,7 +260,7 @@ ${
 }
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${verificationCodeBlock(event.verificationCode, qrDataUrl)}
+${verificationCodeBlock(event.verificationCode, qrImgSrc)}
 ${bulletproofButtonHref(link, 'View event details')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Prefer a plain link?
@@ -272,6 +286,7 @@ ${bulletproofButtonHref(link, 'View event details')}
             subject,
             html,
             text,
+            ...(qrBase64 ? { attachments: [inlineCheckinQrAttachment(qrBase64)] } : {}),
         }),
     });
 
@@ -294,7 +309,8 @@ export async function sendOrganizerEventCreatedEmail(opts: {
     const { to, event, displayName } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
-    const qrDataUrl = await qrPngDataUrlForEmail(event.verificationCode);
+    const qrBase64 = await qrPngBase64ForEmail(event.verificationCode);
+    const qrImgSrc = qrBase64 ? `cid:${CHECKIN_QR_CONTENT_ID}` : null;
 
     const subject = `Event is live · ${event.name}`;
     const text = [
@@ -324,7 +340,7 @@ export async function sendOrganizerEventCreatedEmail(opts: {
 </p>
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${verificationCodeBlock(event.verificationCode, qrDataUrl)}
+${verificationCodeBlock(event.verificationCode, qrImgSrc)}
 ${bulletproofButtonHref(link, 'Open event page')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Share URL:
@@ -344,13 +360,89 @@ ${bulletproofButtonHref(link, 'Open event page')}
             Authorization: `Bearer ${key}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ from, to: [to], subject, html, text }),
+        body: JSON.stringify({
+            from,
+            to: [to],
+            subject,
+            html,
+            text,
+            ...(qrBase64 ? { attachments: [inlineCheckinQrAttachment(qrBase64)] } : {}),
+        }),
     });
 
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
         const err = typeof body?.message === 'string' ? body.message : JSON.stringify(body);
         console.error('[email] Resend error:', res.status, err);
+        return { ok: false, error: err };
+    }
+    return { ok: true };
+}
+
+/** After a successful check-in at an event — sent when we can resolve the registrant’s email. */
+export async function sendAttendanceVerifiedEmail(opts: {
+    to: string;
+    event: Event;
+    attendeeName?: string | null;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+    const key = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+    const { to, event, attendeeName } = opts;
+    const origin = appOrigin();
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+
+    const subject = `You're checked in · ${event.name}`;
+    const text = [
+        `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
+        '',
+        `Your attendance was recorded for "${event.name}".`,
+        '',
+        `When: ${formatEventWhen(event)}`,
+        event.location ? `Where: ${event.location}` : '',
+        '',
+        `Event link: ${link}`,
+        '',
+        `— ${brandName()}`,
+    ]
+        .filter(Boolean)
+        .join('\n');
+
+    const greet = attendeeName ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,` : 'Hi there,';
+    const preheader = `Attendance confirmed for ${event.name}`;
+    const inner = `
+<p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  ${greet}
+</p>
+<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  Your attendance is <strong style="color:${C.white};">verified</strong> for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
+</p>
+${detailRow('When', formatEventWhen(event))}
+${event.location ? detailRow('Where', event.location) : ''}
+${bulletproofButtonHref(link, 'View event')}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+  Keep this email for your records.
+</p>`;
+
+    const html = emailShell({ preheader, innerHtml: inner });
+
+    if (!key) {
+        console.warn('[email] RESEND_API_KEY not set; skipping check-in email to', to);
+        return { ok: false, skipped: true };
+    }
+
+    const res = await fetch(RESEND_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from, to: [to], subject, html, text }),
+    });
+
+    const chkBody = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const err = typeof chkBody?.message === 'string' ? chkBody.message : JSON.stringify(chkBody);
+        console.error('[email] Resend error (check-in):', res.status, err);
         return { ok: false, error: err };
     }
     return { ok: true };

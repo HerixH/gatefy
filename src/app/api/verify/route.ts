@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { peekCode, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
-import { isRegistered, isRegisteredByEmail } from '@/lib/registrations';
+import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
+import { sendAttendanceVerifiedEmail } from '@/lib/email';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { base } from 'viem/chains';
 
@@ -98,6 +99,28 @@ export async function POST(request: Request) {
         if (success) {
             if (event && newCheckin) {
                 await incrementAttendee(event.id);
+
+                try {
+                    let reg = null as Awaited<ReturnType<typeof getRegistrationForEvent>>;
+                    if (emailMode && email) {
+                        reg = await getRegistrationForEvent(event.id, { email });
+                    } else if (wallet && wallet !== '0xDEV') {
+                        reg = await getRegistrationForEvent(event.id, { wallet });
+                        if (!reg && email) {
+                            reg = await getRegistrationForEvent(event.id, { email });
+                        }
+                    }
+                    const toEmail = reg?.email?.trim() || (emailMode && email ? email : '');
+                    if (toEmail) {
+                        void sendAttendanceVerifiedEmail({
+                            to: toEmail,
+                            event,
+                            attendeeName: reg?.name ?? null,
+                        }).catch((e) => console.error('[verify] check-in email failed:', e));
+                    }
+                } catch (e) {
+                    console.error('[verify] check-in email lookup/send error:', e);
+                }
             }
 
             // If the user already checked in for this event, surface that explicitly

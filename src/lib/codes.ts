@@ -94,31 +94,45 @@ export async function verifyCode(
         }).eq('code', code);
         if (updateErr) throw updateErr;
     } else {
+        const normEventId = eventId.trim().toLowerCase();
         const { data: codes } = await supabase.from('claim_codes').select('code').eq('code', code);
         if (!codes?.length) return { success: false, newCheckin: false };
 
         if (wallet) {
-            const { data: existing } = await supabase.from('attendance').select('id').eq('wallet', wallet.toLowerCase()).eq('event_id', eventId).limit(1);
+            const { data: existing } = await supabase
+                .from('attendance')
+                .select('id')
+                .eq('wallet', wallet.toLowerCase())
+                .eq('event_id', normEventId)
+                .limit(1);
             if (existing?.length) return { success: true, newCheckin: false };
         }
         if (cleanEmail) {
             const { data: existing } = await supabase
                 .from('attendance')
                 .select('id')
-                .eq('event_id', eventId)
+                .eq('event_id', normEventId)
                 .ilike('email', cleanEmail)
                 .limit(1);
             if (existing?.length) return { success: true, newCheckin: false };
         }
     }
 
+    const normEventIdForInsert = eventId ? eventId.trim().toLowerCase() : null;
+
     if (wallet) {
-        const { data: dup } = await supabase.from('attendance').select('id').eq('wallet', wallet.toLowerCase()).eq('code', code).eq('event_id', eventId ?? null).limit(1);
+        const { data: dup } = await supabase
+            .from('attendance')
+            .select('id')
+            .eq('wallet', wallet.toLowerCase())
+            .eq('code', code)
+            .eq('event_id', normEventIdForInsert)
+            .limit(1);
         if (!dup?.length) {
             const { error: insErr } = await supabase.from('attendance').insert({
                 wallet: wallet.toLowerCase(),
                 code,
-                event_id: eventId ?? null,
+                event_id: normEventIdForInsert,
             });
             if (!insErr) newCheckin = true;
         }
@@ -126,7 +140,7 @@ export async function verifyCode(
         const { data: dup } = await supabase
             .from('attendance')
             .select('id')
-            .eq('event_id', eventId ?? null)
+            .eq('event_id', normEventIdForInsert)
             .ilike('email', cleanEmail)
             .eq('code', code)
             .limit(1);
@@ -135,7 +149,7 @@ export async function verifyCode(
                 wallet: null,
                 email: cleanEmail,
                 code,
-                event_id: eventId ?? null,
+                event_id: normEventIdForInsert,
             });
             if (!insErr) newCheckin = true;
         }

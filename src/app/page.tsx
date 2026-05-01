@@ -3,7 +3,7 @@
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useConfig } from 'wagmi';
 import { waitForTransactionReceipt } from '@wagmi/core';
@@ -355,19 +355,12 @@ function HomeContent() {
   const [uploadingBanner, setUploadingBanner] = useState(false);
 
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     fetchEvents();
   }, [address]);
-
-  // Auto-select event from URL ?event=ID (for registration links)
-  useEffect(() => {
-    const eventId = searchParams.get('event');
-    if (eventId && events.length > 0) {
-      const ev = events.find(e => e.id.toLowerCase() === eventId.toLowerCase());
-      if (ev) setSelectedEvent(ev);
-    }
-  }, [searchParams, events]);
 
   const fetchEvents = async (): Promise<Event[]> => {
     try {
@@ -469,6 +462,7 @@ function HomeContent() {
           setMinted(true);
         }
         setShowScanner(false);
+        refetchOrganizerLists();
       } else {
         showWalletToast(result.message || 'Verification failed. Check your code and try again.');
       }
@@ -675,6 +669,24 @@ function HomeContent() {
   const isPast = (iso: string, endDate?: string) => getEventStatus(iso, endDate) === 'past';
   const hasEventStarted = (iso: string) => getEventStatus(iso) !== 'upcoming';
 
+  // Deep links: open detail modal only for upcoming / ongoing events. Past events stay on the homepage
+  // (full-screen modal on every reload felt like an unwanted pop-up for archived links).
+  useEffect(() => {
+    const eventId = searchParams.get('event');
+    if (!eventId || events.length === 0) return;
+    const ev = events.find((e) => e.id.toLowerCase() === eventId.toLowerCase());
+    if (!ev) return;
+    if (isPast(ev.date, ev.endDate)) {
+      setSelectedEvent(null);
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('event');
+      const q = next.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
+      return;
+    }
+    setSelectedEvent(ev);
+  }, [searchParams, events, pathname, router]);
+
   // Remaining seats = capacity minus registrations (so it updates after someone registers)
   const getRegisteredCount = (ev: Event) => ev.registrationCount ?? ev.attendeeCount;
   const getRemainingSeats = (ev: Event) =>
@@ -685,11 +697,15 @@ function HomeContent() {
   const registrantMatchesCheckIn = (
     r: { wallet?: string | null; email?: string | null },
     a: { wallet?: string | null; email?: string | null }
-  ) =>
-    (a.wallet &&
-      r.wallet &&
-      String(a.wallet).toLowerCase() === String(r.wallet).toLowerCase()) ||
-    (a.email && r.email && String(a.email).toLowerCase() === String(r.email).toLowerCase());
+  ) => {
+    const rw = (r.wallet ?? '').trim().toLowerCase();
+    const re = (r.email ?? '').trim().toLowerCase();
+    const aw = (a.wallet ?? '').trim().toLowerCase();
+    const ae = (a.email ?? '').trim().toLowerCase();
+    if (aw && rw && aw === rw) return true;
+    if (ae && re && ae === re) return true;
+    return false;
+  };
 
   const exportOrganizerRosterCsv = () => {
     if (!selectedEvent) return;
@@ -1150,17 +1166,22 @@ function HomeContent() {
         </div>
       </header>
 
-      {/* Wallet toast — never triggers connect modal */}
+      {/* Corner notice only — never opens the wallet modal; tap to dismiss */}
       <AnimatePresence>
         {walletToast && (
           <motion.div
-            initial={{ opacity: 0, y: -12 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -12 }}
-            className="fixed top-20 lg:top-24 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 border border-accent/30 bg-black/90 backdrop-blur-xl flex items-center gap-3 shadow-[0_0_30px_rgba(59,130,246,0.15)]"
+            exit={{ opacity: 0, y: 8 }}
+            role="status"
+            onClick={() => setWalletToast(null)}
+            className="fixed bottom-4 left-4 z-[90] max-w-[min(22rem,calc(100vw-2rem))] px-4 py-2.5 border border-white/15 bg-black/88 backdrop-blur-md flex items-start gap-2.5 shadow-lg cursor-pointer pointer-events-auto"
+            title="Dismiss"
           >
-            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0" />
-            <span className="text-[10px] font-bold tracking-[0.25em] uppercase text-white/80 whitespace-nowrap">{walletToast}</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0 mt-1" />
+            <span className="text-[9px] font-semibold tracking-[0.12em] uppercase text-white/75 leading-snug break-words">
+              {walletToast}
+            </span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1709,9 +1730,9 @@ function HomeContent() {
                               const res = await fetch('/api/events/upload-banner', { method: 'POST', body: fd });
                               const data = await res.json();
                               if (data.url) setForm(f => ({ ...f, bannerUrl: data.url }));
-                              else alert(data.error || 'Upload failed');
+                              else showWalletToast(data.error || 'Banner upload failed.');
                             } catch {
-                              alert('Upload failed');
+                              showWalletToast('Banner upload failed.');
                             } finally {
                               setUploadingBanner(false);
                               e.target.value = '';
