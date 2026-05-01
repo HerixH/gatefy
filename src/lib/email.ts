@@ -1,4 +1,5 @@
 import type { Event } from './events';
+import { getBrandDisplayName } from './brand';
 import QRCode from 'qrcode';
 
 const RESEND_URL = 'https://api.resend.com/emails';
@@ -24,7 +25,7 @@ function appOrigin(): string {
 }
 
 function brandName(): string {
-    return process.env.EMAIL_BRAND_NAME?.trim() || 'Gate Protocol';
+    return getBrandDisplayName();
 }
 
 /** Same payload as in-app organizer `QRCodeCanvas` — raw verification code for door scanners. */

@@ -1117,9 +1117,10 @@ function HomeContent() {
               <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
             </g>
           </svg>
-          <div className="flex flex-col leading-none gap-[3px]">
-            <span className="text-base lg:text-lg font-black tracking-[0.3em] uppercase text-white group-hover:text-white/90">GATE</span>
-            <span className="text-[8px] lg:text-[9px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
+          <div className="flex flex-col leading-[1.1] gap-0">
+            <span className="text-[10px] lg:text-xs font-semibold tracking-[0.14em] text-white group-hover:text-white/90">
+              Gate <span className="text-white/65 font-medium tracking-[0.1em]">Protocol</span>
+            </span>
           </div>
         </Link>
 

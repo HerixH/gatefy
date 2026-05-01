@@ -357,8 +357,9 @@ export default function AdminDashboard() {
                                 </g>
                             </svg>
                             <div className="flex flex-col items-start leading-none gap-1">
-                                <span className="text-3xl font-black tracking-[0.2em] uppercase text-white">GATE</span>
-                                <span className="text-[10px] font-bold tracking-[0.5em] uppercase text-white/70">Protocol</span>
+                                <span className="text-2xl font-semibold tracking-[0.12em] text-white">
+                                    Gate <span className="text-white/65 font-medium">Protocol</span>
+                                </span>
                             </div>
                         </div>
                         <p className="text-[10px] tracking-[0.4em] uppercase text-white/20 font-bold">Admin Terminal Access</p>
@@ -422,8 +423,9 @@ export default function AdminDashboard() {
                         </g>
                     </svg>
                     <div className="flex flex-col leading-none">
-                        <span className="text-[11px] font-black tracking-[0.2em] uppercase">GATE</span>
-                        <span className="text-[6px] font-bold tracking-[0.4em] uppercase text-white/70">Protocol</span>
+                        <span className="text-[10px] font-semibold tracking-[0.12em] text-white">
+                            Gate <span className="text-white/65">Protocol</span>
+                        </span>
                     </div>
                 </div>
 

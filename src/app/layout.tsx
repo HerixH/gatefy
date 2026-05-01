@@ -20,7 +20,10 @@ const pressStart = Press_Start_2P({
   weight: "400",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://gatefy.vercel.app";
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ||
+  process.env.NEXT_PUBLIC_APP_URL ||
+  "https://www.gateprotocol.xyz";
 
 export const metadata: Metadata = {
   title: "GATE PROTOCOL | NFT Attendance",

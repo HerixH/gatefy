@@ -25,9 +25,10 @@ export default function About() {
                             <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
                         </g>
                     </svg>
-                    <div className="flex flex-col leading-none gap-[3px]">
-                        <span className="text-sm font-black tracking-[0.3em] uppercase text-white">GATE</span>
-                        <span className="text-[7px] font-bold tracking-[0.45em] uppercase text-white/70">Protocol</span>
+                    <div className="flex flex-col leading-[1.1]">
+                        <span className="text-xs font-semibold tracking-[0.14em] text-white">
+                            Gate <span className="text-white/65 font-medium tracking-[0.1em]">Protocol</span>
+                        </span>
                     </div>
                 </Link>
                 <Link href="/" className="text-[9px] tracking-[0.3em] uppercase text-white/40 hover:text-white transition-colors font-bold">Back</Link>
