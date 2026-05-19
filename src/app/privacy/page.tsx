@@ -73,7 +73,7 @@ export default function Privacy() {
                     <h1 className="text-5xl lg:text-6xl font-black tracking-tighter leading-none mb-4 text-white">
                         Privacy<br />Policy
                     </h1>
-                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: February 2026</p>
+                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: May 19, 2026</p>
 
                     <div className="space-y-10">
                         {sections.map((s, i) => (
