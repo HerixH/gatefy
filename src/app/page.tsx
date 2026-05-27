@@ -15,6 +15,11 @@ import {
   formatOrganizerShort,
   isEmailOrganizerId,
 } from '@/lib/event-organizer';
+import {
+  eventAcceptsMobileMoney,
+  eventAcceptsUsdc,
+  validateEventPaymentConfig,
+} from '@/lib/event-payment';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -37,6 +42,15 @@ const ERC20_ABI = [
 
 const DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
+/** For <input type="datetime-local" /> — local wall time from ISO. */
+function toDatetimeLocalValue(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 interface Event {
   id: string;
   name: string;
@@ -58,6 +72,10 @@ interface Event {
   isBlockchain?: boolean;
   ticketPriceUsdc?: number;
   mobileMoneyInstructions?: string;
+  /** Paid wallet flow: accept USDC (default on). */
+  ticketAcceptUsdc?: boolean;
+  /** Paid flow: accept mobile-money reference (default on). */
+  ticketAcceptMobileMoney?: boolean;
 }
 
 function HomeContent() {
@@ -69,6 +87,9 @@ function HomeContent() {
   const [minted, setMinted] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
+  /** Organizer-scoped list from GET /api/events/managed (lighter than filtering the public catalog). */
+  const [managedEvents, setManagedEvents] = useState<Event[]>([]);
+  const [managedEventsLoading, setManagedEventsLoading] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [createdEvent, setCreatedEvent] = useState<Event | null>(null); // shown after creation
@@ -90,7 +111,16 @@ function HomeContent() {
   const [blockchainSignupEmail, setBlockchainSignupEmail] = useState('');
   const [blockchainSignupName, setBlockchainSignupName] = useState('');
   const [attendees, setAttendees] = useState<any[]>([]);
-  const [registrations, setRegistrations] = useState<{ wallet?: string; email?: string; name?: string; registeredAt: string }[]>([]);
+  type RegRow = {
+    wallet?: string | null;
+    email?: string | null;
+    name?: string | null;
+    registeredAt: string;
+    paymentStatus?: string | null;
+    paymentTxHash?: string | null;
+    paymentReference?: string | null;
+  };
+  const [registrations, setRegistrations] = useState<RegRow[]>([]);
   const [loadingAttendees, setLoadingAttendees] = useState(false);
   /** Server-backed registration row for the selected event (name / email / wallet). */
   const [eventRegProfile, setEventRegProfile] = useState<{
@@ -113,6 +143,13 @@ function HomeContent() {
   const organizerListAuthSuffix = useMemo(() => {
     if (address) return `&organizerWallet=${encodeURIComponent(address)}`;
     if (organizerSessionEmail) return `&organizerEmail=${encodeURIComponent(organizerSessionEmail)}`;
+    return '';
+  }, [address, organizerSessionEmail]);
+
+  /** Query string for GET /api/events/managed (no leading `?`). */
+  const managedEventsQuerySuffix = useMemo(() => {
+    if (address) return `organizerWallet=${encodeURIComponent(address)}`;
+    if (organizerSessionEmail) return `organizerEmail=${encodeURIComponent(organizerSessionEmail)}`;
     return '';
   }, [address, organizerSessionEmail]);
 
@@ -349,10 +386,31 @@ function HomeContent() {
     organizerDisplayName: '',
     ticketPriceUsdc: '' as string,
     mobileMoneyInstructions: '' as string,
+    ticketAcceptUsdc: true,
+    ticketAcceptMobileMoney: true,
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [uploadingBanner, setUploadingBanner] = useState(false);
+
+  /** Edit existing event (organizer-only): ticketing, capacity, basics. */
+  const [showManageEvent, setShowManageEvent] = useState(false);
+  const [manageSaving, setManageSaving] = useState(false);
+  const [manageError, setManageError] = useState('');
+  const [manageForm, setManageForm] = useState({
+    name: '',
+    description: '',
+    date: '',
+    endDate: '',
+    location: '',
+    maxAttendees: '' as string,
+    ticketPriceUsdc: '' as string,
+    mobileMoneyInstructions: '' as string,
+    ticketAcceptUsdc: true,
+    ticketAcceptMobileMoney: true,
+    bannerUrl: '',
+  });
+  const [manageBannerUploading, setManageBannerUploading] = useState(false);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -361,6 +419,10 @@ function HomeContent() {
   useEffect(() => {
     fetchEvents();
   }, [address]);
+
+  useEffect(() => {
+    fetchManagedEvents();
+  }, [managedEventsQuerySuffix]);
 
   const fetchEvents = async (): Promise<Event[]> => {
     try {
@@ -375,6 +437,48 @@ function HomeContent() {
       console.error(e);
       return [];
     }
+  };
+
+  const fetchManagedEvents = async (): Promise<Event[]> => {
+    if (!managedEventsQuerySuffix) {
+      setManagedEvents([]);
+      return [];
+    }
+    setManagedEventsLoading(true);
+    try {
+      const res = await fetch(`/api/events/managed?${managedEventsQuerySuffix}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setManagedEvents(data);
+        return data;
+      }
+      setManagedEvents([]);
+      return [];
+    } catch (e) {
+      console.error(e);
+      setManagedEvents([]);
+      return [];
+    } finally {
+      setManagedEventsLoading(false);
+    }
+  };
+
+  const mergeEventInLists = (updated: Event) => {
+    const idKey = updated.id.toLowerCase();
+    setEvents((prev) => {
+      const i = prev.findIndex((e) => e.id.toLowerCase() === idKey);
+      if (i < 0) return prev;
+      const next = [...prev];
+      next[i] = { ...next[i], ...updated };
+      return next;
+    });
+    setManagedEvents((prev) => {
+      const i = prev.findIndex((e) => e.id.toLowerCase() === idKey);
+      if (i < 0) return prev;
+      const next = [...prev];
+      next[i] = { ...next[i], ...updated };
+      return next;
+    });
   };
 
   // ── In-app wallet toast (never triggers RainbowKit modal) ──────────────
@@ -512,6 +616,21 @@ function HomeContent() {
       }
       const mm = form.mobileMoneyInstructions.trim();
       if (mm) payload.mobileMoneyInstructions = mm;
+
+      const ticketAmt = typeof payload.ticketPriceUsdc === 'number' ? payload.ticketPriceUsdc : undefined;
+      const pv = validateEventPaymentConfig({
+        isBlockchain: form.isBlockchain,
+        ticketPriceUsdc: ticketAmt,
+        ticketAcceptUsdc: form.ticketAcceptUsdc,
+        ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+      });
+      if (!pv.ok) {
+        setCreateError(pv.error);
+        setCreating(false);
+        return;
+      }
+      payload.ticketAcceptUsdc = form.ticketAcceptUsdc;
+      payload.ticketAcceptMobileMoney = form.ticketAcceptMobileMoney;
       if (address) {
         payload.organizer = address;
       } else {
@@ -541,13 +660,15 @@ function HomeContent() {
           organizerDisplayName: '',
           ticketPriceUsdc: '',
           mobileMoneyInstructions: '',
+          ticketAcceptUsdc: true,
+          ticketAcceptMobileMoney: true,
         });
         if (!address && form.organizerEmail.trim()) {
           commitOrganizerEmailSession(form.organizerEmail.trim(), { silent: true });
         }
         setShowCreateEvent(false);
         setCreatedEvent(newEvent); // show QR download modal
-        await fetchEvents();
+        await Promise.all([fetchEvents(), fetchManagedEvents()]);
       } else {
         const err = await res.json().catch(() => ({}));
         const msg = err?.error || 'Failed to create event';
@@ -559,6 +680,109 @@ function HomeContent() {
       setCreateError(msg.includes('fetch') ? 'Cannot reach server. Is the dev server running?' : `Network error: ${msg}`);
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openManageEventModal = () => {
+    if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return;
+    const ev = selectedEvent;
+    setManageError('');
+    setManageForm({
+      name: ev.name,
+      description: ev.description || '',
+      date: toDatetimeLocalValue(ev.date),
+      endDate: ev.endDate ? toDatetimeLocalValue(ev.endDate) : '',
+      location: ev.location || '',
+      maxAttendees: ev.maxAttendees != null && ev.maxAttendees > 0 ? String(ev.maxAttendees) : '',
+      ticketPriceUsdc: ev.ticketPriceUsdc != null && ev.ticketPriceUsdc > 0 ? String(ev.ticketPriceUsdc) : '',
+      mobileMoneyInstructions: ev.mobileMoneyInstructions || '',
+      ticketAcceptUsdc: ev.ticketAcceptUsdc !== false,
+      ticketAcceptMobileMoney: ev.ticketAcceptMobileMoney !== false,
+      bannerUrl: ev.bannerUrl || '',
+    });
+    setShowManageEvent(true);
+  };
+
+  const handleSaveManagedEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEvent) return;
+    if (!organizerListAuthSuffix) {
+      showWalletToast('Sign in as organizer first.');
+      return;
+    }
+    setManageSaving(true);
+    setManageError('');
+    try {
+      const dateIso = manageForm.date ? new Date(manageForm.date).toISOString() : selectedEvent.date;
+      const endIso = manageForm.endDate.trim() ? new Date(manageForm.endDate).toISOString() : null;
+
+      let ticketAmount: number | null = null;
+      const tp = manageForm.ticketPriceUsdc.trim();
+      if (tp) {
+        const n = parseFloat(tp);
+        if (Number.isFinite(n) && n > 0) ticketAmount = n;
+      }
+
+      let maxPatch: number | null = null;
+      const mx = manageForm.maxAttendees.trim();
+      if (mx) {
+        const n = parseInt(mx, 10);
+        if (Number.isFinite(n) && n > 0) maxPatch = n;
+      }
+
+      const mergedBlockchain = selectedEvent.isBlockchain !== false;
+
+      const payCheck = validateEventPaymentConfig({
+        isBlockchain: mergedBlockchain,
+        ticketPriceUsdc: ticketAmount ?? undefined,
+        ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
+        ticketAcceptMobileMoney: manageForm.ticketAcceptMobileMoney,
+      });
+      if (!payCheck.ok) {
+        setManageError(payCheck.error);
+        setManageSaving(false);
+        return;
+      }
+
+      const patch: Record<string, unknown> = {
+        eventId: selectedEvent.id,
+        ...(address ? { organizerWallet: address } : {}),
+        ...(organizerSessionEmail ? { organizerEmail: organizerSessionEmail } : {}),
+        name: manageForm.name.trim(),
+        description: manageForm.description.trim(),
+        date: dateIso,
+        endDate: endIso,
+        location: manageForm.location.trim(),
+        maxAttendees: maxPatch,
+        ticketPriceUsdc: ticketAmount,
+        mobileMoneyInstructions: manageForm.mobileMoneyInstructions.trim() || null,
+        ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
+        ticketAcceptMobileMoney: manageForm.ticketAcceptMobileMoney,
+        bannerUrl: manageForm.bannerUrl.trim() || null,
+      };
+
+      const res = await fetch('/api/events', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setManageError(typeof data?.error === 'string' ? data.error : 'Update failed');
+        return;
+      }
+      const updated = data as Event;
+      mergeEventInLists(updated);
+      await fetchEvents();
+      await fetchManagedEvents();
+      setSelectedEvent(updated);
+      setShowManageEvent(false);
+      showWalletToast('Event updated.');
+      refetchOrganizerLists();
+    } catch {
+      setManageError('Network error');
+    } finally {
+      setManageSaving(false);
     }
   };
 
@@ -694,6 +918,15 @@ function HomeContent() {
       ? Math.max(0, ev.maxAttendees - getRegisteredCount(ev))
       : null;
 
+  const managedTicketSummary = (ev: Event) => {
+    const price = ev.ticketPriceUsdc ?? 0;
+    if (!(Number.isFinite(price) && price > 0)) return 'Free';
+    const rails: string[] = [];
+    if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
+    if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
+    return rails.length ? `${price} USDC · ${rails.join(' · ')}` : `${price} USDC`;
+  };
+
   const registrantMatchesCheckIn = (
     r: { wallet?: string | null; email?: string | null },
     a: { wallet?: string | null; email?: string | null }
@@ -710,7 +943,25 @@ function HomeContent() {
   const exportOrganizerRosterCsv = () => {
     if (!selectedEvent) return;
     const unverified = registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a)));
-    type Row = { Status: string; Identity: string; Name: string; Email: string; Code: string; Timestamp: string };
+    const ticketP = selectedEvent.ticketPriceUsdc ?? 0;
+    const payExport = (r: RegRow | null, verified: boolean) => {
+      if (ticketP <= 0) return 'Free';
+      if (verified) return '—';
+      if (!r) return '—';
+      const st = r.paymentStatus ?? 'none';
+      if (st === 'paid_crypto') return 'USDC';
+      if (st === 'paid_mobile') return 'Mobile';
+      return 'Unpaid';
+    };
+    type Row = {
+      Status: string;
+      Identity: string;
+      Name: string;
+      Email: string;
+      Code: string;
+      Payment: string;
+      Timestamp: string;
+    };
     const rows: Row[] = [];
     attendees.forEach((a: { wallet?: string; email?: string; checkedInAt: string; code?: string }) => {
       rows.push({
@@ -719,6 +970,7 @@ function HomeContent() {
         Name: '—',
         Email: (a.email ?? '').trim() || '—',
         Code: (a.code ?? '').trim() || '—',
+        Payment: payExport(null, true),
         Timestamp: new Date(a.checkedInAt).toLocaleString('en-GB'),
       });
     });
@@ -729,6 +981,7 @@ function HomeContent() {
         Name: (r.name ?? '').trim() || '—',
         Email: (r.email ?? '').trim() || '—',
         Code: '-',
+        Payment: payExport(r, false),
         Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
       });
     });
@@ -787,9 +1040,27 @@ function HomeContent() {
   const renderOrganizerEventPanel = () => {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
     const ev = selectedEvent;
+    const ticketSpot = ev.ticketPriceUsdc ?? 0;
+    const regPayLabel = (r: RegRow) => {
+      const st = r.paymentStatus ?? 'none';
+      if (ticketSpot <= 0) return '—';
+      if (st === 'paid_crypto') {
+        const tx = r.paymentTxHash?.trim();
+        return tx && tx.length > 14 ? `Paid · USDC · ${tx.slice(0, 8)}…` : 'Paid · USDC';
+      }
+      if (st === 'paid_mobile') {
+        const ref = r.paymentReference?.trim();
+        return ref ? `Paid · Mobile · ${ref.length > 18 ? `${ref.slice(0, 14)}…` : ref}` : 'Paid · Mobile';
+      }
+      if (st === 'none') return 'Unpaid';
+      return String(st);
+    };
     return (
       <>
         <div className="space-y-6 p-6 border border-white/[0.08] bg-white/[0.02]">
+          <p className="text-[9px] font-mono text-cyan-400/85 tracking-wide">
+            Ticket: {managedTicketSummary(ev)}
+          </p>
           <div className="flex flex-col md:flex-row items-center gap-8">
             <div className="bg-white p-3 border border-white/20 shrink-0">
               <QRCodeCanvas
@@ -840,6 +1111,13 @@ function HomeContent() {
                   className="px-4 py-2 bg-white/10 border border-white/20 hover:bg-white/20 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-white"
                 >
                   Copy Registration Link
+                </button>
+                <button
+                  type="button"
+                  onClick={openManageEventModal}
+                  className="px-4 py-2 border border-blue-400/40 bg-blue-500/10 hover:bg-blue-500/20 transition-all text-[9px] tracking-[0.2em] uppercase font-bold text-blue-200/90"
+                >
+                  Manage event & tickets
                 </button>
               </div>
             </div>
@@ -944,7 +1222,10 @@ function HomeContent() {
                               Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                             </p>
                           </div>
-                          <span className="text-[8px] uppercase tracking-widest text-amber-400/50 font-bold shrink-0 ml-2">Pending</span>
+                          <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
+                            <span className="text-[8px] uppercase tracking-widest text-amber-400/50 font-bold">Pending</span>
+                            <span className="text-[8px] font-mono text-white/35">{regPayLabel(r)}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -982,6 +1263,10 @@ function HomeContent() {
       return;
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
+    if (price > 0 && !eventAcceptsUsdc(selectedEvent)) {
+      showWalletToast('This event is not accepting USDC for tickets. Contact the organizer.');
+      return;
+    }
     setRegistering(true);
     try {
       let paymentTxHash: string | undefined;
@@ -1058,6 +1343,10 @@ function HomeContent() {
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
     if (price > 0) {
+      if (!eventAcceptsMobileMoney(selectedEvent)) {
+        showWalletToast('This event is not accepting mobile-money references for tickets.');
+        return;
+      }
       const ref = normalPayRef.trim();
       if (ref.length < 4) {
         showWalletToast('Enter your mobile-money payment reference after paying (see instructions above).');
@@ -1430,19 +1719,29 @@ function HomeContent() {
                     </p>
                   </div>
                   <span className="text-[9px] font-mono text-white/70 tracking-widest">
-                    {events.filter(ev => isEventOrganizer(ev.organizer, orgCtx)).length} Total
+                    {managedEventsLoading ? '…' : `${managedEvents.length} Total`}
                   </span>
                 </div>
 
                 <div className="border border-white/5 bg-white/[0.01] backdrop-blur-3xl overflow-hidden">
-                  {events.filter(ev => isEventOrganizer(ev.organizer, orgCtx)).length === 0 ? (
+                  {managedEventsLoading && managedEvents.length === 0 ? (
+                    <div className="p-8 flex flex-col items-center justify-center text-center gap-4">
+                      <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30 animate-pulse">Loading your events…</p>
+                    </div>
+                  ) : managedEvents.length === 0 ? (
                     <div className="p-8 flex flex-col items-center justify-center text-center gap-4">
                       <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30">No uploads found</p>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateEvent(true)}
+                        className="text-[9px] font-black uppercase tracking-widest text-white/50 hover:text-white border border-white/15 px-4 py-2"
+                      >
+                        Create event
+                      </button>
                     </div>
                   ) : (
                     <div className="divide-y divide-white/[0.05]">
-                      {events
-                        .filter(ev => isEventOrganizer(ev.organizer, orgCtx))
+                      {[...managedEvents]
                         .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Show newest uploads first
                         .map((ev, i) => (
                           <motion.button
@@ -1465,7 +1764,9 @@ function HomeContent() {
                                   )}
                                   <p className="text-[11px] font-bold tracking-tight truncate opacity-70">{ev.name}</p>
                                 </div>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">Managed Asset // {formatOrganizerShort(ev)}</p>
+                                <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">
+                                  {managedTicketSummary(ev)} · {formatOrganizerShort(ev)}
+                                </p>
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="text-[8px] font-mono text-secondary/40">{formatDateTime(ev.date)}</p>
@@ -1682,6 +1983,51 @@ function HomeContent() {
                     />
                   </div>
 
+                  {(() => {
+                    const tp = parseFloat(form.ticketPriceUsdc.trim());
+                    const paid = Number.isFinite(tp) && tp > 0;
+                    if (!paid) return null;
+                    return (
+                      <div className="space-y-3 p-4 border border-cyan-500/20 bg-cyan-500/[0.05] rounded-sm">
+                        <p className="text-[9px] tracking-[0.25em] uppercase text-cyan-400/95 font-black">
+                          Accepted payment modes (paid ticket)
+                        </p>
+                        {form.isBlockchain ? (
+                          <label className="flex items-start gap-3 cursor-pointer group">
+                            <input
+                              type="checkbox"
+                              checked={form.ticketAcceptUsdc}
+                              onChange={e => setForm(f => ({ ...f, ticketAcceptUsdc: e.target.checked }))}
+                              className="mt-1 accent-white"
+                            />
+                            <span className="text-[10px] text-white/70 leading-relaxed">
+                              <span className="text-white font-bold group-hover:text-white">USDC on Base</span> — wallet
+                              registrants send {tp} USDC to your treasury when they sign up.
+                            </span>
+                          </label>
+                        ) : (
+                          <p className="text-[9px] text-white/40 font-mono">
+                            Email-only events collect payment via mobile reference (below). USDC is only used when
+                            registration is wallet-based.
+                          </p>
+                        )}
+                        <label className="flex items-start gap-3 cursor-pointer group">
+                          <input
+                            type="checkbox"
+                            checked={form.ticketAcceptMobileMoney}
+                            onChange={e => setForm(f => ({ ...f, ticketAcceptMobileMoney: e.target.checked }))}
+                            className="mt-1 accent-emerald-500"
+                          />
+                          <span className="text-[10px] text-white/70 leading-relaxed">
+                            <span className="text-emerald-400 font-bold group-hover:text-emerald-300">Mobile money</span>{' '}
+                            — attendee pays locally and submits a transaction reference (recommended for email
+                            signups). Add instructions in the box above when this is enabled.
+                          </span>
+                        </label>
+                      </div>
+                    );
+                  })()}
+
                   <div className="space-y-2">
                     <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Description</label>
                     <textarea
@@ -1860,6 +2206,233 @@ function HomeContent() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showManageEvent && selectedEvent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[160] bg-black/85 backdrop-blur-xl flex items-center justify-center p-4"
+            onClick={(e) => e.target === e.currentTarget && setShowManageEvent(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="w-full max-w-lg border border-white/10 bg-black max-h-[90vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-white/10 flex items-center justify-between shrink-0">
+                <div>
+                  <p className="text-[9px] tracking-[0.35em] uppercase text-blue-400/90 font-black">Organizer</p>
+                  <h2 className="text-lg font-bold tracking-tight">Manage event & tickets</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManageEvent(false)}
+                  className="text-[10px] font-bold uppercase text-white/40 hover:text-white"
+                >
+                  Close
+                </button>
+              </div>
+              <form onSubmit={handleSaveManagedEvent} className="flex flex-col min-h-0 flex-1">
+                <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                  {manageError ? (
+                    <p className="text-[10px] text-red-400 font-mono">{manageError}</p>
+                  ) : null}
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Name</label>
+                    <input
+                      value={manageForm.name}
+                      onChange={(e) => setManageForm((f) => ({ ...f, name: e.target.value }))}
+                      required
+                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-white/25"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Description</label>
+                    <textarea
+                      value={manageForm.description}
+                      onChange={(e) => setManageForm((f) => ({ ...f, description: e.target.value }))}
+                      rows={2}
+                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm resize-none focus:outline-none focus:border-white/25"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Banner image</label>
+                    {manageForm.bannerUrl ? (
+                      <div className="relative border border-white/10">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={manageForm.bannerUrl} alt="" className="w-full h-28 object-cover opacity-90" />
+                        <button
+                          type="button"
+                          onClick={() => setManageForm((f) => ({ ...f, bannerUrl: '' }))}
+                          className="absolute top-2 right-2 text-[8px] font-bold uppercase bg-black/80 border border-white/20 px-2 py-1 text-white/70 hover:text-white"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="block w-full bg-white/[0.04] border border-white/10 px-3 py-4 text-center text-white/40 text-[10px] font-mono cursor-pointer hover:border-white/20">
+                        {manageBannerUploading ? 'Uploading…' : 'Choose image (optional)'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={manageBannerUploading}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file || !selectedEvent) return;
+                            setManageBannerUploading(true);
+                            try {
+                              const fd = new FormData();
+                              fd.set('file', file);
+                              fd.set('eventId', selectedEvent.id);
+                              if (address) fd.set('organizerWallet', address);
+                              if (organizerSessionEmail) fd.set('organizerEmail', organizerSessionEmail);
+                              const res = await fetch('/api/events/upload-banner', { method: 'POST', body: fd });
+                              const data = await res.json();
+                              if (data.url) setManageForm((f) => ({ ...f, bannerUrl: data.url }));
+                              else showWalletToast(data.error || 'Banner upload failed.');
+                            } catch {
+                              showWalletToast('Banner upload failed.');
+                            } finally {
+                              setManageBannerUploading(false);
+                              e.target.value = '';
+                            }
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Start</label>
+                      <input
+                        type="datetime-local"
+                        value={manageForm.date}
+                        onChange={(e) => setManageForm((f) => ({ ...f, date: e.target.value }))}
+                        required
+                        className="w-full bg-white/[0.04] border border-white/10 px-2 py-2 text-white text-[11px] [color-scheme:dark]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">End (optional)</label>
+                      <input
+                        type="datetime-local"
+                        value={manageForm.endDate}
+                        onChange={(e) => setManageForm((f) => ({ ...f, endDate: e.target.value }))}
+                        className="w-full bg-white/[0.04] border border-white/10 px-2 py-2 text-white text-[11px] [color-scheme:dark]"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Location</label>
+                    <input
+                      value={manageForm.location}
+                      onChange={(e) => setManageForm((f) => ({ ...f, location: e.target.value }))}
+                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-white/25"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Max capacity</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={manageForm.maxAttendees}
+                      onChange={(e) => setManageForm((f) => ({ ...f, maxAttendees: e.target.value }))}
+                      placeholder="Empty = unlimited"
+                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="space-y-1 p-3 border border-white/10 bg-white/[0.02]">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Ticket (USDC) — blank = free</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={manageForm.ticketPriceUsdc}
+                      onChange={(e) => setManageForm((f) => ({ ...f, ticketPriceUsdc: e.target.value }))}
+                      className="w-full bg-black/40 border border-white/10 px-3 py-2 text-white text-sm [color-scheme:dark]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Mobile money instructions</label>
+                    <textarea
+                      value={manageForm.mobileMoneyInstructions}
+                      onChange={(e) => setManageForm((f) => ({ ...f, mobileMoneyInstructions: e.target.value }))}
+                      rows={3}
+                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm resize-none focus:outline-none focus:border-white/25"
+                    />
+                  </div>
+                  {(() => {
+                    const tp = parseFloat(manageForm.ticketPriceUsdc.trim());
+                    const paid = Number.isFinite(tp) && tp > 0;
+                    if (!paid) return null;
+                    return (
+                      <div className="space-y-3 p-3 border border-cyan-500/25 bg-cyan-500/[0.04] rounded">
+                        <p className="text-[9px] uppercase tracking-widest text-cyan-400 font-black">
+                          Accepted payment modes
+                        </p>
+                        {selectedEvent.isBlockchain !== false ? (
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={manageForm.ticketAcceptUsdc}
+                              onChange={(e) =>
+                                setManageForm((f) => ({ ...f, ticketAcceptUsdc: e.target.checked }))
+                              }
+                              className="mt-0.5"
+                            />
+                            <span className="text-[10px] text-white/70">
+                              Accept <strong className="text-white">USDC on Base</strong> (wallet signup)
+                            </span>
+                          </label>
+                        ) : (
+                          <p className="text-[9px] text-white/40">
+                            This event uses email signup — collectors pay with{' '}
+                            <strong className="text-white/60">mobile money reference</strong> when enabled below.
+                          </p>
+                        )}
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={manageForm.ticketAcceptMobileMoney}
+                            onChange={(e) =>
+                              setManageForm((f) => ({ ...f, ticketAcceptMobileMoney: e.target.checked }))
+                            }
+                            className="mt-0.5 accent-emerald-500"
+                          />
+                          <span className="text-[10px] text-white/70">
+                            Accept <strong className="text-emerald-400">mobile-money references</strong>
+                          </span>
+                        </label>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div className="p-5 border-t border-white/10 flex gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowManageEvent(false)}
+                    className="flex-1 py-3 border border-white/20 text-[10px] font-bold uppercase text-white/60"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={manageSaving}
+                    className="flex-1 py-3 bg-white text-black text-[10px] font-black uppercase hover:bg-neutral-200 disabled:opacity-50"
+                  >
+                    {manageSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Event Detail Modal */}
       <AnimatePresence>
         {selectedEvent && (
@@ -1994,16 +2567,38 @@ function HomeContent() {
                 </div>
 
                 {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && (
-                  <div className="p-4 border border-blue-500/25 bg-blue-500/[0.06] space-y-2">
+                  <div className="p-4 border border-blue-500/25 bg-blue-500/[0.06] space-y-3">
                     <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400/95 font-black">Ticket</p>
-                    <p className="text-[11px] text-white/80 leading-relaxed">
-                      <strong className="text-white">{selectedEvent.ticketPriceUsdc} USDC</strong> on Base when you register with a wallet.
-                      {selectedEvent.mobileMoneyInstructions
-                        ? ' You can also follow the mobile-money steps below and submit a reference when signing up with email.'
-                        : ' Add mobile-money instructions when creating the event if you want local payments.'}
+                    <p className="text-sm text-white/90 font-semibold">
+                      <strong className="text-white">{selectedEvent.ticketPriceUsdc} USDC</strong>
+                      {selectedEvent.isBlockchain !== false
+                        ? eventAcceptsUsdc(selectedEvent)
+                          ? ' · Pay with USDC on Base when registering with a wallet.'
+                          : ' · USDC checkout is turned off for this event.'
+                        : null}
                     </p>
+                    <ul className="text-[10px] text-white/65 space-y-1.5 list-none font-mono leading-relaxed">
+                      {selectedEvent.isBlockchain !== false && eventAcceptsUsdc(selectedEvent) && (
+                        <li>
+                          <span className="text-blue-300/90 font-bold">Crypto</span>: USDC on Base (wallet registration).
+                        </li>
+                      )}
+                      {eventAcceptsMobileMoney(selectedEvent) && (
+                        <li>
+                          <span className="text-emerald-400/90 font-bold">Mobile money</span>: follow the organizer’s steps and enter your reference when you register with email.
+                        </li>
+                      )}
+                      {!eventAcceptsMobileMoney(selectedEvent) && selectedEvent.isBlockchain === false ? (
+                        <li className="text-amber-400/80">
+                          Check with the host — mobile-money payment is not listed for this ticket.
+                        </li>
+                      ) : null}
+                    </ul>
                     {selectedEvent.mobileMoneyInstructions ? (
                       <div className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed border border-white/10 p-3 bg-black/40 font-sans">
+                        <p className="text-[8px] uppercase tracking-widest text-white/35 font-black mb-2">
+                          How to pay (mobile / local)
+                        </p>
                         {selectedEvent.mobileMoneyInstructions}
                       </div>
                     ) : null}
@@ -2048,7 +2643,8 @@ function HomeContent() {
                               className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                             />
                           </div>
-                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && (
+                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
+                          eventAcceptsMobileMoney(selectedEvent) ? (
                             <div className="space-y-2">
                               <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
                                 Mobile-money reference * (after payment)
@@ -2062,7 +2658,7 @@ function HomeContent() {
                                 className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                               />
                             </div>
-                          )}
+                          ) : null}
                           <button
                             type="submit"
                             disabled={registering}
@@ -2158,9 +2754,14 @@ function HomeContent() {
                           </p>
                           <p className="text-[9px] text-white/35 leading-relaxed">
                             Connect your wallet, then add how we should list you and your email for confirmations.
-                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
+                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && eventAcceptsUsdc(selectedEvent) ? (
                               <span className="block mt-2 text-amber-400/90">
                                 This ticket costs {selectedEvent.ticketPriceUsdc} USDC on Base — your wallet will be prompted to pay when you register.
+                              </span>
+                            ) : null}
+                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && !eventAcceptsUsdc(selectedEvent) ? (
+                              <span className="block mt-2 text-rose-400/90">
+                                Paid USDC checkout is disabled — use the email registration link shared by the organizer if they accept mobile money instead.
                               </span>
                             ) : null}
                           </p>

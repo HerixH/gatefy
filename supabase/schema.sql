@@ -20,7 +20,9 @@ create table if not exists public.events (
   is_blockchain boolean default true,
   organizer_display_name text,
   ticket_price_usdc numeric,
-  mobile_money_instructions text
+  mobile_money_instructions text,
+  ticket_accept_usdc boolean default true,
+  ticket_accept_mobile_money boolean default true
 );
 
 -- If table already exists, run: alter table public.events add column if not exists end_date timestamptz; alter table public.events add column if not exists max_attendees integer;

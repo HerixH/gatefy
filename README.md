@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Database (Supabase)
+
+- Fresh setup: see `supabase/schema.sql`.
+- Existing databases: apply numbered SQL in `supabase/patches/` in order; see [`supabase/patches/README.md`](supabase/patches/README.md).  
+  **Ticket payment rails** (USDC vs mobile money for paid events) require patch **`05_ticket_payment_modes.sql`**.
+
 ## Getting Started
 
 First, run the development server:

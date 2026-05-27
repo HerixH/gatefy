@@ -30,6 +30,10 @@ export interface Event {
     ticketPriceUsdc?: number;
     /** Organizer instructions for mobile money (MTN MoMo, etc.) */
     mobileMoneyInstructions?: string;
+    /** Paid wallet events: accept USDC transfer (default true). */
+    ticketAcceptUsdc?: boolean;
+    /** Paid events: accept mobile-money reference (default true). Required for email-only paid events. */
+    ticketAcceptMobileMoney?: boolean;
 }
 
 type EventRow = {
@@ -52,6 +56,8 @@ type EventRow = {
     organizer_display_name: string | null;
     ticket_price_usdc?: number | string | null;
     mobile_money_instructions?: string | null;
+    ticket_accept_usdc?: boolean | null;
+    ticket_accept_mobile_money?: boolean | null;
 };
 
 /** DB / drivers may return boolean or string; null/undefined defaults to wallet (blockchain) mode. */
@@ -70,14 +76,29 @@ function parseTicketPrice(v: unknown): number | undefined {
 }
 
 const MISSING_PAID_TICKET_COLUMNS_HINT =
-    'Paid ticket fields require DB columns. In Supabase Dashboard → SQL Editor, run:\n\n' +
+    'Paid ticket / payment-mode fields require DB columns. In Supabase Dashboard → SQL Editor, run:\n\n' +
     'alter table public.events add column if not exists ticket_price_usdc numeric;\n' +
     'alter table public.events add column if not exists mobile_money_instructions text;\n' +
-    "notify pgrst, 'reload schema';\n";
+    'alter table public.events add column if not exists ticket_accept_usdc boolean default true;\n' +
+    'alter table public.events add column if not exists ticket_accept_mobile_money boolean default true;\n' +
+    "notify pgrst, 'reload schema';\n" +
+    '\n(See supabase/patches/05_ticket_payment_modes.sql)\n';
 
 function isMissingPaidTicketColumnError(err: { message?: string }): boolean {
     const m = err.message ?? '';
-    return m.includes('schema cache') && (m.includes('ticket_price_usdc') || m.includes('mobile_money_instructions'));
+    if (!m.includes('schema cache')) return false;
+    return (
+        m.includes('ticket_price_usdc') ||
+        m.includes('mobile_money_instructions') ||
+        m.includes('ticket_accept_usdc') ||
+        m.includes('ticket_accept_mobile_money')
+    );
+}
+
+/** Default true when column missing / null — old rows behave as today (both rails on). */
+function acceptFlagFromDb(value: unknown): boolean {
+    if (value === false || value === 'false' || value === 0) return false;
+    return true;
 }
 
 function rowToEvent(r: EventRow): Event {
@@ -101,6 +122,8 @@ function rowToEvent(r: EventRow): Event {
         organizerDisplayName: r.organizer_display_name ?? undefined,
         ticketPriceUsdc: parseTicketPrice(r.ticket_price_usdc),
         mobileMoneyInstructions: r.mobile_money_instructions?.trim() || undefined,
+        ticketAcceptUsdc: acceptFlagFromDb(r.ticket_accept_usdc),
+        ticketAcceptMobileMoney: acceptFlagFromDb(r.ticket_accept_mobile_money),
     };
 }
 
@@ -132,15 +155,19 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         verificationCode,
         createdAt,
         attendeeCount: 0,
+        ticketAcceptUsdc: data.ticketAcceptUsdc !== false,
+        ticketAcceptMobileMoney: data.ticketAcceptMobileMoney !== false,
     };
 
     if (isSupabaseConfigured) {
         const supabase = getSupabase();
         const usdcPrice = parseTicketPrice(event.ticketPriceUsdc);
         const momo = event.mobileMoneyInstructions?.trim();
-        const ticketCols: Record<string, string | number> = {};
+        const ticketCols: Record<string, string | number | boolean> = {};
         if (usdcPrice !== undefined) ticketCols.ticket_price_usdc = usdcPrice;
         if (momo) ticketCols.mobile_money_instructions = momo;
+        ticketCols.ticket_accept_usdc = event.ticketAcceptUsdc !== false;
+        ticketCols.ticket_accept_mobile_money = event.ticketAcceptMobileMoney !== false;
 
         const { error } = await supabase.from('events').insert({
             id: event.id,
@@ -223,4 +250,116 @@ export async function getEventByCode(code: string): Promise<Event | undefined> {
     }
     const events = await getEvents();
     return events.find(e => e.verificationCode === code);
+}
+
+/** Partial fields organizers may change after creation (identity & verification code are immutable). */
+export type OrganizerMutableEventPatch = Partial<{
+    name: string;
+    description: string;
+    date: string;
+    endDate: string | null;
+    location: string;
+    maxAttendees: number | null;
+    isVip: boolean;
+    vipTokenAddress: string;
+    vipMinBalance: string;
+    bannerUrl: string | null;
+    isBlockchain: boolean;
+    organizerDisplayName: string;
+    ticketPriceUsdc: number | null;
+    mobileMoneyInstructions: string | null;
+    ticketAcceptUsdc?: boolean;
+    ticketAcceptMobileMoney?: boolean;
+}>;
+
+function patchToSupabaseRow(patch: OrganizerMutableEventPatch): Record<string, string | number | boolean | null> {
+    const row: Record<string, string | number | boolean | null> = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.description !== undefined) row.description = patch.description;
+    if (patch.date !== undefined) row.date = patch.date;
+    if (patch.endDate !== undefined) row.end_date = patch.endDate;
+    if (patch.location !== undefined) row.location = patch.location;
+    if (patch.maxAttendees !== undefined) {
+        row.max_attendees = patch.maxAttendees === null || patch.maxAttendees <= 0 ? null : patch.maxAttendees;
+    }
+    if (patch.isVip !== undefined) row.is_vip = patch.isVip;
+    if (patch.vipTokenAddress !== undefined) row.vip_token_address = patch.vipTokenAddress;
+    if (patch.vipMinBalance !== undefined) row.vip_min_balance = patch.vipMinBalance;
+    if (patch.bannerUrl !== undefined) row.banner_url = patch.bannerUrl === null || patch.bannerUrl === '' ? null : patch.bannerUrl;
+    if (patch.isBlockchain !== undefined) row.is_blockchain = patch.isBlockchain;
+    if (patch.organizerDisplayName !== undefined) row.organizer_display_name = patch.organizerDisplayName?.trim() || null;
+    if (patch.ticketPriceUsdc !== undefined) {
+        const p = patch.ticketPriceUsdc;
+        row.ticket_price_usdc = p === null || p <= 0 || !Number.isFinite(p) ? null : p;
+    }
+    if (patch.mobileMoneyInstructions !== undefined) {
+        const m = patch.mobileMoneyInstructions;
+        row.mobile_money_instructions = m === null || String(m).trim() === '' ? null : String(m).trim();
+    }
+    if (patch.ticketAcceptUsdc !== undefined) row.ticket_accept_usdc = !!patch.ticketAcceptUsdc;
+    if (patch.ticketAcceptMobileMoney !== undefined) row.ticket_accept_mobile_money = !!patch.ticketAcceptMobileMoney;
+    return row;
+}
+
+export async function updateEventById(
+    eventId: string,
+    patch: OrganizerMutableEventPatch
+): Promise<Event | undefined> {
+    const id = eventId.trim();
+    if (!id) return undefined;
+
+    const row = patchToSupabaseRow(patch);
+    if (Object.keys(row).length === 0) {
+        return getEventById(id);
+    }
+
+    if (isSupabaseConfigured) {
+        const supabase = getSupabase();
+        const { error } = await supabase.from('events').update(row).eq('id', id);
+        if (error) {
+            if (isMissingPaidTicketColumnError(error)) throw new Error(MISSING_PAID_TICKET_COLUMNS_HINT);
+            throw error;
+        }
+        return getEventById(id);
+    }
+
+    const events = await getEvents();
+    const idx = events.findIndex((e) => e.id.toLowerCase() === id.toLowerCase());
+    if (idx === -1) return undefined;
+
+    const cur = events[idx];
+    const next: Event = { ...cur };
+    if (patch.name !== undefined) next.name = patch.name;
+    if (patch.description !== undefined) next.description = patch.description;
+    if (patch.date !== undefined) next.date = patch.date;
+    if (patch.endDate !== undefined) next.endDate = patch.endDate ?? undefined;
+    if (patch.location !== undefined) next.location = patch.location;
+    if (patch.maxAttendees !== undefined) {
+        next.maxAttendees = patch.maxAttendees === null || patch.maxAttendees <= 0 ? undefined : patch.maxAttendees;
+    }
+    if (patch.isVip !== undefined) next.isVip = patch.isVip;
+    if (patch.vipTokenAddress !== undefined) next.vipTokenAddress = patch.vipTokenAddress;
+    if (patch.vipMinBalance !== undefined) next.vipMinBalance = patch.vipMinBalance;
+    if (patch.bannerUrl !== undefined) next.bannerUrl = patch.bannerUrl ?? undefined;
+    if (patch.isBlockchain !== undefined) next.isBlockchain = patch.isBlockchain;
+    if (patch.organizerDisplayName !== undefined) next.organizerDisplayName = patch.organizerDisplayName?.trim() || undefined;
+    if (patch.ticketPriceUsdc !== undefined) {
+        next.ticketPriceUsdc =
+            patch.ticketPriceUsdc === null || patch.ticketPriceUsdc <= 0 ? undefined : patch.ticketPriceUsdc;
+    }
+    if (patch.mobileMoneyInstructions !== undefined) {
+        const m = patch.mobileMoneyInstructions;
+        next.mobileMoneyInstructions = m === null || !String(m).trim() ? undefined : String(m).trim();
+    }
+    if (patch.ticketAcceptUsdc !== undefined) next.ticketAcceptUsdc = patch.ticketAcceptUsdc;
+    if (patch.ticketAcceptMobileMoney !== undefined) next.ticketAcceptMobileMoney = patch.ticketAcceptMobileMoney;
+
+    events[idx] = next;
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+        fs.writeFileSync(EVENTS_PATH, JSON.stringify(events, null, 2));
+    } catch {
+        throw new Error('File system not writable (e.g. on Vercel). Use Supabase.');
+    }
+    return next;
 }

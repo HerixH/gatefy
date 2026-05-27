@@ -6,6 +6,11 @@ export interface Registration {
     email: string | null;
     name: string | null;
     registeredAt: string;
+    /** none | paid_crypto | paid_mobile */
+    paymentStatus?: string | null;
+    paymentTxHash?: string | null;
+    paymentReference?: string | null;
+    paidAt?: string | null;
 }
 
 function mapRegistrationRow(r: {
@@ -14,6 +19,10 @@ function mapRegistrationRow(r: {
     email?: string | null;
     name?: string | null;
     registered_at: string;
+    payment_status?: string | null;
+    payment_tx_hash?: string | null;
+    payment_reference?: string | null;
+    paid_at?: string | null;
 }): Registration {
     return {
         eventId: r.event_id,
@@ -21,6 +30,10 @@ function mapRegistrationRow(r: {
         email: r.email ?? null,
         name: r.name ?? null,
         registeredAt: r.registered_at,
+        paymentStatus: r.payment_status ?? undefined,
+        paymentTxHash: r.payment_tx_hash ?? undefined,
+        paymentReference: r.payment_reference ?? undefined,
+        paidAt: r.paid_at ?? undefined,
     };
 }
 

@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, startTransition } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
+import { formatOrganizerShort, isEmailOrganizerId } from '@/lib/event-organizer';
+import { eventAcceptsMobileMoney, eventAcceptsUsdc } from '@/lib/event-payment';
 
 interface AttendanceRecord {
     wallet?: string | null;
@@ -20,6 +22,7 @@ interface DashboardEvent {
     date: string;
     location: string;
     organizer: string;
+    organizerDisplayName?: string;
     verificationCode: string;
     createdAt: string;
     attendeeCount: number;
@@ -29,6 +32,10 @@ interface DashboardEvent {
     vipTokenAddress?: string;
     vipMinBalance?: string;
     isBlockchain?: boolean;
+    ticketPriceUsdc?: number;
+    mobileMoneyInstructions?: string;
+    ticketAcceptUsdc?: boolean;
+    ticketAcceptMobileMoney?: boolean;
 }
 
 interface Registration {
@@ -37,9 +44,15 @@ interface Registration {
     email: string | null;
     name: string | null;
     registeredAt: string;
+    paymentStatus?: string | null;
+    paymentTxHash?: string | null;
+    paymentReference?: string | null;
+    paidAt?: string | null;
 }
 
-type Tab = 'overview' | 'attendance' | 'events';
+type Tab = 'overview' | 'managers' | 'attendance' | 'events';
+
+type OrganizerHostType = 'wallet' | 'email';
 
 export default function AdminDashboard() {
     const [authed, setAuthed] = useState(false);
@@ -58,6 +71,10 @@ export default function AdminDashboard() {
     // Interactivity: Search & Filter
     const [searchQuery, setSearchQuery] = useState('');
     const [filterType, setFilterType] = useState<'all' | 'vip' | 'regular'>('all');
+    const [managerHostFilter, setManagerHostFilter] = useState<'all' | OrganizerHostType>('all');
+
+    /** Filter events tab to hosts matching this organizer id (normalized). */
+    const [selectedOrganizerKey, setSelectedOrganizerKey] = useState<string | null>(null);
 
     useEffect(() => {
         fetch('/api/admin/session', { credentials: 'include' })
@@ -70,12 +87,40 @@ export default function AdminDashboard() {
             .finally(() => setSessionChecked(true));
     }, []);
 
+    const fetchAttendance = useCallback(async () => {
+        const res = await fetch('/api/admin/attendance', { cache: 'no-store', credentials: 'include' });
+        if (res.status === 401) {
+            setAuthed(false);
+            return;
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) setAttendance(data);
+    }, []);
+
+    const fetchEvents = useCallback(async () => {
+        const res = await fetch('/api/events', { cache: 'no-store' });
+        const data = await res.json();
+        if (Array.isArray(data)) setEvents(data);
+    }, []);
+
+    const fetchRegistrations = useCallback(async () => {
+        const res = await fetch('/api/admin/registrations', { cache: 'no-store', credentials: 'include' });
+        if (res.status === 401) {
+            setAuthed(false);
+            return;
+        }
+        const data = await res.json();
+        if (Array.isArray(data)) setRegistrations(data);
+    }, []);
+
     useEffect(() => {
         if (!authed) return;
-        fetchAttendance();
-        fetchRegistrations();
-        fetchEvents();
-    }, [authed]);
+        startTransition(() => {
+            void fetchAttendance();
+            void fetchRegistrations();
+            void fetchEvents();
+        });
+    }, [authed, fetchAttendance, fetchRegistrations, fetchEvents]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -105,39 +150,15 @@ export default function AdminDashboard() {
         setAuthed(false);
     };
 
-    const fetchAttendance = async () => {
-        const res = await fetch('/api/admin/attendance', { cache: 'no-store', credentials: 'include' });
-        if (res.status === 401) {
-            setAuthed(false);
-            return;
-        }
-        const data = await res.json();
-        if (Array.isArray(data)) setAttendance(data);
-    };
-
-    const fetchEvents = async () => {
-        const res = await fetch('/api/events', { cache: 'no-store' });
-        const data = await res.json();
-        if (Array.isArray(data)) setEvents(data);
-    };
-
-    const fetchRegistrations = async () => {
-        const res = await fetch('/api/admin/registrations', { cache: 'no-store', credentials: 'include' });
-        if (res.status === 401) {
-            setAuthed(false);
-            return;
-        }
-        const data = await res.json();
-        if (Array.isArray(data)) setRegistrations(data);
-    };
-
     // Export Logic
-    const exportToCSV = (data: any[], filename: string) => {
+    const exportToCSV = (data: Record<string, string | number | boolean | null | undefined>[], filename: string) => {
         if (data.length === 0) return;
         const headers = Object.keys(data[0]);
         const csvContent = [
             headers.join(','),
-            ...data.map(row => headers.map(h => `"${row[h] || ''}"`).join(','))
+            ...data.map(row =>
+                headers.map(h => `"${String(row[h] ?? '')}"`).join(','),
+            ),
         ].join('\n');
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -151,16 +172,106 @@ export default function AdminDashboard() {
         document.body.removeChild(link);
     };
 
+    /** Per–event-host aggregate stats for admins (wallet vs email-hosted events). */
+    const organizerSummaries = useMemo(() => {
+        type Row = {
+            organizer: string;
+            display: string;
+            hostType: OrganizerHostType;
+            events: DashboardEvent[];
+        };
+        const m = new Map<string, Row>();
+        for (const ev of events) {
+            const k = ev.organizer.toLowerCase();
+            let row = m.get(k);
+            if (!row) {
+                row = {
+                    organizer: ev.organizer,
+                    display: formatOrganizerShort(ev),
+                    hostType: isEmailOrganizerId(ev.organizer) ? 'email' : 'wallet',
+                    events: [],
+                };
+                m.set(k, row);
+            }
+            row.events.push(ev);
+        }
+
+        const eventIdLower = (id: string) => id.trim().toLowerCase();
+
+        return [...m.values()]
+            .map((row) => {
+                const ids = new Set(row.events.map((e) => eventIdLower(e.id)));
+                const registrationCount = registrations.filter((r) =>
+                    ids.has(eventIdLower(r.eventId ?? '')),
+                ).length;
+                const verifiedCheckins = attendance.filter(
+                    (a) =>
+                        !!a.eventId &&
+                        ids.has(eventIdLower(a.eventId)),
+                ).length;
+                return {
+                    ...row,
+                    registrationCount,
+                    verifiedCheckins,
+                };
+            })
+            .sort(
+                (a, b) =>
+                    b.events.length - a.events.length ||
+                    a.display.localeCompare(b.display),
+            );
+    }, [events, registrations, attendance]);
+
     // Filtered data
-    const filteredEvents = events.filter(ev => {
-        const matchesSearch = ev.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const filteredEvents = events.filter((ev) => {
+        const orgLower = ev.organizer.toLowerCase();
+        if (selectedOrganizerKey && orgLower !== selectedOrganizerKey.toLowerCase()) return false;
+        const matchesSearch =
+            ev.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (ev.organizerDisplayName ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
             ev.location?.toLowerCase().includes(searchQuery.toLowerCase()) ||
             ev.organizer.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesFilter = filterType === 'all' ||
-            (filterType === 'vip' && ev.isVip) ||
-            (filterType === 'regular' && !ev.isVip);
-        return matchesSearch && matchesFilter;
+        const matchesFilter =
+            filterType === 'all' || (filterType === 'vip' && ev.isVip) || (filterType === 'regular' && !ev.isVip);
+        const isEmailHost = isEmailOrganizerId(ev.organizer);
+        const matchesHost =
+            managerHostFilter === 'all' ||
+            (managerHostFilter === 'wallet' && !isEmailHost) ||
+            (managerHostFilter === 'email' && isEmailHost);
+        return matchesSearch && matchesFilter && matchesHost;
     });
+
+    const filteredOrganizerSummaries = organizerSummaries.filter((row) => {
+        if (managerHostFilter === 'wallet' && row.hostType !== 'wallet') return false;
+        if (managerHostFilter === 'email' && row.hostType !== 'email') return false;
+        const q = searchQuery.toLowerCase();
+        if (!q) return true;
+        return (
+            row.display.toLowerCase().includes(q) ||
+            row.organizer.toLowerCase().includes(q) ||
+            row.events.some((e) => e.name.toLowerCase().includes(q))
+        );
+    });
+
+    const openHostEvents = (organizerKey: string) => {
+        setSelectedOrganizerKey(organizerKey);
+        setTab('events');
+        setSearchQuery('');
+    };
+
+    const exportManagersCSV = () => {
+        exportToCSV(
+            filteredOrganizerSummaries.map((r) => ({
+                display: r.display,
+                organizer_raw: r.organizer,
+                host_type: r.hostType,
+                events_managed: r.events.length,
+                registrations_total: r.registrationCount,
+                verified_checkins_total: r.verifiedCheckins,
+            })),
+            'gatefy-event-managers.csv',
+        );
+    };
 
     const filteredAttendance = attendance.filter(record =>
         (record.wallet ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -267,6 +378,41 @@ export default function AdminDashboard() {
         return `${raw.slice(0, 10)}…${raw.slice(-8)}`;
     };
 
+    const shortHash = (h?: string | null) => {
+        const t = h?.trim();
+        if (!t) return '';
+        if (t.length <= 14) return t;
+        return `${t.slice(0, 8)}…${t.slice(-6)}`;
+    };
+
+    /** One line for CSV / badges: how this registration paid (if tracked). */
+    const registrationPaymentLabel = (r: Registration): string => {
+        const st = (r.paymentStatus ?? '').trim().toLowerCase();
+        if (st === 'paid_crypto') return 'USDC (on-chain)';
+        if (st === 'paid_mobile') return 'Mobile money ref';
+        if (st && st !== 'none') return st;
+        return '—';
+    };
+
+    const registrationPaymentDetail = (r: Registration): string => {
+        const st = (r.paymentStatus ?? '').trim().toLowerCase();
+        if (st === 'paid_crypto' && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
+        if (st === 'paid_mobile' && r.paymentReference?.trim()) return r.paymentReference.trim();
+        return '';
+    };
+
+    const eventPaidTicketSummary = (ev: DashboardEvent) => {
+        const price = ev.ticketPriceUsdc ?? 0;
+        if (!(Number.isFinite(price) && price > 0)) return { label: 'Free', rails: '' as string };
+        const rails: string[] = [];
+        if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
+        if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
+        return {
+            label: `${price} USDC`,
+            rails: rails.length ? rails.join(' · ') : '—',
+        };
+    };
+
     const getVerifiedForEvent = (eventId: string) =>
         attendance
             .filter(a => a.eventId && a.eventId.toLowerCase() === eventId.toLowerCase())
@@ -287,7 +433,16 @@ export default function AdminDashboard() {
     const exportEventRoster = (ev: DashboardEvent) => {
         const verified = getVerifiedForEvent(ev.id);
         const onlyReg = getRegisteredOnlyForEvent(ev.id);
-        const rows: { Status: string; Identity: string; Name: string; Email: string; Code: string; Timestamp: string }[] = [];
+        const rows: {
+            Status: string;
+            Identity: string;
+            Name: string;
+            Email: string;
+            Code: string;
+            Payment: string;
+            PaymentDetail: string;
+            Timestamp: string;
+        }[] = [];
         verified.forEach(v => {
             rows.push({
                 Status: 'Verified',
@@ -295,6 +450,8 @@ export default function AdminDashboard() {
                 Name: '—',
                 Email: (v.email ?? '').trim() || '—',
                 Code: v.code,
+                Payment: '—',
+                PaymentDetail: '—',
                 Timestamp: new Date(v.checkedInAt).toLocaleString('en-GB'),
             });
         });
@@ -305,6 +462,8 @@ export default function AdminDashboard() {
                 Name: (r.name ?? '').trim() || '—',
                 Email: (r.email ?? '').trim() || '—',
                 Code: '-',
+                Payment: registrationPaymentLabel(r),
+                PaymentDetail: registrationPaymentDetail(r) || '—',
                 Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
             });
         });
@@ -430,29 +589,45 @@ export default function AdminDashboard() {
                 </div>
 
                 <nav className="hidden md:flex items-center gap-2">
-                    {(['overview', 'attendance', 'events'] as Tab[]).map(t => (
+                    {(['overview', 'managers', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
-                            onClick={() => { setTab(t); setSearchQuery(''); }}
+                            onClick={() => {
+                                setTab(t);
+                                setSearchQuery('');
+                                if (t !== 'events') {
+                                    setSelectedOrganizerKey(null);
+                                    setFilterType('all');
+                                    setManagerHostFilter('all');
+                                }
+                            }}
                             className={`px-6 py-2 text-[9px] tracking-[0.35em] uppercase font-black transition-all ${tab === t
                                 ? 'bg-white text-black'
                                 : 'text-white/30 hover:text-white/70'}`}
                         >
-                            {t}
+                            {t === 'managers' ? 'Hosts' : t}
                         </button>
                     ))}
                 </nav>
 
                 <div className="md:hidden flex items-center gap-1 overflow-x-auto no-scrollbar">
-                    {(['overview', 'attendance', 'events'] as Tab[]).map(t => (
+                    {(['overview', 'managers', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
-                            onClick={() => { setTab(t); setSearchQuery(''); }}
+                            onClick={() => {
+                                setTab(t);
+                                setSearchQuery('');
+                                if (t !== 'events') {
+                                    setSelectedOrganizerKey(null);
+                                    setFilterType('all');
+                                    setManagerHostFilter('all');
+                                }
+                            }}
                             className={`px-3 py-1.5 text-[8px] tracking-[0.2em] uppercase font-black transition-all whitespace-nowrap ${tab === t
                                 ? 'bg-white text-black'
                                 : 'text-white/30'}`}
                         >
-                            {t}
+                            {t === 'managers' ? 'Hosts' : t}
                         </button>
                     ))}
                 </div>
@@ -481,12 +656,33 @@ export default function AdminDashboard() {
                                     <div className="w-16 h-16 border-t font-black border-r border-white" />
                                 </div>
                                 <p className="text-5xl font-medium tracking-tighter mb-1">{attendance.length}</p>
-                                <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Verification Events</p>
+                                <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Check-in rows</p>
                             </motion.div>
 
                             <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
                                 <p className="text-2xl font-bold mb-1">{events.length}</p>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Pools</p>
+                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Events</p>
+                            </div>
+
+                            <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
+                                <p className="text-2xl font-bold mb-1">{organizerSummaries.length}</p>
+                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Event hosts</p>
+                            </div>
+
+                            <div className="border border-white/[0.05] bg-white/[0.015] p-4 space-y-2">
+                                <p className="text-[8px] uppercase tracking-[0.3em] font-black text-white/25">Wallet vs email hosts</p>
+                                <div className="flex justify-between text-[10px] font-mono">
+                                    <span className="text-white/50">Wallet</span>
+                                    <span className="text-white/80 font-bold">
+                                        {organizerSummaries.filter((h) => h.hostType === 'wallet').length}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between text-[10px] font-mono">
+                                    <span className="text-white/50">Email-hosted</span>
+                                    <span className="text-emerald-400/90 font-bold">
+                                        {organizerSummaries.filter((h) => h.hostType === 'email').length}
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -497,37 +693,113 @@ export default function AdminDashboard() {
                 <main>
                     {/* Search Bar */}
                     {tab !== 'overview' && (
-                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-12 relative group">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={e => setSearchQuery(e.target.value)}
-                                placeholder={`Filter ${tab} data by address, ID, or name...`}
-                                className="w-full bg-white/[0.02] border border-white/[0.06] px-8 py-5 text-sm font-mono tracking-widest placeholder:text-white/30 focus:outline-none focus:border-white/20 transition-all font-bold"
-                            />
-                            <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-4">
-                                {tab === 'attendance' && (
-                                    <button
-                                        onClick={() => exportAttendanceReport()}
-                                        className="px-4 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors bg-white text-black hover:bg-neutral-200 mr-2"
-                                    >
-                                        Export CSV
-                                    </button>
-                                )}
-                                {tab === 'events' && (
-                                    <div className="flex bg-black p-1 border border-white/5">
-                                        {(['all', 'vip', 'regular'] as const).map(f => (
+                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-12 space-y-4">
+                            <div className="relative group">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={e => setSearchQuery(e.target.value)}
+                                    placeholder={
+                                        tab === 'managers'
+                                            ? 'Filter hosts by display name, wallet, email id, or event title…'
+                                            : `Filter ${tab} data by address, ID, or name…`
+                                    }
+                                    className="w-full bg-white/[0.02] border border-white/[0.06] px-8 py-5 text-sm font-mono tracking-widest placeholder:text-white/30 focus:outline-none focus:border-white/20 transition-all font-bold"
+                                />
+                                <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-wrap items-center justify-end gap-2 max-w-[65%]">
+                                    {tab === 'attendance' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => exportAttendanceReport()}
+                                            className="px-4 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors bg-white text-black hover:bg-neutral-200"
+                                        >
+                                            Export CSV
+                                        </button>
+                                    )}
+                                    {tab === 'managers' && (
+                                        <>
+                                            <div className="flex bg-black p-1 border border-white/5">
+                                                {(['all', 'wallet', 'email'] as const).map((f) => (
+                                                    <button
+                                                        key={f}
+                                                        type="button"
+                                                        onClick={() => setManagerHostFilter(f)}
+                                                        className={`px-3 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors ${managerHostFilter === f ? 'bg-white text-black' : 'text-white/30'}`}
+                                                    >
+                                                        {f}
+                                                    </button>
+                                                ))}
+                                            </div>
                                             <button
-                                                key={f}
-                                                onClick={() => setFilterType(f)}
-                                                className={`px-3 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors ${filterType === f ? 'bg-white text-black' : 'text-white/30'}`}
+                                                type="button"
+                                                onClick={() => exportManagersCSV()}
+                                                className="px-4 py-1 text-[8px] uppercase tracking-widest font-black font-mono bg-white text-black hover:bg-neutral-200"
                                             >
-                                                {f}
+                                                Export CSV
                                             </button>
-                                        ))}
-                                    </div>
-                                )}
+                                        </>
+                                    )}
+                                    {tab === 'events' && (
+                                        <>
+                                            <div className="flex bg-black p-1 border border-white/5">
+                                                {(['all', 'vip', 'regular'] as const).map((f) => (
+                                                    <button
+                                                        key={f}
+                                                        type="button"
+                                                        onClick={() => setFilterType(f)}
+                                                        className={`px-3 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors ${filterType === f ? 'bg-white text-black' : 'text-white/30'}`}
+                                                    >
+                                                        {f}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="flex bg-black p-1 border border-white/5">
+                                                <span className="px-2 py-1 text-[7px] text-white/20 font-black uppercase self-center tracking-wider">hosts</span>
+                                                {(['all', 'wallet', 'email'] as const).map((f) => (
+                                                    <button
+                                                        key={`h-${f}`}
+                                                        type="button"
+                                                        onClick={() => setManagerHostFilter(f)}
+                                                        className={`px-2 py-1 text-[8px] uppercase tracking-widest font-black font-mono transition-colors ${managerHostFilter === f ? 'bg-emerald-600/90 text-white' : 'text-white/30'}`}
+                                                    >
+                                                        {f}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             </div>
+                            {tab === 'events' && selectedOrganizerKey && (
+                                <div className="flex flex-wrap items-center gap-2 text-[9px] font-mono text-white/50">
+                                    <span className="text-white/30 uppercase tracking-[0.2em] font-black">Pinned host:</span>
+                                    <span className="px-2 py-1 border border-white/15 bg-white/[0.04] text-white/80 truncate max-w-md" title={selectedOrganizerKey}>
+                                        {organizerSummaries.find((s) => s.organizer.toLowerCase() === selectedOrganizerKey.toLowerCase())
+                                            ?.display ?? selectedOrganizerKey}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedOrganizerKey(null)}
+                                        className="text-white/40 hover:text-white uppercase tracking-widest font-black"
+                                    >
+                                        Clear
+                                    </button>
+                                    <Link
+                                        href="/"
+                                        className="text-blue-400/90 hover:text-blue-300 uppercase tracking-widest font-black ml-2"
+                                    >
+                                        Public app →
+                                    </Link>
+                                </div>
+                            )}
+                            {tab === 'managers' && (
+                                <p className="text-[9px] text-white/30 font-mono leading-relaxed max-w-3xl">
+                                    <span className="text-white/50 font-bold uppercase tracking-[0.15em]">Note:</span>{' '}
+                                    Wallet hosts are identified by on-chain addresses; email hosts use{' '}
+                                    <code className="text-white/45">email:…</code> in storage. Organizer email is{' '}
+                                    <span className="text-amber-400/70">browser-session based</span> on the site — admins see all events here regardless.
+                                </p>
+                            )}
                         </motion.div>
                     )}
 
@@ -590,6 +862,87 @@ export default function AdminDashboard() {
                                             {events.length === 0 && <p className="text-[10px] text-white/10 italic text-center py-12">No active pools</p>}
                                         </div>
                                     </div>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* EVENT HOSTS (organizers) */}
+                        {tab === 'managers' && (
+                            <motion.div key="managers" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+                                <div className="space-y-2">
+                                    <h2 className="text-3xl font-black tracking-tighter uppercase text-white/90">Event hosts</h2>
+                                    <p className="text-[10px] uppercase tracking-[0.35em] text-white/25 font-black">
+                                        Unique wallet and email-session organizers · click a row to open their events
+                                    </p>
+                                </div>
+                                <div className="border border-white/[0.06] divide-y divide-white/[0.06]">
+                                    {filteredOrganizerSummaries.length === 0 ? (
+                                        <div className="p-16 text-center text-white/25 text-[10px] uppercase tracking-widest">
+                                            No hosts match this filter
+                                        </div>
+                                    ) : (
+                                        filteredOrganizerSummaries.map((row, i) => (
+                                            <motion.div
+                                                key={row.organizer}
+                                                role="button"
+                                                tabIndex={0}
+                                                initial={{ opacity: 0, y: 6 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ delay: i * 0.03 }}
+                                                onClick={() => openHostEvents(row.organizer)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault();
+                                                        openHostEvents(row.organizer);
+                                                    }
+                                                }}
+                                                className="px-5 py-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 hover:bg-white/[0.03] cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40"
+                                            >
+                                                <div className="space-y-2 min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span
+                                                            className={`text-[8px] font-black uppercase tracking-[0.2em] px-2 py-0.5 border ${
+                                                                row.hostType === 'wallet'
+                                                                    ? 'border-white/25 text-white/80 bg-white/[0.04]'
+                                                                    : 'border-emerald-500/35 text-emerald-400/90 bg-emerald-500/10'
+                                                            }`}
+                                                        >
+                                                            {row.hostType === 'wallet' ? 'Wallet host' : 'Email host'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-lg font-bold tracking-tight text-white truncate" title={row.display}>
+                                                        {row.display}
+                                                    </p>
+                                                    <p className="text-[10px] font-mono text-white/35 truncate" title={row.organizer}>
+                                                        {row.organizer}
+                                                    </p>
+                                                    <p className="text-[9px] text-white/25 font-mono line-clamp-2">
+                                                        Events:{' '}
+                                                        <span className="text-white/45">
+                                                            {row.events.map((e) => e.name).join(' · ')}
+                                                        </span>
+                                                    </p>
+                                                </div>
+                                                <div className="flex flex-wrap gap-6 shrink-0 text-[10px] font-mono text-white/50">
+                                                    <div>
+                                                        <p className="text-[8px] uppercase tracking-wider text-white/25 mb-0.5">Events</p>
+                                                        <p className="text-white font-bold">{row.events.length}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[8px] uppercase tracking-wider text-white/25 mb-0.5">Registrations</p>
+                                                        <p className="text-white font-bold">{row.registrationCount}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[8px] uppercase tracking-wider text-white/25 mb-0.5">Check-ins</p>
+                                                        <p className="text-blue-400/90 font-bold">{row.verifiedCheckins}</p>
+                                                    </div>
+                                                    <span className="self-center px-3 py-2 border border-white/15 text-[8px] font-black uppercase tracking-widest text-white/50">
+                                                        Open →
+                                                    </span>
+                                                </div>
+                                            </motion.div>
+                                        ))
+                                    )}
                                 </div>
                             </motion.div>
                         )}
@@ -696,7 +1049,20 @@ export default function AdminDashboard() {
                                                                                     <span className="text-[10px] uppercase tracking-wider text-amber-400/60">
                                                                                         {ev?.name ?? reg.eventId}
                                                                                     </span>
-                                                                                    <span className="font-mono text-sm text-white/20">—</span>
+                                                                                    <span className="font-mono text-[10px] text-white/35 leading-tight">
+                                                                                        {registrationPaymentLabel(reg) === '—'
+                                                                                            ? '—'
+                                                                                            : (
+                                                                                                  <>
+                                                                                                      <span className="block text-amber-400/80">{registrationPaymentLabel(reg)}</span>
+                                                                                                      {registrationPaymentDetail(reg) && (
+                                                                                                          <span className="block truncate text-white/25 text-[9px]" title={registrationPaymentDetail(reg)}>
+                                                                                                              {shortHash(registrationPaymentDetail(reg)) || registrationPaymentDetail(reg)}
+                                                                                                          </span>
+                                                                                                      )}
+                                                                                                  </>
+                                                                                              )}
+                                                                                    </span>
                                                                                     <span className="text-[10px] text-white/20 font-mono">
                                                                                         Registered {new Date(reg.registeredAt).toLocaleString('en-GB', {
                                                                                             day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
@@ -751,12 +1117,34 @@ export default function AdminDashboard() {
                                                         <p className="text-[9px] font-mono text-white/60 uppercase">{ev.location || 'N/A'}</p>
                                                     </div>
                                                     <div className="space-y-0.5">
-                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Organizer</p>
-                                                        <p className="text-[9px] font-mono text-white/60">{ev.organizer.slice(0, 8)}...{ev.organizer.slice(-6)}</p>
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Event host</p>
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            <span
+                                                                className={`text-[7px] font-black uppercase tracking-wider px-1 py-0.5 ${
+                                                                    isEmailOrganizerId(ev.organizer)
+                                                                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                                                                        : 'bg-white/[0.06] text-white/70 border border-white/10'
+                                                                }`}
+                                                            >
+                                                                {isEmailOrganizerId(ev.organizer) ? 'Email' : 'Wallet'}
+                                                            </span>
+                                                            <p className="text-[9px] font-mono text-white/60 truncate max-w-[200px]" title={formatOrganizerShort(ev)}>
+                                                                {formatOrganizerShort(ev)}
+                                                            </p>
+                                                        </div>
                                                     </div>
                                                     <div className="space-y-0.5">
-                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Pool Stats</p>
-                                                        <p className="text-[9px] font-mono text-white/60">{ev.attendeeCount} Verified</p>
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Ticket</p>
+                                                        <p className="text-[9px] font-mono text-white/60">
+                                                            {(() => {
+                                                                const { label, rails } = eventPaidTicketSummary(ev);
+                                                                return label === 'Free' ? 'Free' : `${label}${rails !== '—' ? ` (${rails})` : ''}`;
+                                                            })()}
+                                                        </p>
+                                                    </div>
+                                                    <div className="space-y-0.5">
+                                                        <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Verified</p>
+                                                        <p className="text-[9px] font-mono text-white/60">{ev.attendeeCount} check-ins</p>
                                                     </div>
                                                 </div>
                                             </div>
@@ -809,9 +1197,25 @@ export default function AdminDashboard() {
                                     <p className="text-[10px] font-mono text-white/35">
                                         {selectedEventDetail.location || '—'} · {new Date(selectedEventDetail.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                                     </p>
-                                    <p className="text-[9px] font-mono text-white/25 truncate" title={selectedEventDetail.organizer}>
-                                        Organizer {selectedEventDetail.organizer}
-                                    </p>
+                                    <div className="space-y-2">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span
+                                                className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 border ${
+                                                    isEmailOrganizerId(selectedEventDetail.organizer)
+                                                        ? 'border-emerald-500/35 text-emerald-400 bg-emerald-500/10'
+                                                        : 'border-white/20 text-white/70 bg-white/[0.04]'
+                                                }`}
+                                            >
+                                                {isEmailOrganizerId(selectedEventDetail.organizer) ? 'Email host' : 'Wallet host'}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm font-mono text-white/60 truncate" title={formatOrganizerShort(selectedEventDetail)}>
+                                            {formatOrganizerShort(selectedEventDetail)}
+                                        </p>
+                                        <p className="text-[9px] font-mono text-white/25 truncate" title={selectedEventDetail.organizer}>
+                                            {selectedEventDetail.organizer}
+                                        </p>
+                                    </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 sm:justify-end">
                                     <button
@@ -854,6 +1258,19 @@ export default function AdminDashboard() {
                                         <span>Cap {selectedEventDetail.maxAttendees}</span>
                                     </>
                                 )}
+                                {(() => {
+                                    const { label, rails } = eventPaidTicketSummary(selectedEventDetail);
+                                    if (label === 'Free') return null;
+                                    return (
+                                        <>
+                                            <span>·</span>
+                                            <span className="text-cyan-400/85">
+                                                {label}
+                                                {rails !== '—' ? ` · ${rails}` : ''}
+                                            </span>
+                                        </>
+                                    );
+                                })()}
                             </div>
 
                             <div className="flex-1 min-h-0 overflow-y-auto">
@@ -890,6 +1307,31 @@ export default function AdminDashboard() {
                                                             {reg.name?.trim() && <span className="text-white/50">{reg.name}</span>}
                                                         </div>
                                                         {(reg.email?.trim()) && <span className="text-white/35 text-[9px]">{reg.email}</span>}
+                                                        {registrationPaymentLabel(reg) !== '—' && (
+                                                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                                <span
+                                                                    className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 border ${
+                                                                        (reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto'
+                                                                            ? 'border-cyan-500/35 text-cyan-300 bg-cyan-500/10'
+                                                                            : 'border-emerald-500/35 text-emerald-300 bg-emerald-500/10'
+                                                                    }`}
+                                                                >
+                                                                    {registrationPaymentLabel(reg)}
+                                                                </span>
+                                                                {(reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto' &&
+                                                                    reg.paymentTxHash?.trim() && (
+                                                                        <span className="text-[9px] text-white/40" title={reg.paymentTxHash}>
+                                                                            Tx {shortHash(reg.paymentTxHash)}
+                                                                        </span>
+                                                                    )}
+                                                                {(reg.paymentStatus ?? '').toLowerCase() === 'paid_mobile' &&
+                                                                    reg.paymentReference?.trim() && (
+                                                                        <span className="text-[9px] text-white/40 truncate max-w-full" title={reg.paymentReference}>
+                                                                            Ref {reg.paymentReference}
+                                                                        </span>
+                                                                    )}
+                                                            </div>
+                                                        )}
                                                         <span className="text-white/25 text-[9px]">
                                                             Registered {new Date(reg.registeredAt).toLocaleString('en-GB')}
                                                         </span>

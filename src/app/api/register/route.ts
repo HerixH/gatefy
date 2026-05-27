@@ -6,7 +6,9 @@ import {
     isRegisteredByEmail,
     getRegistrationForEvent,
 } from '@/lib/registrations';
+import type { Event } from '@/lib/events';
 import { getEventById } from '@/lib/events';
+import { eventAcceptsMobileMoney, eventAcceptsUsdc, type TicketPaymentFields } from '@/lib/event-payment';
 import { sendRegistrationConfirmationEmail } from '@/lib/email';
 import { verifyUsdcTicketPayment } from '@/lib/usdc-payment';
 
@@ -22,6 +24,7 @@ function ticketPrice(ev: { ticketPriceUsdc?: number } | null | undefined): numbe
 }
 
 async function resolvePaidTicketOpts(
+    ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney'>,
     price: number,
     body: { paymentTxHash?: string; mobileMoneyReference?: string }
 ): Promise<
@@ -31,18 +34,40 @@ async function resolvePaidTicketOpts(
     if (price <= 0) return { ok: true, payment: undefined };
     const txHash = typeof body.paymentTxHash === 'string' ? body.paymentTxHash.trim() : '';
     const mobileRef = typeof body.mobileMoneyReference === 'string' ? body.mobileMoneyReference.trim() : '';
+
+    const allowed: string[] = [];
+    if (eventAcceptsUsdc(ev)) allowed.push('USDC on Base (paste transaction hash after paying)');
+    if (eventAcceptsMobileMoney(ev))
+        allowed.push('mobile money (follow organizer instructions, then enter your payment reference)');
+
     if (txHash) {
+        if (!eventAcceptsUsdc(ev)) {
+            return {
+                ok: false,
+                error: 'This organizer is not accepting USDC for this ticket.',
+                status: 400,
+            };
+        }
         const v = await verifyUsdcTicketPayment(txHash, price, TREASURY);
         if (!v.ok) return { ok: false, error: v.error || 'Payment verification failed', status: 400 };
         return { ok: true, payment: { txHash }, paymentLabel: 'USDC on Base' };
     }
     if (mobileRef.length >= 4) {
+        if (!eventAcceptsMobileMoney(ev)) {
+            return {
+                ok: false,
+                error: 'This organizer is not accepting mobile-money references for this ticket.',
+                status: 400,
+            };
+        }
         return { ok: true, payment: { mobileRef }, paymentLabel: 'mobile money' };
     }
     return {
         ok: false,
         error:
-            'This event requires a paid ticket: pay with USDC on Base and paste the transaction hash, or use mobile money per the organizer’s instructions and enter your payment reference.',
+            allowed.length === 0
+                ? 'This ticket is misconfigured — contact the organizer.'
+                : `This event requires payment (${price} USDC equivalent where applicable): use ${allowed.join(' or ')}.`,
         status: 400,
     };
 }
@@ -93,7 +118,11 @@ export async function POST(request: Request) {
                 );
             }
 
-            const paid = await resolvePaidTicketOpts(price, body);
+            const paid = await resolvePaidTicketOpts(
+                ev ?? { ticketAcceptUsdc: true, ticketAcceptMobileMoney: true },
+                price,
+                body
+            );
             if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
 
             const success = await registerForEvent(
@@ -143,7 +172,11 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: 'Already registered' }, { status: 400 });
             }
 
-            const paid = await resolvePaidTicketOpts(price, body);
+            const paid = await resolvePaidTicketOpts(
+                ev ?? { ticketAcceptUsdc: true, ticketAcceptMobileMoney: true },
+                price,
+                body
+            );
             if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
 
             const success = await registerForEventWithEmail(eventId, emailStr, nameStr, paid.payment);

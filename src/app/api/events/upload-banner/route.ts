@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isSupabaseConfigured, getSupabase, getSupabaseConfigError, isUsingServiceRole, STORAGE_BUCKET_EVENT_BANNERS } from '@/lib/supabase';
+import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB (matches schema bucket limit)
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -25,6 +26,31 @@ export async function POST(request: Request) {
     try {
         const formData = await request.formData();
         const file = formData.get('file') as File | null;
+        const eventIdRaw = typeof formData.get('eventId') === 'string' ? (formData.get('eventId') as string).trim() : '';
+        const organizerWallet = typeof formData.get('organizerWallet') === 'string' ? (formData.get('organizerWallet') as string).trim() : '';
+        const organizerEmail = typeof formData.get('organizerEmail') === 'string' ? (formData.get('organizerEmail') as string).trim() : '';
+
+        if (eventIdRaw) {
+            if (!organizerWallet && !organizerEmail) {
+                return NextResponse.json(
+                    { error: 'When updating a banner for an existing event, pass organizerWallet or organizerEmail alongside eventId.' },
+                    { status: 403 }
+                );
+            }
+            const ev = await findEventByIdCaseInsensitive(eventIdRaw);
+            if (!ev) {
+                return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+            }
+            if (
+                !serverOrganizerMatchesEvent(ev.organizer, {
+                    organizerWallet,
+                    organizerEmail,
+                })
+            ) {
+                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+        }
+
         if (!file || !file.size) {
             return NextResponse.json({ error: 'No file provided' }, { status: 400 });
         }
