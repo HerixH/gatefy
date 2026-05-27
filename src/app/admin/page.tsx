@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 import { formatOrganizerShort, isEmailOrganizerId } from '@/lib/event-organizer';
-import { eventAcceptsMobileMoney, eventAcceptsUsdc } from '@/lib/event-payment';
+import {
+    formatEventTicketSummary,
+    isPaidRegistration,
+    registrationPaymentLabel,
+} from '@/lib/event-payment';
 
 interface AttendanceRecord {
     wallet?: string | null;
@@ -385,32 +389,11 @@ export default function AdminDashboard() {
         return `${t.slice(0, 8)}…${t.slice(-6)}`;
     };
 
-    /** One line for CSV / badges: how this registration paid (if tracked). */
-    const registrationPaymentLabel = (r: Registration): string => {
-        const st = (r.paymentStatus ?? '').trim().toLowerCase();
-        if (st === 'paid_crypto') return 'USDC (on-chain)';
-        if (st === 'paid_mobile') return 'Mobile money ref';
-        if (st && st !== 'none') return st;
-        return '—';
-    };
-
     const registrationPaymentDetail = (r: Registration): string => {
         const st = (r.paymentStatus ?? '').trim().toLowerCase();
         if (st === 'paid_crypto' && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
         if (st === 'paid_mobile' && r.paymentReference?.trim()) return r.paymentReference.trim();
         return '';
-    };
-
-    const eventPaidTicketSummary = (ev: DashboardEvent) => {
-        const price = ev.ticketPriceUsdc ?? 0;
-        if (!(Number.isFinite(price) && price > 0)) return { label: 'Free', rails: '' as string };
-        const rails: string[] = [];
-        if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
-        if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
-        return {
-            label: `${price} USDC`,
-            rails: rails.length ? rails.join(' · ') : '—',
-        };
     };
 
     const getVerifiedForEvent = (eventId: string) =>
@@ -462,7 +445,7 @@ export default function AdminDashboard() {
                 Name: (r.name ?? '').trim() || '—',
                 Email: (r.email ?? '').trim() || '—',
                 Code: '-',
-                Payment: registrationPaymentLabel(r),
+                Payment: registrationPaymentLabel(r.paymentStatus),
                 PaymentDetail: registrationPaymentDetail(r) || '—',
                 Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
             });
@@ -1050,11 +1033,11 @@ export default function AdminDashboard() {
                                                                                         {ev?.name ?? reg.eventId}
                                                                                     </span>
                                                                                     <span className="font-mono text-[10px] text-white/35 leading-tight">
-                                                                                        {registrationPaymentLabel(reg) === '—'
+                                                                                        {!isPaidRegistration(reg.paymentStatus)
                                                                                             ? '—'
                                                                                             : (
                                                                                                   <>
-                                                                                                      <span className="block text-amber-400/80">{registrationPaymentLabel(reg)}</span>
+                                                                                                      <span className="block text-amber-400/80">{registrationPaymentLabel(reg.paymentStatus)}</span>
                                                                                                       {registrationPaymentDetail(reg) && (
                                                                                                           <span className="block truncate text-white/25 text-[9px]" title={registrationPaymentDetail(reg)}>
                                                                                                               {shortHash(registrationPaymentDetail(reg)) || registrationPaymentDetail(reg)}
@@ -1136,10 +1119,7 @@ export default function AdminDashboard() {
                                                     <div className="space-y-0.5">
                                                         <p className="text-[7px] uppercase tracking-[0.2em] text-white/30 font-bold">Ticket</p>
                                                         <p className="text-[9px] font-mono text-white/60">
-                                                            {(() => {
-                                                                const { label, rails } = eventPaidTicketSummary(ev);
-                                                                return label === 'Free' ? 'Free' : `${label}${rails !== '—' ? ` (${rails})` : ''}`;
-                                                            })()}
+                                                            {formatEventTicketSummary(ev)}
                                                         </p>
                                                     </div>
                                                     <div className="space-y-0.5">
@@ -1258,19 +1238,14 @@ export default function AdminDashboard() {
                                         <span>Cap {selectedEventDetail.maxAttendees}</span>
                                     </>
                                 )}
-                                {(() => {
-                                    const { label, rails } = eventPaidTicketSummary(selectedEventDetail);
-                                    if (label === 'Free') return null;
-                                    return (
-                                        <>
-                                            <span>·</span>
-                                            <span className="text-cyan-400/85">
-                                                {label}
-                                                {rails !== '—' ? ` · ${rails}` : ''}
-                                            </span>
-                                        </>
-                                    );
-                                })()}
+                                {formatEventTicketSummary(selectedEventDetail) !== 'Free' ? (
+                                    <>
+                                        <span>·</span>
+                                        <span className="text-cyan-400/85">
+                                            {formatEventTicketSummary(selectedEventDetail)}
+                                        </span>
+                                    </>
+                                ) : null}
                             </div>
 
                             <div className="flex-1 min-h-0 overflow-y-auto">
@@ -1307,7 +1282,7 @@ export default function AdminDashboard() {
                                                             {reg.name?.trim() && <span className="text-white/50">{reg.name}</span>}
                                                         </div>
                                                         {(reg.email?.trim()) && <span className="text-white/35 text-[9px]">{reg.email}</span>}
-                                                        {registrationPaymentLabel(reg) !== '—' && (
+                                                        {isPaidRegistration(reg.paymentStatus) && (
                                                             <div className="flex flex-wrap items-center gap-2 pt-1">
                                                                 <span
                                                                     className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 border ${
@@ -1316,7 +1291,7 @@ export default function AdminDashboard() {
                                                                             : 'border-emerald-500/35 text-emerald-300 bg-emerald-500/10'
                                                                     }`}
                                                                 >
-                                                                    {registrationPaymentLabel(reg)}
+                                                                    {registrationPaymentLabel(reg.paymentStatus)}
                                                                 </span>
                                                                 {(reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto' &&
                                                                     reg.paymentTxHash?.trim() && (

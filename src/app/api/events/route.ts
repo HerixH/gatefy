@@ -5,6 +5,7 @@ import { getRegistrations } from '@/lib/registrations';
 import { makeEmailOrganizerId, isEmailOrganizerId } from '@/lib/event-organizer';
 import { sendOrganizerEventCreatedEmail } from '@/lib/email';
 import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { isPast } from '@/lib/event-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -197,6 +198,10 @@ export async function PATCH(request: Request) {
             })
         ) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        if (isPast(event.date, event.endDate)) {
+            return NextResponse.json({ error: 'Past events cannot be edited.' }, { status: 400 });
         }
 
         const patch: OrganizerMutableEventPatch = {};

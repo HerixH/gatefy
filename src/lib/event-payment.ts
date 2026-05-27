@@ -45,3 +45,28 @@ export function validateEventPaymentConfig(
     }
     return { ok: true };
 }
+
+/** Human-readable ticket price + accepted rails (for organizer/admin UI). */
+export function formatEventTicketSummary(
+    ev: Pick<TicketPaymentFields, 'ticketPriceUsdc' | 'isBlockchain' | 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney'>
+): string {
+    const price = ev.ticketPriceUsdc ?? 0;
+    if (!(Number.isFinite(price) && price > 0)) return 'Free';
+    const rails: string[] = [];
+    if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
+    if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
+    return rails.length ? `${price} USDC · ${rails.join(' · ')}` : `${price} USDC`;
+}
+
+export function isPaidRegistration(status?: string | null): boolean {
+    const st = (status ?? '').trim().toLowerCase();
+    return st === 'paid_crypto' || st === 'paid_mobile';
+}
+
+export function registrationPaymentLabel(status?: string | null): string {
+    const st = (status ?? '').trim().toLowerCase();
+    if (st === 'paid_crypto') return 'USDC (on-chain)';
+    if (st === 'paid_mobile') return 'Mobile money ref';
+    if (st && st !== 'none') return st;
+    return 'Unpaid';
+}

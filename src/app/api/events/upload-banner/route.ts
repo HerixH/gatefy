@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isSupabaseConfigured, getSupabase, getSupabaseConfigError, isUsingServiceRole, STORAGE_BUCKET_EVENT_BANNERS } from '@/lib/supabase';
 import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { isPast } from '@/lib/event-status';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB (matches schema bucket limit)
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
                 })
             ) {
                 return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            }
+            if (isPast(ev.date, ev.endDate)) {
+                return NextResponse.json({ error: 'Past events cannot be edited.' }, { status: 400 });
             }
         }
 

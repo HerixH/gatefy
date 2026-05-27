@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getEvents } from '@/lib/events';
 import { getRegistrations } from '@/lib/registrations';
 import { serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { isPaidRegistration } from '@/lib/event-payment';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,10 +38,25 @@ export async function GET(request: Request) {
 
         const withCounts = managed
             .map((ev) => {
-                const registrationCount = registrations.filter(
+                const eventRegs = registrations.filter(
                     (r) => r.eventId?.toLowerCase() === ev.id.toLowerCase()
-                ).length;
-                return { ...ev, registrationCount };
+                );
+                const registrationCount = eventRegs.length;
+                const price = ev.ticketPriceUsdc != null && ev.ticketPriceUsdc > 0 ? Number(ev.ticketPriceUsdc) : 0;
+                let paidRegistrationCount = 0;
+                let unpaidRegistrationCount = 0;
+                if (price > 0) {
+                    for (const r of eventRegs) {
+                        if (isPaidRegistration(r.paymentStatus)) paidRegistrationCount++;
+                        else unpaidRegistrationCount++;
+                    }
+                }
+                return {
+                    ...ev,
+                    registrationCount,
+                    paidRegistrationCount,
+                    unpaidRegistrationCount,
+                };
             })
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
