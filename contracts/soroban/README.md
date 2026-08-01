@@ -68,25 +68,25 @@ stellar contract invoke \
 Release workflow: `.github/workflows/soroban-release.yml` (Docker image `stellar/stellar-cli` pinned by **amd64** digest).
 
 ```bash
-git tag v0.1.2-attendance && git push origin v0.1.2-attendance
+git tag v0.1.3-attendance && git push origin v0.1.3-attendance
 # wait for Actions → download BOTH assets from the release:
 #   attendance_proof.wasm
 #   attendance_proof-source.tar.gz
 stellar contract deploy --wasm attendance_proof.wasm --source-account gate-minter --network testnet
 ```
 
-**Deployed testnet instance (Gate — SEP-55 + SEP-58 release `v0.1.2-attendance`):**
+The release WASM embeds only SEP-58 fields (`bldimg`, `bldopt`, `source_uri`, `source_sha256`) and is compiled from the published source archive (same bytes a verifier extracts). Lab’s **Source Code Verified** badge still depends on a third-party verifier (Walnut) succeeding at `stellar contract verify`.
+
+**Deployed testnet instance (Gate — SEP-55 + SEP-58 release):**
 
 | | |
 |--|--|
 | Contract | `CBG2JH4H7YFLD2PJJMXHNRNQGCLIID7MOWMVPXDZVTVMZWBNDPXBUNA7` |
 | Admin / minter | `gate-minter` → `GBDH542K3AF3WTRHPXIBH6IUQVJHJBZZ7FGGMUG7BBFWML46ZVEF6ERJ` |
-| Wasm hash | `44ddf8319685682af18d841a1e65d78911d8885a381da8cce82673497cd2f64e` |
 | Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.2-attendance |
-| Actions | https://github.com/HerixH/gatefy/actions/runs/30713788351 |
 | Lab | https://lab.stellar.org/r/testnet/contract/CBG2JH4H7YFLD2PJJMXHNRNQGCLIID7MOWMVPXDZVTVMZWBNDPXBUNA7 |
 
-Set `SOROBAN_CONTRACT_ID` to the contract ID above (already done in local `.env.local`).
+After `v0.1.3-attendance` ships, update `SOROBAN_CONTRACT_ID` to that deploy.
 
 ## App env
 
