@@ -1,0 +1,72 @@
+# Builds attendance_proof with source meta + GitHub attestation (SEP-55).
+# Lab "Verified Build" needs an attestation for the exact on-chain WASM hash.
+#
+# Trigger: tag a release, e.g.  git tag v0.1.0-attendance && git push origin v0.1.0-attendance
+# Then deploy the WASM from the GitHub Release (not a local build).
+
+name: Build & attest Soroban contracts
+
+on:
+  push:
+    tags:
+      - 'v*-attendance*'
+      - 'v*-soroban*'
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: Release name / tag label
+        required: true
+
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
+jobs:
+  release-attendance-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v27.0.0
+        with:
+          version: '27.0.0'
+
+      - name: Build with source meta
+        working-directory: contracts/soroban/attendance_proof
+        run: |
+          stellar contract build \
+            --out-dir ./dist \
+            --meta "source_repo=github:${{ github.repository }}" \
+            --meta "commit_sha=${{ github.sha }}" \
+            --meta "source_rev=${{ github.sha }}" \
+            --meta "name=gate-attendance-proof" \
+            --meta "version=${{ github.ref_name || github.event.inputs.release_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: attendance_proof.wasm
+          path: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: attendance_proof.wasm
+          subject-path: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+
+      - name: Create / update release & attach WASM
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('manual-{0}', github.event.inputs.release_name) }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.release_name }}
+          files: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
