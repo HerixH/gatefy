@@ -68,7 +68,7 @@ stellar contract invoke \
 Release workflow: `.github/workflows/soroban-release.yml` (Docker image `stellar/stellar-cli` pinned by **amd64** digest).
 
 ```bash
-git tag v0.1.4-attendance && git push origin v0.1.4-attendance
+git tag v0.1.5-attendance && git push origin v0.1.5-attendance
 # wait for Actions → download BOTH assets from the release:
 #   attendance_proof.wasm
 #   attendance_proof-source.tar.gz
@@ -86,7 +86,7 @@ The release WASM embeds only SEP-58 fields (`bldimg`, `bldopt`, `source_uri`, `s
 | Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.2-attendance |
 | Lab | https://lab.stellar.org/r/testnet/contract/CBG2JH4H7YFLD2PJJMXHNRNQGCLIID7MOWMVPXDZVTVMZWBNDPXBUNA7 |
 
-After `v0.1.4-attendance` ships, update `SOROBAN_CONTRACT_ID` to that deploy.
+After `v0.1.5-attendance` ships, update `SOROBAN_CONTRACT_ID` to that deploy.
 
 ## App env
 
