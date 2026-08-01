@@ -158,6 +158,46 @@ export async function verifyCode(
     return { success: true, newCheckin };
 }
 
+/** Persist Soroban (or later Base) mint receipt on the attendance row. */
+export async function updateAttendanceMint(params: {
+    eventId: string;
+    wallet?: string | null;
+    email?: string | null;
+    mintChain: string;
+    mintStatus: string;
+    mintTxHash?: string | null;
+    mintTokenId?: string | null;
+    mintError?: string | null;
+}): Promise<void> {
+    if (!isSupabaseConfigured) return;
+    const supabase = getSupabase();
+    const eventId = params.eventId.trim().toLowerCase();
+    const patch = {
+        mint_chain: params.mintChain,
+        mint_status: params.mintStatus,
+        mint_tx_hash: params.mintTxHash ?? null,
+        mint_token_id: params.mintTokenId ?? null,
+        mint_error: params.mintError ?? null,
+        minted_at: params.mintStatus === 'minted' ? new Date().toISOString() : null,
+    };
+
+    if (params.wallet) {
+        await supabase
+            .from('attendance')
+            .update(patch)
+            .eq('event_id', eventId)
+            .eq('wallet', params.wallet.toLowerCase());
+        return;
+    }
+    if (params.email) {
+        await supabase
+            .from('attendance')
+            .update(patch)
+            .eq('event_id', eventId)
+            .ilike('email', params.email.trim().toLowerCase());
+    }
+}
+
 export async function getAttendance(): Promise<AttendanceRecord[]> {
     if (!isSupabaseConfigured) return [];
     const supabase = getSupabase();

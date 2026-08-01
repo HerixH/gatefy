@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gate Protocol — Pitch Deck</title>
+  <style>
+    @page { size: 16in 9in; margin: 0; }
+    :root {
+      --bg: #050505;
+      --fg: #f5f5f5;
+      --muted: rgba(255,255,255,0.55);
+      --accent: #60a5fa;
+      --border: rgba(255,255,255,0.12);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: #111;
+      color: var(--fg);
+    }
+    .slide {
+      width: 100vw;
+      min-height: 100vh;
+      background: var(--bg);
+      padding: 56px 72px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      position: relative;
+      page-break-after: always;
+      break-after: page;
+    }
+    .slide::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+    }
+    .slide > * { position: relative; z-index: 1; }
+    .kicker {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.35em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: clamp(36px, 5vw, 56px);
+      font-weight: 900;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      margin-bottom: 20px;
+      max-width: 900px;
+    }
+    h2 {
+      font-size: clamp(28px, 3.5vw, 40px);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 24px;
+      max-width: 820px;
+    }
+    p, li {
+      font-size: 18px;
+      line-height: 1.55;
+      color: var(--muted);
+      max-width: 780px;
+    }
+    ul { margin: 16px 0 0 24px; }
+    li { margin-bottom: 10px; }
+    li strong { color: var(--fg); }
+    .sub {
+      font-size: 20px;
+      color: var(--muted);
+      margin-bottom: 32px;
+      max-width: 640px;
+    }
+    .footer {
+      position: absolute;
+      bottom: 32px;
+      left: 72px;
+      right: 72px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.25);
+    }
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-top: 8px;
+      max-width: 900px;
+    }
+    .card {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      padding: 20px 24px;
+    }
+    .card h3 {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    .card p { font-size: 15px; margin: 0; }
+    .stat-row {
+      display: flex;
+      gap: 40px;
+      margin-top: 28px;
+      flex-wrap: wrap;
+    }
+    .stat { min-width: 120px; }
+    .stat .n { font-size: 32px; font-weight: 900; color: var(--fg); }
+    .stat .l { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.35); margin-top: 4px; }
+    .contact { font-size: 16px; color: var(--fg); margin-top: 12px; }
+    @media print {
+      body { background: #000; }
+      .slide { width: 16in; height: 9in; min-height: 9in; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1 -->
+  <section class="slide">
+    <p class="kicker">Gate Protocol · 500 Global · 2026</p>
+    <h1>Verifiable events for the wallet era</h1>
+    <p class="sub">Registration, paid tickets, and proof-of-attendance — one host dashboard. Built on Base. Designed for Africa and global crypto communities.</p>
+    <p class="contact"><strong>Herix Hangandu</strong> · Founder &amp; CEO · herix.hangandu@gmail.com · gatefy.app</p>
+    <div class="footer"><span>Gate Protocol</span><span>1 / 12</span></div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <p class="kicker">Problem</p>
+    <h2>Events still run on trust, not proof</h2>
+    <ul>
+      <li><strong>RSVPs ≠ attendance</strong> — sponsors and hosts can’t trust who actually showed up.</li>
+      <li><strong>Fragmented tools</strong> — forms, WhatsApp, spreadsheets, and generic ticketing don’t talk to each other.</li>
+      <li><strong>Payment gaps</strong> — crypto communities want USDC; local markets want mobile money — incumbents do neither well.</li>
+      <li><strong>No portable record</strong> — attendees lose proof they were there when the event ends.</li>
+    </ul>
+    <div class="footer"><span>Gate Protocol</span><span>2 / 12</span></div>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <p class="kicker">Solution</p>
+    <h2>One protocol for sign-up, payment, and check-in</h2>
+    <ul>
+      <li><strong>Host dashboard</strong> — create events, set ticket price, manage buyers and rosters, export CSV, share QR.</li>
+      <li><strong>Wallet + email registration</strong> — organizers without a wallet can still run full events.</li>
+      <li><strong>USDC on Base</strong> + <strong>mobile-money references</strong> for paid tickets in emerging markets.</li>
+      <li><strong>Cryptographic verification</strong> — unique event codes and on-chain-ready attendance flow.</li>
+    </ul>
+    <div class="footer"><span>Gate Protocol</span><span>3 / 12</span></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <p class="kicker">Product</p>
+    <h2>Live today (Web and app)</h2>
+    <div class="grid2">
+      <div class="card"><h3>Create</h3><p>Event form with capacity, banner, VIP gates, payment modes, mobile-money instructions.</p></div>
+      <div class="card"><h3>Register</h3><p>Attendees sign up via wallet or email; pay in USDC or submit MoMo reference.</p></div>
+      <div class="card"><h3>Manage</h3><p>/organizer dashboard — tickets, revenue estimates, roster filters, edit (owner-only).</p></div>
+      <div class="card"><h3>Verify</h3><p>QR scan at door; verified check-ins vs pending registrations.</p></div>
+    </div>
+    <p style="margin-top:20px;font-size:14px;">Stack: Next.js · Supabase · Wagmi · RainbowKit · Base mainnet USDC</p>
+    <div class="footer"><span>Gate Protocol</span><span>4 / 12</span></div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <p class="kicker">How it works</p>
+    <h2>Organizer → attendee → proof</h2>
+    <ul>
+      <li><strong>1.</strong> Host creates event and gets a verification code + registration link.</li>
+      <li><strong>2.</strong> Attendees register (wallet or email) and pay if required.</li>
+      <li><strong>3.</strong> At the event, attendees scan QR / code to verify check-in.</li>
+      <li><strong>4.</strong> Host sees live roster, exports data, and owns the attendance record.</li>
+    </ul>
+    <div class="footer"><span>Gate Protocol</span><span>5 / 12</span></div>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide">
+    <p class="kicker">Market</p>
+    <h2>Who we serve</h2>
+    <div class="grid2">
+      <div class="card"><h3>Primary</h3><p>Event hosts in <strong>Africa</strong> — meetups, conferences, launches — needing MoMo + simple tooling.</p></div>
+      <div class="card"><h3>Secondary</h3><p><strong>Base / crypto</strong> communities — wallet-native registration and USDC tickets.</p></div>
+    </div>
+    <p style="margin-top:24px;">Global events software is a multi-billion-dollar category; we start with underserved hosts who need payments + verification in one place.</p>
+    <div class="footer"><span>Gate Protocol</span><span>6 / 12</span></div>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <p class="kicker">Business model</p>
+    <h2>How we will make money</h2>
+    <ul>
+      <li><strong>Platform fee</strong> on paid USDC tickets (target 2–5% once monetization is enabled).</li>
+      <li><strong>SaaS tiers</strong> for power hosts — analytics, branding, team access, higher volume.</li>
+      <li><strong>Premium features</strong> — VIP/token-gated access, API access for integrators.</li>
+    </ul>
+    <p style="margin-top:20px;"><strong>Today:</strong> Pre-revenue ($0 company revenue). Product-led pilots; monetization after retention proof.</p>
+    <div class="footer"><span>Gate Protocol</span><span>7 / 12</span></div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <p class="kicker">Traction</p>
+    <h2>Early stage — shipping in public</h2>
+    <div class="stat-row">
+      <div class="stat"><div class="n">Live</div><div class="l">Product status</div></div>
+      <div class="stat"><div class="n">$0</div><div class="l">Company revenue</div></div>
+      <div class="stat"><div class="n">1</div><div class="l">Full-time founder</div></div>
+    </div>
+    <p style="margin-top:28px;">Update this slide with your real metrics before submitting: # events hosted, registrations, repeat organizers, geographies.</p>
+    <div class="footer"><span>Gate Protocol</span><span>8 / 12</span></div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <p class="kicker">Competition</p>
+    <h2>Incumbents vs on-chain tools</h2>
+    <div class="grid2">
+      <div class="card"><h3>Substitutes</h3><p>Eventbrite, Luma, Partiful, Google Forms, WhatsApp lists.</p></div>
+      <div class="card"><h3>Web3</h3><p>POAP, Guild — strong on badges, weak on full ticketing + MoMo + host ops.</p></div>
+    </div>
+    <p style="margin-top:24px;"><strong>Our wedge:</strong> Full host workflow (payments + roster + verification) in one product, wallet-optional, Base-native, Africa-first payments.</p>
+    <div class="footer"><span>Gate Protocol</span><span>9 / 12</span></div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <p class="kicker">Team</p>
+    <h2>Herix Hangandu — Founder &amp; CEO</h2>
+    <ul>
+      <li>Technical founder — full-stack product and Web3 integration.</li>
+      <li>Based in <strong>Zambia</strong>; building for local hosts and global crypto events.</li>
+      <li>GitHub: github.com/HerixH</li>
+    </ul>
+    <p style="margin-top:16px;">Add LinkedIn URL before submitting.</p>
+    <div class="footer"><span>Gate Protocol</span><span>10 / 12</span></div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide">
+    <p class="kicker">The ask</p>
+    <h2>Why 500 Global</h2>
+    <ul>
+      <li><strong>GTM &amp; sales</strong> — repeatable playbook to onboard event hosts.</li>
+      <li><strong>Fundraising</strong> — structure first institutional round after pilots.</li>
+      <li><strong>Network</strong> — fintech, crypto, and emerging-market operator intros.</li>
+    </ul>
+    <p style="margin-top:20px;">We have product; we need distribution and company-building support to turn usage into revenue.</p>
+    <div class="footer"><span>Gate Protocol</span><span>11 / 12</span></div>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide">
+    <p class="kicker">Contact</p>
+    <h1>Gate Protocol</h1>
+    <p class="contact">Herix Hangandu · herix.hangandu@gmail.com</p>
+    <p class="contact">Product: gatefy.app · Host dashboard: gatefy.app/organizer</p>
+    <p style="margin-top:32px;font-size:14px;color:rgba(255,255,255,0.4);">Built on Base · The present is proof</p>
+    <div class="footer"><span>Gate Protocol</span><span>12 / 12</span></div>
+  </section>
+
+</body>
+</html>

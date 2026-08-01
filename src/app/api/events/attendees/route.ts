@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAttendance } from '@/lib/codes';
-import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { findEventByIdCaseInsensitive, requireOrganizerSessionForEvent } from '@/lib/organizer-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,31 +15,23 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'Event ID is required' }, { status: 400 });
         }
 
-        if (!organizerWallet?.trim() && !organizerEmail?.trim()) {
-            return NextResponse.json(
-                { error: 'organizerWallet or organizerEmail is required for this endpoint' },
-                { status: 403 }
-            );
-        }
-
         const event = await findEventByIdCaseInsensitive(eventId);
         if (!event) {
             return NextResponse.json({ error: 'Event not found' }, { status: 404 });
         }
 
-        if (
-            !serverOrganizerMatchesEvent(event.organizer, {
-                organizerWallet,
-                organizerEmail,
-            })
-        ) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        const auth = await requireOrganizerSessionForEvent(event.organizer, {
+            organizerWallet,
+            organizerEmail,
+        });
+        if (!auth.ok) {
+            return NextResponse.json({ error: auth.error }, { status: auth.status });
         }
 
         const records = await getAttendance();
         const id = eventId.trim();
         const eventAttendees = records.filter(
-            r => r.eventId != null && String(r.eventId).toLowerCase() === id.toLowerCase()
+            (r) => r.eventId != null && String(r.eventId).toLowerCase() === id.toLowerCase()
         );
 
         return NextResponse.json(eventAttendees, {

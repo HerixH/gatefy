@@ -1,30 +1,27 @@
 import { NextResponse } from 'next/server';
 import { getEvents } from '@/lib/events';
 import { getRegistrations } from '@/lib/registrations';
-import { serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { serverOrganizerMatchesEvent, getVerifiedOrganizerSession } from '@/lib/organizer-access';
 import { isPaidRegistration } from '@/lib/event-payment';
+import { sessionToAuthParams } from '@/lib/organizer-auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Organizer-scoped event list — same shape as GET /api/events but only events this wallet or session email manages.
+ * Organizer-scoped event list — requires verified host session (email OTP or wallet signature).
  */
-export async function GET(request: Request) {
+export async function GET() {
     try {
-        const { searchParams } = new URL(request.url);
-        const organizerWallet = searchParams.get('organizerWallet');
-        const organizerEmail = searchParams.get('organizerEmail');
-
-        if (!organizerWallet?.trim() && !organizerEmail?.trim()) {
+        const session = await getVerifiedOrganizerSession();
+        if (!session) {
             return NextResponse.json(
-                {
-                    error: 'organizerWallet or organizerEmail is required',
-                },
-                { status: 400 }
+                { error: 'Sign in as host first (email code or wallet signature).' },
+                { status: 401 }
             );
         }
 
-        const events = await getEvents();
+        const auth = sessionToAuthParams(session);
+        const events = await getEvents({ includeCancelled: true });
         let registrations: Awaited<ReturnType<typeof getRegistrations>> = [];
         try {
             registrations = await getRegistrations();
@@ -33,7 +30,10 @@ export async function GET(request: Request) {
         }
 
         const managed = events.filter((ev) =>
-            serverOrganizerMatchesEvent(ev.organizer, { organizerWallet, organizerEmail })
+            serverOrganizerMatchesEvent(ev.organizer, {
+                organizerWallet: auth.organizerWallet,
+                organizerEmail: auth.organizerEmail,
+            })
         );
 
         const withCounts = managed

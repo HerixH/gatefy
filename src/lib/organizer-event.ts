@@ -21,6 +21,10 @@ export type OrganizerEvent = {
     mobileMoneyInstructions?: string;
     ticketAcceptUsdc?: boolean;
     ticketAcceptMobileMoney?: boolean;
+    ticketAcceptStellar?: boolean;
+    cancelledAt?: string;
+    cancelledByAdmin?: boolean;
+    cancelReason?: string;
 };
 
 export function toDatetimeLocalValue(iso: string): string {

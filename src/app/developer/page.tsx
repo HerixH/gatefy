@@ -144,7 +144,6 @@ export default function Developer() {
                             {[
                                 { label: 'X / Twitter', href: 'https://x.com/gatefyprotocol' },
                                 { label: 'GitHub', href: 'https://github.com/HerixH' },
-                                { label: 'Farcaster', href: 'https://farcaster.xyz/herixhangandu' },
                             ].map(s => (
                                 <a
                                     key={s.label}

@@ -83,7 +83,7 @@ export default function LeaderboardPage() {
                         Leaderboard
                     </h1>
                     <p className="text-white/45 text-xs mb-6 max-w-sm leading-relaxed">
-                        Stats only — no explorer links. Email and wallet ranked the same.
+                        Stats only, no explorer links. Email and wallet ranked the same.
                     </p>
 
                     <div className="flex gap-0 border-b border-white/10 mb-4">
@@ -226,20 +226,6 @@ export default function LeaderboardPage() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                                {(o.emailSignupEvents > 0 || o.walletSignupEvents > 0) && (
-                                                    <p className="text-[7px] text-white/30 px-3 sm:px-3.5 pb-2 pl-10 sm:pl-11 leading-snug border-t border-white/[0.05] pt-1.5 bg-black/[0.12]">
-                                                        <span className="text-white/25">Types · </span>
-                                                        {o.emailSignupEvents > 0 && (
-                                                            <span className="text-emerald-400/80">{o.emailSignupEvents} email</span>
-                                                        )}
-                                                        {o.emailSignupEvents > 0 && o.walletSignupEvents > 0 && (
-                                                            <span className="text-white/20"> · </span>
-                                                        )}
-                                                        {o.walletSignupEvents > 0 && (
-                                                            <span className="text-white/45">{o.walletSignupEvents} wallet</span>
-                                                        )}
-                                                    </p>
-                                                )}
                                             </div>
                                         ))
                                     )}

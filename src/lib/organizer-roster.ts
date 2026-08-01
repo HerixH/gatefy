@@ -1,4 +1,5 @@
 export type OrganizerRegRow = {
+    id?: number;
     wallet?: string | null;
     email?: string | null;
     name?: string | null;
@@ -30,8 +31,13 @@ export function registrantMatchesCheckIn(
 
 export function registrationPaymentDetail(r: OrganizerRegRow): string | null {
     const st = (r.paymentStatus ?? '').toLowerCase();
-    if (st === 'paid_crypto' && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
-    if (st === 'paid_mobile' && r.paymentReference?.trim()) return r.paymentReference.trim();
+    if ((st === 'paid_crypto' || st === 'paid_stellar') && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
+    if (
+        (st === 'paid_mobile' || st === 'pending_mobile' || st === 'rejected_mobile') &&
+        r.paymentReference?.trim()
+    ) {
+        return r.paymentReference.trim();
+    }
     return null;
 }
 
@@ -40,12 +46,18 @@ export function registrationPayLabel(r: OrganizerRegRow, ticketPriceUsdc: number
     if (ticketPriceUsdc <= 0) return '—';
     if (st === 'paid_crypto') {
         const tx = r.paymentTxHash?.trim();
-        return tx && tx.length > 14 ? `Paid · USDC · ${tx.slice(0, 8)}…` : 'Paid · USDC';
+        return tx && tx.length > 14 ? `Paid · Base · ${tx.slice(0, 8)}…` : 'Paid · Base';
+    }
+    if (st === 'paid_stellar') {
+        const tx = r.paymentTxHash?.trim();
+        return tx && tx.length > 14 ? `Paid · Stellar · ${tx.slice(0, 8)}…` : 'Paid · Stellar';
     }
     if (st === 'paid_mobile') {
         const ref = r.paymentReference?.trim();
         return ref ? `Paid · Mobile · ${ref.length > 18 ? `${ref.slice(0, 14)}…` : ref}` : 'Paid · Mobile';
     }
+    if (st === 'pending_mobile') return 'Awaiting host · Mobile';
+    if (st === 'rejected_mobile') return 'Rejected · Mobile';
     if (st === 'none') return 'Unpaid';
     return String(st);
 }
@@ -62,14 +74,15 @@ export function exportOrganizerRosterCsv(
         if (verified) return '—';
         if (!r) return '—';
         const st = r.paymentStatus ?? 'none';
-        if (st === 'paid_crypto') return 'USDC';
+        if (st === 'paid_crypto') return 'Base';
+        if (st === 'paid_stellar') return 'Stellar';
         if (st === 'paid_mobile') return 'Mobile';
         return 'Unpaid';
     };
     const payDetailExport = (r: OrganizerRegRow | null) => {
         if (!r) return '—';
         const st = (r.paymentStatus ?? '').toLowerCase();
-        if (st === 'paid_crypto' && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
+        if ((st === 'paid_crypto' || st === 'paid_stellar') && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
         if (st === 'paid_mobile' && r.paymentReference?.trim()) return r.paymentReference.trim();
         return '—';
     };

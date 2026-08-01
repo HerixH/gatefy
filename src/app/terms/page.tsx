@@ -6,31 +6,55 @@ import { PageFooter } from '@/components/PageFooter';
 const sections = [
     {
         title: '1. Acceptance of Terms',
-        body: 'By accessing or using the GATE PROTOCOL ("Protocol"), you agree to be bound by these Terms of Service. If you do not agree, you may not use the Protocol. These terms apply to all users, organisers, and attendees interacting with any GATE PROTOCOL smart contract or interface.',
+        body: 'By accessing or using GATE PROTOCOL (the "Protocol", "we", "us"), including the website and any related app surfaces, you agree to these Terms of Service. If you do not agree, do not use the Protocol. These terms apply to organisers (hosts), attendees, and any other visitor who creates events, registers, pays for tickets, checks in, or otherwise uses the service.',
     },
     {
-        title: '2. Protocol Use',
-        body: 'GATE PROTOCOL is a decentralised attendance verification tool. You may use it to create events, verify attendance, and receive on-chain proof-of-presence tokens. You are solely responsible for ensuring that your use complies with applicable laws in your jurisdiction.',
+        title: '2. The Service',
+        body: 'GATE PROTOCOL is an event hosting and attendance verification product. Hosts can create events, set capacity, issue check-in codes, manage rosters, and optionally sell tickets. Attendees can register, pay where required, and receive verified proof of presence. Features may include free or paid tickets, on-chain payment rails, local mobile-money references confirmed by the host, QR check-in, and host dashboards. The Protocol is provided for lawful event and community use only.',
     },
     {
-        title: '3. Wallet Responsibility',
-        body: 'You are fully responsible for the security of your cryptocurrency wallet. GATE PROTOCOL does not have access to your private keys and cannot recover lost assets. Any transactions made on-chain are final and irreversible.',
+        title: '3. Host accounts and verification',
+        body: 'To create or manage events as a host, you must verify control of a wallet (by signing a challenge message) and/or an email address (by entering a one-time code we send). Knowing or typing an email alone is not enough. You are responsible for keeping access to that wallet or inbox secure. Anyone who completes verification for your host identity may manage events tied to it.',
     },
     {
-        title: '4. Non-Transferable Tokens',
-        body: 'Proof-of-attendance tokens issued by the Protocol are non-transferable by design. They exist solely as a record of verified presence and carry no monetary value, rights, or ownership claims.',
+        title: '4. Tickets and payments',
+        body: 'Hosts may offer free events or paid tickets. For paid tickets, hosts choose which checkout options to enable. On-chain payments are verified against the configured treasury and network rules. Mobile-money registrations may remain pending until the host confirms or rejects the payment reference. Crypto transfers that are confirmed on-chain are final and irreversible. GATE PROTOCOL is not a bank, remittance provider, or escrow agent for host payouts unless expressly stated for a specific product feature.',
     },
     {
-        title: '5. VIP Imprint',
-        body: 'VIP Imprint codes are issued after successful USDC payment confirmation on-chain. Payments are final. GATE PROTOCOL takes no responsibility for failed transactions due to insufficient funds, network congestion, or user error.',
+        title: '5. Organiser responsibilities',
+        body: 'Hosts are responsible for accurate event details, lawful ticketing, clear payment instructions (including mobile money), capacity limits, cancelling only upcoming events when appropriate, and handling disputes with their attendees. Soft-cancelled events stop new signups; historical roster data may be retained. Hosts must not use the Protocol for fraud, scams, unlicensed lottery activity, or other illegal events.',
     },
     {
-        title: '6. Disclaimer',
-        body: 'The Protocol is provided "as is" without warranties of any kind. We do not guarantee uptime, data accuracy, or the permanence of any on-chain record beyond what the Base network itself provides.',
+        title: '6. Attendee registration and check-in',
+        body: 'Attendees must provide accurate registration details. Registration may be refused when an event is sold out, cancelled, or misconfigured. Check-in uses the event verification flow (for example a QR or code). Proof-of-attendance records, where issued, are designed as non-transferable presence records and do not by themselves grant ownership, equity, or refund rights.',
     },
     {
-        title: '7. Changes',
-        body: 'We reserve the right to update these terms at any time. Continued use of the Protocol following any update constitutes acceptance of the revised terms.',
+        title: '7. Wallets and keys',
+        body: 'If you use a cryptocurrency wallet with the Protocol, you alone control your private keys. We cannot reverse on-chain transfers, recover lost keys, or undo a signed transaction. You are responsible for network fees, correct destination addresses, and confirming you are on the intended network before paying.',
+    },
+    {
+        title: '8. VIP and optional paid features',
+        body: 'Optional paid features (such as VIP imprint flows) may require on-chain payment confirmation. Payments that settle on-chain are final. We are not responsible for failed payments caused by insufficient funds, wrong network, congestion, or user error.',
+    },
+    {
+        title: '9. Acceptable use',
+        body: 'You may not abuse the Protocol, attempt to bypass host verification, reuse payment proofs fraudulently, scrape or attack our systems, impersonate another host or attendee, or interfere with other users. We may suspend access to off-chain interfaces where we reasonably believe these terms are violated.',
+    },
+    {
+        title: '10. Disclaimer',
+        body: 'The Protocol is provided "as is" without warranties of any kind, express or implied. We do not guarantee uninterrupted uptime, perfect data accuracy, delivery of every email, or permanence of records beyond what the underlying networks and our infrastructure reasonably allow.',
+    },
+    {
+        title: '11. Limitation of liability',
+        body: 'To the fullest extent permitted by law, GATE PROTOCOL and its contributors are not liable for indirect, incidental, special, or consequential damages, lost profits, lost tickets, failed check-ins, or losses arising from blockchain network behaviour, third-party wallets, or host-attendee disputes. Your sole remedy for dissatisfaction with the service is to stop using it.',
+    },
+    {
+        title: '12. Changes',
+        body: 'We may update these terms from time to time. The effective date at the top of this page will change when we do. Continued use of the Protocol after an update means you accept the revised terms.',
+    },
+    {
+        title: '13. Contact',
+        body: 'Questions about these terms can be directed through the channels listed on the Developer page of the Protocol website.',
     },
 ];
 
@@ -73,7 +97,7 @@ export default function Terms() {
                     <h1 className="text-5xl lg:text-6xl font-black tracking-tighter leading-none mb-4 text-white">
                         Terms of<br />Service
                     </h1>
-                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: May 19, 2026</p>
+                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: August 1, 2026</p>
 
                     <div className="space-y-10">
                         {sections.map((s, i) => (
@@ -81,7 +105,7 @@ export default function Terms() {
                                 key={i}
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                transition={{ delay: i * 0.06 }}
+                                transition={{ delay: Math.min(i * 0.04, 0.4) }}
                                 className="border-b border-white/5 pb-10 last:border-0"
                             >
                                 <h2 className="text-sm font-black tracking-tight text-white mb-3 uppercase">{s.title}</h2>

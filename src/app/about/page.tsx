@@ -49,20 +49,25 @@ export default function About() {
 
                     <div className="space-y-10 text-white/60 font-light leading-relaxed text-base lg:text-lg">
                         <p>
-                            GATE PROTOCOL is a decentralised attendance verification system built on the <span className="text-white/90 font-medium">Base blockchain</span>. It enables event organisers to issue tamper-proof, on-chain proof-of-attendance records to participants — permanently and without intermediaries.
+                            GATE PROTOCOL is a decentralised attendance verification system built on{' '}
+                            <span className="text-white/90 font-medium">blockchain</span>. Organisers run events,
+                            check-ins, and ticketing in one place, with crypto checkout and local mobile-money where
+                            needed.
                         </p>
                         <p>
-                            Unlike traditional ticketing systems that rely on centralised databases, GATE PROTOCOL uses cryptographic QR codes and smart contracts to ensure every check-in is verifiable, immutable, and owned by the attendee — not the platform.
+                            Unlike traditional ticketing systems that rely on centralised databases, GATE PROTOCOL uses
+                            cryptographic QR codes and smart contracts so every check-in is verifiable, immutable, and
+                            owned by the attendee, not the platform.
                         </p>
                     </div>
 
                     {/* Stats row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 my-16 border-y border-white/5 py-10">
                         {[
-                            { label: 'Network', value: 'Base' },
-                            { label: 'Standard', value: 'ERC-721' },
+                            { label: 'Proof', value: 'On-chain' },
+                            { label: 'Tickets', value: 'Paid & free' },
                             { label: 'Status', value: 'Live' },
-                            { label: 'Available', value: 'Mini App · Web' },
+                            { label: 'Available', value: 'Web and app' },
                         ].map(s => (
                             <div key={s.label} className="space-y-2">
                                 <p className="text-[9px] tracking-[0.35em] uppercase text-white/30 font-bold">{s.label}</p>
@@ -90,8 +95,12 @@ export default function About() {
                         </div>
 
                         <div>
-                            <h2 className="text-lg font-black tracking-tight text-white mb-3 uppercase">Why Base?</h2>
-                            <p>Base offers near-zero transaction costs, Ethereum-level security, and EVM compatibility — making it the ideal layer for high-volume attendance verification without burdening users with gas fees.</p>
+                            <h2 className="text-lg font-black tracking-tight text-white mb-3 uppercase">Unified payments</h2>
+                            <p>
+                                One ticket price. Hosts choose checkout rails (crypto and/or mobile money), and guests
+                                pick one at signup. Same event, same ticket, local currency instructions where the host
+                                enables them.
+                            </p>
                         </div>
                     </div>
 

@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { validateEventPaymentConfig } from '@/lib/event-payment';
 import { isPast } from '@/lib/event-status';
+import { isEventOrganizer, organizerAuthParamsForEvent } from '@/lib/event-organizer';
 import type { OrganizerEvent } from '@/lib/organizer-event';
 import { toDatetimeLocalValue } from '@/lib/organizer-event';
+import { EventLocationField } from '@/components/EventLocationField';
 
 export type ManageFormState = {
     name: string;
@@ -18,6 +20,7 @@ export type ManageFormState = {
     mobileMoneyInstructions: string;
     ticketAcceptUsdc: boolean;
     ticketAcceptMobileMoney: boolean;
+    ticketAcceptStellar: boolean;
     bannerUrl: string;
 };
 
@@ -45,6 +48,14 @@ export function OrganizerManageModal({
     const [bannerUploading, setBannerUploading] = useState(false);
     const [form, setForm] = useState<ManageFormState>(() => buildFormFromEvent(event));
 
+    const orgCtx = { address: walletAddress ?? null, organizerSessionEmail: organizerEmail };
+    const isOwner = isEventOrganizer(event.organizer, orgCtx);
+    const ownerAuth = organizerAuthParamsForEvent(event.organizer, orgCtx);
+
+    useEffect(() => {
+        if (open && !isOwner) onClose();
+    }, [open, isOwner, onClose]);
+
     useEffect(() => {
         if (open) setForm(buildFormFromEvent(event));
     }, [open, event.id]);
@@ -61,17 +72,22 @@ export function OrganizerManageModal({
             mobileMoneyInstructions: ev.mobileMoneyInstructions || '',
             ticketAcceptUsdc: ev.ticketAcceptUsdc !== false,
             ticketAcceptMobileMoney: ev.ticketAcceptMobileMoney !== false,
+            ticketAcceptStellar: ev.ticketAcceptStellar === true,
             bannerUrl: ev.bannerUrl || '',
         };
     }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!isOwner) {
+            onToast('Only the event organizer can edit this event.');
+            return;
+        }
         if (isPast(event.date, event.endDate)) {
             setError('Past events cannot be edited.');
             return;
         }
-        if (!walletAddress && !organizerEmail) {
+        if (!ownerAuth) {
             onToast('Sign in as organizer first.');
             return;
         }
@@ -100,6 +116,7 @@ export function OrganizerManageModal({
                 ticketPriceUsdc: ticketAmount ?? undefined,
                 ticketAcceptUsdc: form.ticketAcceptUsdc,
                 ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+                ticketAcceptStellar: form.ticketAcceptStellar,
             });
             if (!payCheck.ok) {
                 setError(payCheck.error);
@@ -112,8 +129,7 @@ export function OrganizerManageModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     eventId: event.id,
-                    ...(walletAddress ? { organizerWallet: walletAddress } : {}),
-                    ...(organizerEmail ? { organizerEmail } : {}),
+                    ...ownerAuth,
                     name: form.name.trim(),
                     description: form.description.trim(),
                     date: dateIso,
@@ -124,6 +140,7 @@ export function OrganizerManageModal({
                     mobileMoneyInstructions: form.mobileMoneyInstructions.trim() || null,
                     ticketAcceptUsdc: form.ticketAcceptUsdc,
                     ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+                    ticketAcceptStellar: form.ticketAcceptStellar,
                     bannerUrl: form.bannerUrl.trim() || null,
                 }),
             });
@@ -141,6 +158,8 @@ export function OrganizerManageModal({
             setSaving(false);
         }
     };
+
+    if (!isOwner) return null;
 
     return (
         <AnimatePresence>
@@ -216,8 +235,8 @@ export function OrganizerManageModal({
                                                         const fd = new FormData();
                                                         fd.set('file', file);
                                                         fd.set('eventId', event.id);
-                                                        if (walletAddress) fd.set('organizerWallet', walletAddress);
-                                                        if (organizerEmail) fd.set('organizerEmail', organizerEmail);
+                                                        if (ownerAuth?.organizerWallet) fd.set('organizerWallet', ownerAuth.organizerWallet);
+                                                        if (ownerAuth?.organizerEmail) fd.set('organizerEmail', ownerAuth.organizerEmail);
                                                         const res = await fetch('/api/events/upload-banner', {
                                                             method: 'POST',
                                                             body: fd,
@@ -255,13 +274,12 @@ export function OrganizerManageModal({
                                         />
                                     </Field>
                                 </div>
-                                <Field label="Location">
-                                    <input
-                                        value={form.location}
-                                        onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-                                        className={inputCls}
-                                    />
-                                </Field>
+                                <EventLocationField
+                                    id="organizer-manage-location"
+                                    variant="manage"
+                                    value={form.location}
+                                    onChange={(location) => setForm((f) => ({ ...f, location }))}
+                                />
                                 <Field label="Max capacity">
                                     <input
                                         type="number"
@@ -274,7 +292,7 @@ export function OrganizerManageModal({
                                 </Field>
                                 <div className="p-3 border border-white/10 space-y-2">
                                     <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">
-                                        Ticket (USDC) — blank = free
+                                        Ticket price — blank = free
                                     </label>
                                     <input
                                         type="number"
@@ -300,7 +318,10 @@ export function OrganizerManageModal({
                                     return (
                                         <div className="space-y-3 p-3 border border-cyan-500/25 bg-cyan-500/[0.04]">
                                             <p className="text-[9px] uppercase tracking-widest text-cyan-400 font-black">
-                                                Payment modes
+                                                Checkout rails — same ticket
+                                            </p>
+                                            <p className="text-[8px] text-white/35 font-mono">
+                                                One ticket amount. Enable Base, Stellar, and/or mobile for checkout.
                                             </p>
                                             {event.isBlockchain !== false ? (
                                                 <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
@@ -311,11 +332,28 @@ export function OrganizerManageModal({
                                                             setForm((f) => ({ ...f, ticketAcceptUsdc: e.target.checked }))
                                                         }
                                                     />
-                                                    Accept USDC on Base (wallet signup)
+                                                    Base — crypto (wallet signup)
                                                 </label>
                                             ) : (
-                                                <p className="text-[9px] text-white/40">Email signup — mobile money when enabled below.</p>
+                                                <p className="text-[9px] text-white/40">
+                                                    Email signup: Base crypto needs wallet registration. Enable Stellar
+                                                    and/or mobile below.
+                                                </p>
                                             )}
+                                            <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={form.ticketAcceptStellar}
+                                                    onChange={(e) =>
+                                                        setForm((f) => ({
+                                                            ...f,
+                                                            ticketAcceptStellar: e.target.checked,
+                                                        }))
+                                                    }
+                                                    className="accent-violet-400"
+                                                />
+                                                Stellar — crypto
+                                            </label>
                                             <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
                                                 <input
                                                     type="checkbox"
@@ -328,7 +366,7 @@ export function OrganizerManageModal({
                                                     }
                                                     className="accent-emerald-500"
                                                 />
-                                                Accept mobile-money references
+                                                Mobile money — local pay + reference
                                             </label>
                                         </div>
                                     );

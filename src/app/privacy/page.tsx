@@ -6,31 +6,31 @@ import { PageFooter } from '@/components/PageFooter';
 const sections = [
     {
         title: '1. What We Collect',
-        body: 'GATE PROTOCOL collects only the minimum data necessary to operate: your public wallet address (when connected), event metadata you submit as an organiser, and attendance records associated with your wallet. We do not collect names, emails, or any personally identifiable off-chain information unless voluntarily provided.',
+        body: 'We collect data needed to run event hosting and check-in: public wallet addresses when connected or verified, host email addresses when you request a sign-in code, attendee names and emails you submit at registration, event details you create as a host (including banners and payment instructions), registration and payment status records, and attendance / check-in records. We do not sell personal data.',
     },
     {
-        title: '2. On-Chain Data',
-        body: 'All attendance records and token issuances are stored on the Base blockchain. This data is public, permanent, and immutable by design. By using the Protocol, you acknowledge that your wallet address and associated records are visible on-chain to anyone.',
+        title: '2. On-chain data',
+        body: 'Some activity (for example verified crypto ticket payments or on-chain attendance proofs) is recorded on public blockchains. That data is public and may be permanent. By paying or verifying on-chain, you acknowledge that wallet addresses and transaction details can be visible to anyone.',
     },
     {
-        title: '3. Off-Chain Storage',
-        body: 'Event metadata (name, description, date, location, and banner image) is stored in a secure off-chain database. This data is retained solely to serve the Protocol interface and may be deleted upon request for records not yet tied to verified on-chain activity.',
+        title: '3. Off-chain storage',
+        body: 'Event metadata, registrations, host session verification state, and related operational data are stored in secure off-chain databases and application infrastructure. Host sign-in uses short-lived codes and signed session cookies so we can confirm you control an email or wallet without storing passwords.',
     },
     {
-        title: '4. Cookies & Analytics',
-        body: 'We do not use tracking cookies, advertising pixels, or third-party analytics. Any local storage used is strictly for UI state and wallet session continuity.',
+        title: '4. Cookies and local storage',
+        body: 'We use essential cookies for verified host sessions and may use local or session storage for UI state. We do not use advertising pixels or third-party ad analytics as part of the core Protocol product.',
     },
     {
-        title: '5. Third-Party Services',
-        body: 'The Protocol integrates with third-party wallet connectivity providers. These services operate independently and may have their own privacy policies. USDC transfers for VIP Imprints are processed entirely on-chain with no intermediary.',
+        title: '5. Third-party services',
+        body: 'The Protocol may use wallet providers, email delivery services, and cloud infrastructure. Those providers process data under their own terms. On-chain transfers are settled by the relevant networks, not by GATE PROTOCOL as a payment intermediary.',
     },
     {
-        title: '6. Data Retention',
-        body: 'On-chain records cannot be deleted. Off-chain event data is retained for the lifetime of the Protocol. You may request deletion of off-chain data not tied to verified on-chain events by contacting the development team.',
+        title: '6. Data retention',
+        body: 'On-chain records generally cannot be deleted. Off-chain event and registration data is retained to operate the product and for host history. You may request deletion of off-chain personal data that is not required to keep the service honest (for example payment uniqueness) by contacting the team via the Developer page.',
     },
     {
-        title: '7. Your Rights',
-        body: 'Depending on your jurisdiction, you may have the right to access, correct, or request deletion of your personal data. As a decentralised protocol, our ability to act on these rights is limited to off-chain data only.',
+        title: '7. Your rights',
+        body: 'Depending on your jurisdiction, you may have rights to access, correct, or request deletion of personal data we hold off-chain. Our ability to change or erase public blockchain data is limited or nonexistent.',
     },
 ];
 
@@ -73,7 +73,7 @@ export default function Privacy() {
                     <h1 className="text-5xl lg:text-6xl font-black tracking-tighter leading-none mb-4 text-white">
                         Privacy<br />Policy
                     </h1>
-                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: May 19, 2026</p>
+                    <p className="text-white/30 text-sm font-mono tracking-widest mb-16">Effective: August 1, 2026</p>
 
                     <div className="space-y-10">
                         {sections.map((s, i) => (
@@ -81,7 +81,7 @@ export default function Privacy() {
                                 key={i}
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
-                                transition={{ delay: i * 0.06 }}
+                                transition={{ delay: Math.min(i * 0.04, 0.4) }}
                                 className="border-b border-white/5 pb-10 last:border-0"
                             >
                                 <h2 className="text-sm font-black tracking-tight text-white mb-3 uppercase">{s.title}</h2>
@@ -91,7 +91,7 @@ export default function Privacy() {
                     </div>
 
                     <div className="mt-12 pt-8 border-t border-white/5">
-                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 GATE PROTOCOL — Built on Base. Data minimised by design.</p>
+                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 GATE PROTOCOL. Built on blockchain.</p>
                     </div>
 
                 </motion.div>

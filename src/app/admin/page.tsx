@@ -40,6 +40,9 @@ interface DashboardEvent {
     mobileMoneyInstructions?: string;
     ticketAcceptUsdc?: boolean;
     ticketAcceptMobileMoney?: boolean;
+    cancelledAt?: string;
+    cancelledByAdmin?: boolean;
+    cancelReason?: string;
 }
 
 interface Registration {
@@ -71,6 +74,7 @@ export default function AdminDashboard() {
     const [attendanceCollapsed, setAttendanceCollapsed] = useState<Record<string, boolean>>({});
     const [selectedEventQR, setSelectedEventQR] = useState<DashboardEvent | null>(null);
     const [selectedEventDetail, setSelectedEventDetail] = useState<DashboardEvent | null>(null);
+    const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
 
     // Interactivity: Search & Filter
     const [searchQuery, setSearchQuery] = useState('');
@@ -102,10 +106,69 @@ export default function AdminDashboard() {
     }, []);
 
     const fetchEvents = useCallback(async () => {
-        const res = await fetch('/api/events', { cache: 'no-store' });
+        const res = await fetch('/api/admin/events', { cache: 'no-store', credentials: 'include' });
+        if (res.status === 401) {
+            setAuthed(false);
+            return;
+        }
         const data = await res.json();
         if (Array.isArray(data)) setEvents(data);
     }, []);
+
+    const setAdminEventCancelled = useCallback(
+        async (ev: DashboardEvent, cancelled: boolean) => {
+            let reason: string | null = null;
+            if (cancelled) {
+                const ok = window.confirm(
+                    `Cancel “${ev.name}” for misconduct / policy? It will leave public browse and signup will close. The host cannot restore it.`
+                );
+                if (!ok) return;
+                const note = window.prompt('Optional reason (shown to host support):', 'Misconduct / policy');
+                if (note === null) return;
+                reason = note.trim() || 'Cancelled by admin';
+            } else {
+                if (!window.confirm(`Restore “${ev.name}”? It will be public again.`)) return;
+            }
+            setCancelBusyId(ev.id);
+            try {
+                const res = await fetch('/api/admin/events', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        eventId: ev.id,
+                        cancelled,
+                        ...(reason ? { reason } : {}),
+                    }),
+                });
+                if (res.status === 401) {
+                    setAuthed(false);
+                    return;
+                }
+                const data = await res.json();
+                if (!res.ok) {
+                    window.alert(typeof data?.error === 'string' ? data.error : 'Update failed');
+                    return;
+                }
+                await fetchEvents();
+                setSelectedEventDetail((cur) =>
+                    cur && cur.id === ev.id
+                        ? {
+                              ...cur,
+                              cancelledAt: data.cancelledAt,
+                              cancelledByAdmin: data.cancelledByAdmin,
+                              cancelReason: data.cancelReason,
+                          }
+                        : cur
+                );
+            } catch {
+                window.alert('Network error');
+            } finally {
+                setCancelBusyId(null);
+            }
+        },
+        [fetchEvents]
+    );
 
     const fetchRegistrations = useCallback(async () => {
         const res = await fetch('/api/admin/registrations', { cache: 'no-store', credentials: 'include' });
@@ -1090,9 +1153,14 @@ export default function AdminDashboard() {
                                         >
                                             <div className="space-y-2 min-w-0">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    <div className={`w-1 h-1 shrink-0 rounded-full ${new Date(ev.date) >= new Date() ? 'bg-green-500 animate-pulse' : 'bg-white/20'}`} />
+                                                    <div className={`w-1 h-1 shrink-0 rounded-full ${ev.cancelledAt ? 'bg-red-500' : new Date(ev.date) >= new Date() ? 'bg-green-500 animate-pulse' : 'bg-white/20'}`} />
                                                     <h3 className="text-sm font-bold tracking-tight group-hover:tracking-wide transition-all uppercase truncate">{ev.name}</h3>
                                                     {ev.isVip && <span className="text-[7px] px-1.5 py-0.5 border border-yellow-500/30 text-yellow-500 font-black tracking-widest uppercase bg-yellow-500/5">VIP Exclusive</span>}
+                                                    {ev.cancelledAt ? (
+                                                        <span className="text-[7px] px-1.5 py-0.5 border border-red-500/35 text-red-300 font-black tracking-widest uppercase bg-red-500/10">
+                                                            {ev.cancelledByAdmin ? 'Admin cancel' : 'Cancelled'}
+                                                        </span>
+                                                    ) : null}
                                                 </div>
                                                 <div className="flex flex-wrap gap-x-5 gap-y-1">
                                                     <div className="space-y-0.5">
@@ -1128,7 +1196,32 @@ export default function AdminDashboard() {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="shrink-0">
+                                            <div className="shrink-0 flex flex-col sm:flex-row gap-1.5">
+                                                {ev.cancelledAt ? (
+                                                    <button
+                                                        type="button"
+                                                        disabled={cancelBusyId === ev.id}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void setAdminEventCancelled(ev, false);
+                                                        }}
+                                                        className="px-3 py-1.5 border border-emerald-500/30 text-emerald-300/90 hover:bg-emerald-500/10 text-[8px] font-black tracking-[0.25em] uppercase transition-all whitespace-nowrap disabled:opacity-50"
+                                                    >
+                                                        {cancelBusyId === ev.id ? '…' : 'Restore'}
+                                                    </button>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        disabled={cancelBusyId === ev.id}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void setAdminEventCancelled(ev, true);
+                                                        }}
+                                                        className="px-3 py-1.5 border border-red-500/35 text-red-300/90 hover:bg-red-500/10 text-[8px] font-black tracking-[0.25em] uppercase transition-all whitespace-nowrap disabled:opacity-50"
+                                                    >
+                                                        {cancelBusyId === ev.id ? '…' : 'Cancel'}
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={e => {
@@ -1177,6 +1270,14 @@ export default function AdminDashboard() {
                                     <p className="text-[10px] font-mono text-white/35">
                                         {selectedEventDetail.location || '—'} · {new Date(selectedEventDetail.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                                     </p>
+                                    {selectedEventDetail.cancelledAt ? (
+                                        <p className="text-[10px] text-red-300/90 font-mono">
+                                            Cancelled{selectedEventDetail.cancelledByAdmin ? ' by admin' : ''}
+                                            {selectedEventDetail.cancelReason
+                                                ? ` · ${selectedEventDetail.cancelReason}`
+                                                : ''}
+                                        </p>
+                                    ) : null}
                                     <div className="space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
                                             <span
@@ -1198,6 +1299,25 @@ export default function AdminDashboard() {
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 sm:justify-end">
+                                    {selectedEventDetail.cancelledAt ? (
+                                        <button
+                                            type="button"
+                                            disabled={cancelBusyId === selectedEventDetail.id}
+                                            onClick={() => void setAdminEventCancelled(selectedEventDetail, false)}
+                                            className="px-3 py-2 border border-emerald-500/35 text-emerald-300 text-[8px] font-black tracking-[0.2em] uppercase hover:bg-emerald-500/10 disabled:opacity-50"
+                                        >
+                                            Restore event
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            disabled={cancelBusyId === selectedEventDetail.id}
+                                            onClick={() => void setAdminEventCancelled(selectedEventDetail, true)}
+                                            className="px-3 py-2 border border-red-500/40 text-red-300 text-[8px] font-black tracking-[0.2em] uppercase hover:bg-red-500/10 disabled:opacity-50"
+                                        >
+                                            Cancel (misconduct)
+                                        </button>
+                                    )}
                                     <button
                                         type="button"
                                         onClick={() => exportEventRoster(selectedEventDetail)}

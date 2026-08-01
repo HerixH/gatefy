@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import { peekCode, verifyCode } from '@/lib/codes';
+import { peekCode, updateAttendanceMint, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
 import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
 import { sendAttendanceVerifiedEmail } from '@/lib/email';
+import { mintAttendanceProof } from '@/lib/attendance-mint';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { base } from 'viem/chains';
 
@@ -17,8 +18,12 @@ const MINIMAL_ERC20_ABI = parseAbi([
 
 export async function POST(request: Request) {
     try {
-        const { code, wallet, email: emailRaw } = await request.json();
+        const { code, wallet, email: emailRaw, stellarAddress: stellarRaw } = await request.json();
         const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
+        const stellarAddress =
+            typeof stellarRaw === 'string' && /^G[A-Z0-9]{55}$/.test(stellarRaw.trim())
+                ? stellarRaw.trim()
+                : '';
 
         if (!code) {
             return NextResponse.json({ error: 'Code is required' }, { status: 400 });
@@ -97,6 +102,18 @@ export async function POST(request: Request) {
         );
 
         if (success) {
+            let mint:
+                | {
+                      ok: boolean;
+                      chain?: string;
+                      txHash?: string;
+                      tokenId?: string;
+                      explorerUrl?: string;
+                      status?: string;
+                      error?: string;
+                  }
+                | undefined;
+
             if (event && newCheckin) {
                 await incrementAttendee(event.id);
 
@@ -121,6 +138,48 @@ export async function POST(request: Request) {
                 } catch (e) {
                     console.error('[verify] check-in email lookup/send error:', e);
                 }
+
+                // Soroban mint first (Base later) — after successful new check-in only
+                try {
+                    const mintResult = await mintAttendanceProof({
+                        eventId: event.id,
+                        stellarAddress: stellarAddress || null,
+                        evmWallet: wallet && wallet !== '0xDEV' ? wallet : null,
+                    });
+                    mint = mintResult.ok
+                        ? {
+                              ok: true,
+                              chain: mintResult.chain,
+                              txHash: mintResult.txHash,
+                              tokenId: mintResult.tokenId,
+                              explorerUrl: mintResult.explorerUrl,
+                          }
+                        : {
+                              ok: false,
+                              chain: mintResult.chain,
+                              status: mintResult.status,
+                              error: mintResult.error,
+                          };
+
+                    await updateAttendanceMint({
+                        eventId: event.id,
+                        wallet: emailMode ? null : wallet && wallet !== '0xDEV' ? wallet : null,
+                        email: emailMode ? email : null,
+                        mintChain: mintResult.ok ? mintResult.chain : mintResult.chain,
+                        mintStatus: mintResult.ok ? 'minted' : mintResult.status,
+                        mintTxHash: mintResult.ok ? mintResult.txHash : null,
+                        mintTokenId: mintResult.ok ? mintResult.tokenId : null,
+                        mintError: mintResult.ok ? null : mintResult.error,
+                    });
+                } catch (e) {
+                    console.error('[verify] attendance mint error:', e);
+                    mint = {
+                        ok: false,
+                        chain: 'soroban',
+                        status: 'failed',
+                        error: e instanceof Error ? e.message : 'Mint failed',
+                    };
+                }
             }
 
             // If the user already checked in for this event, surface that explicitly
@@ -128,14 +187,17 @@ export async function POST(request: Request) {
                 return NextResponse.json({
                     success: true,
                     alreadyVerified: true,
-                    message: 'You have already verified attendance for this event.'
+                    message: 'You have already verified attendance for this event.',
                 });
             }
 
             return NextResponse.json({
                 success: true,
                 alreadyVerified: false,
-                message: 'Attendance recorded.'
+                message: mint?.ok
+                    ? 'Attendance verified and minted on Stellar (Soroban).'
+                    : 'Attendance recorded.',
+                mint,
             });
         }
 

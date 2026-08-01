@@ -5,12 +5,24 @@ import {
     isRegistered,
     isRegisteredByEmail,
     getRegistrationForEvent,
+    countRegistrationsForEvent,
+    isPaymentTxHashUsed,
+    isMobileMoneyRefUsed,
 } from '@/lib/registrations';
-import type { Event } from '@/lib/events';
 import { getEventById } from '@/lib/events';
-import { eventAcceptsMobileMoney, eventAcceptsUsdc, type TicketPaymentFields } from '@/lib/event-payment';
+import {
+    eventAcceptsMobileMoney,
+    eventAcceptsStellar,
+    eventAcceptsUsdc,
+    type TicketPaymentFields,
+} from '@/lib/event-payment';
 import { sendRegistrationConfirmationEmail } from '@/lib/email';
 import { verifyUsdcTicketPayment } from '@/lib/usdc-payment';
+import {
+    looksLikeBaseTxHash,
+    looksLikeStellarTxHash,
+    verifyStellarUsdcPayment,
+} from '@/lib/stellar-payment';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,33 +36,65 @@ function ticketPrice(ev: { ticketPriceUsdc?: number } | null | undefined): numbe
 }
 
 async function resolvePaidTicketOpts(
-    ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney'>,
+    ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney' | 'ticketAcceptStellar'>,
     price: number,
-    body: { paymentTxHash?: string; mobileMoneyReference?: string }
+    body: { paymentTxHash?: string; mobileMoneyReference?: string; paymentRail?: string }
 ): Promise<
-    | { ok: true; payment?: { txHash?: string; mobileRef?: string }; paymentLabel?: string }
+    | {
+          ok: true;
+          payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' };
+          paymentLabel?: string;
+      }
     | { ok: false; error: string; status: number }
 > {
     if (price <= 0) return { ok: true, payment: undefined };
     const txHash = typeof body.paymentTxHash === 'string' ? body.paymentTxHash.trim() : '';
     const mobileRef = typeof body.mobileMoneyReference === 'string' ? body.mobileMoneyReference.trim() : '';
+    const railHint = typeof body.paymentRail === 'string' ? body.paymentRail.trim().toLowerCase() : '';
 
     const allowed: string[] = [];
-    if (eventAcceptsUsdc(ev)) allowed.push('USDC on Base (paste transaction hash after paying)');
+    if (eventAcceptsUsdc(ev)) allowed.push('crypto on Base (0x… tx after wallet pay)');
+    if (eventAcceptsStellar(ev))
+        allowed.push('crypto on Stellar (wallet pay or 64-char tx hash)');
     if (eventAcceptsMobileMoney(ev))
         allowed.push('mobile money (follow organizer instructions, then enter your payment reference)');
 
     if (txHash) {
+        // Prefer explicit paymentRail; otherwise infer from hash shape (Base = 0x…, Stellar = 64 hex).
+        const wantStellar =
+            railHint === 'stellar' ||
+            (railHint !== 'base' && !looksLikeBaseTxHash(txHash) && looksLikeStellarTxHash(txHash));
+        const wantBase =
+            railHint === 'base' ||
+            (railHint !== 'stellar' && looksLikeBaseTxHash(txHash));
+
+        if (wantStellar && !wantBase) {
+            if (!eventAcceptsStellar(ev)) {
+                return {
+                    ok: false,
+                    error: 'This organizer is not accepting Stellar crypto for this ticket.',
+                    status: 400,
+                };
+            }
+            const v = await verifyStellarUsdcPayment(txHash, price);
+            if (!v.ok) return { ok: false, error: v.error || 'Stellar payment verification failed', status: 400 };
+            return {
+                ok: true,
+                payment: { txHash, rail: 'stellar' },
+                paymentLabel: 'crypto on Stellar',
+            };
+        }
+
         if (!eventAcceptsUsdc(ev)) {
             return {
                 ok: false,
-                error: 'This organizer is not accepting USDC for this ticket.',
+                error: 'This organizer is not accepting Base crypto for this ticket.',
                 status: 400,
             };
         }
         const v = await verifyUsdcTicketPayment(txHash, price, TREASURY);
         if (!v.ok) return { ok: false, error: v.error || 'Payment verification failed', status: 400 };
-        return { ok: true, payment: { txHash }, paymentLabel: 'USDC on Base' };
+        return { ok: true, payment: { txHash, rail: 'base' }, paymentLabel: 'crypto on Base' };
     }
     if (mobileRef.length >= 4) {
         if (!eventAcceptsMobileMoney(ev)) {
@@ -60,14 +104,18 @@ async function resolvePaidTicketOpts(
                 status: 400,
             };
         }
-        return { ok: true, payment: { mobileRef }, paymentLabel: 'mobile money' };
+        return {
+            ok: true,
+            payment: { mobileRef },
+            paymentLabel: 'mobile money (awaiting host confirmation)',
+        };
     }
     return {
         ok: false,
         error:
             allowed.length === 0
                 ? 'This ticket is misconfigured — contact the organizer.'
-                : `This event requires payment (${price} USDC equivalent where applicable): use ${allowed.join(' or ')}.`,
+                : `This event requires payment (ticket ${price}): use ${allowed.join(' or ')}.`,
         status: 400,
     };
 }
@@ -85,10 +133,38 @@ export async function POST(request: Request) {
         const emailStr = typeof email === 'string' ? email.trim() : '';
 
         const ev = await getEventById(String(eventId).trim());
+        if (!ev) {
+            return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+        }
+        if (ev.cancelledAt) {
+            return NextResponse.json({ error: 'This event has been cancelled.' }, { status: 400 });
+        }
+
         const price = ticketPrice(ev);
+        const paymentDefaults = {
+            ticketAcceptUsdc: true,
+            ticketAcceptMobileMoney: true,
+            ticketAcceptStellar: false,
+        };
+
+        const max = ev.maxAttendees != null && ev.maxAttendees > 0 ? ev.maxAttendees : null;
+        if (max != null) {
+            const count = await countRegistrationsForEvent(ev.id);
+            if (count >= max) {
+                return NextResponse.json({ error: 'This event is sold out.' }, { status: 400 });
+            }
+        }
+
+        const walletSignup = ev.isBlockchain !== false;
 
         // Blockchain (wallet) signup — collect email + first name / org name (must run before email-only branch)
         if (wallet) {
+            if (!walletSignup) {
+                return NextResponse.json(
+                    { error: 'This event uses email signup. Register with your email instead of a wallet.' },
+                    { status: 400 }
+                );
+            }
             if (!nameStr) {
                 return NextResponse.json(
                     { error: 'First name or organization name is required' },
@@ -118,12 +194,20 @@ export async function POST(request: Request) {
                 );
             }
 
-            const paid = await resolvePaidTicketOpts(
-                ev ?? { ticketAcceptUsdc: true, ticketAcceptMobileMoney: true },
-                price,
-                body
-            );
+            const paid = await resolvePaidTicketOpts(ev ?? paymentDefaults, price, body);
             if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
+            if (paid.payment?.txHash && (await isPaymentTxHashUsed(paid.payment.txHash))) {
+                return NextResponse.json(
+                    { error: 'This payment transaction was already used for a registration.' },
+                    { status: 400 }
+                );
+            }
+            if (paid.payment?.mobileRef && (await isMobileMoneyRefUsed(ev.id, paid.payment.mobileRef))) {
+                return NextResponse.json(
+                    { error: 'This mobile-money reference was already used for this event.' },
+                    { status: 400 }
+                );
+            }
 
             const success = await registerForEvent(
                 eventId,
@@ -159,6 +243,15 @@ export async function POST(request: Request) {
 
         // Normal (email) signup for non-blockchain events
         if (emailStr) {
+            if (walletSignup) {
+                return NextResponse.json(
+                    {
+                        error:
+                            'This event requires wallet signup. Connect a wallet to register (email-only signup is disabled).',
+                    },
+                    { status: 400 }
+                );
+            }
             if (!nameStr) {
                 return NextResponse.json(
                     { error: 'First name or organization name is required' },
@@ -172,12 +265,20 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: 'Already registered' }, { status: 400 });
             }
 
-            const paid = await resolvePaidTicketOpts(
-                ev ?? { ticketAcceptUsdc: true, ticketAcceptMobileMoney: true },
-                price,
-                body
-            );
+            const paid = await resolvePaidTicketOpts(ev ?? paymentDefaults, price, body);
             if (!paid.ok) return NextResponse.json({ error: paid.error }, { status: paid.status });
+            if (paid.payment?.txHash && (await isPaymentTxHashUsed(paid.payment.txHash))) {
+                return NextResponse.json(
+                    { error: 'This payment transaction was already used for a registration.' },
+                    { status: 400 }
+                );
+            }
+            if (paid.payment?.mobileRef && (await isMobileMoneyRefUsed(ev.id, paid.payment.mobileRef))) {
+                return NextResponse.json(
+                    { error: 'This mobile-money reference was already used for this event.' },
+                    { status: 400 }
+                );
+            }
 
             const success = await registerForEventWithEmail(eventId, emailStr, nameStr, paid.payment);
             if (success) {

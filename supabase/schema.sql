@@ -22,7 +22,11 @@ create table if not exists public.events (
   ticket_price_usdc numeric,
   mobile_money_instructions text,
   ticket_accept_usdc boolean default true,
-  ticket_accept_mobile_money boolean default true
+  ticket_accept_mobile_money boolean default true,
+  ticket_accept_stellar boolean default false,
+  cancelled_at timestamptz,
+  cancelled_by_admin boolean default false,
+  cancel_reason text
 );
 
 -- If table already exists, run: alter table public.events add column if not exists end_date timestamptz; alter table public.events add column if not exists max_attendees integer;
@@ -105,6 +109,12 @@ create table if not exists public.attendance (
   code text not null,
   checked_in_at timestamptz default now(),
   event_id text,
+  mint_chain text,
+  mint_status text,
+  mint_tx_hash text,
+  mint_token_id text,
+  mint_error text,
+  minted_at timestamptz,
   constraint attendance_wallet_or_email_check check (wallet is not null or email is not null)
 );
 
@@ -132,11 +142,22 @@ create unique index if not exists unique_registration_wallet
 create unique index if not exists unique_registration_email
   on public.registrations(event_id, lower(email)) where email is not null;
 
+create unique index if not exists unique_registration_payment_tx_hash
+  on public.registrations (lower(payment_tx_hash))
+  where payment_tx_hash is not null and length(trim(payment_tx_hash)) > 0;
+
+create unique index if not exists unique_registration_payment_reference_per_event
+  on public.registrations (event_id, lower(payment_reference))
+  where payment_reference is not null and length(trim(payment_reference)) > 0;
+
 comment on column public.events.ticket_price_usdc is 'Optional USDC price per ticket on Base mainnet; null/0 = free.';
 comment on column public.events.mobile_money_instructions is 'Organizer text: MTN/Airtel numbers, account name, amount in local currency, etc.';
-comment on column public.registrations.payment_status is 'none | paid_crypto | paid_mobile';
-comment on column public.registrations.payment_tx_hash is 'Base USDC transfer tx hash when paid_crypto';
-comment on column public.registrations.payment_reference is 'Mobile-money transaction id / reference when paid_mobile';
+comment on column public.events.cancelled_at is 'When set, event is cancelled: hidden from public browse, registration blocked.';
+comment on column public.events.cancelled_by_admin is 'True when cancelled by platform admin; organizers cannot restore.';
+comment on column public.events.cancel_reason is 'Optional admin cancel reason (e.g. misconduct).';
+comment on column public.registrations.payment_status is 'none | pending_mobile | paid_crypto | paid_stellar | paid_mobile | rejected_mobile';
+comment on column public.registrations.payment_tx_hash is 'Base/Stellar USDC transfer tx hash when paid_crypto or paid_stellar';
+comment on column public.registrations.payment_reference is 'Mobile-money transaction id / reference when pending_mobile or paid_mobile';
 
 -- If you created events/registrations before paid tickets existed, run supabase/patches/02_tickets_payments.sql once.
 

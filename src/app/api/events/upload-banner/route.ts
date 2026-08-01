@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isSupabaseConfigured, getSupabase, getSupabaseConfigError, isUsingServiceRole, STORAGE_BUCKET_EVENT_BANNERS } from '@/lib/supabase';
-import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
+import { findEventByIdCaseInsensitive, requireOrganizerSessionForEvent } from '@/lib/organizer-access';
 import { isPast } from '@/lib/event-status';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB (matches schema bucket limit)
@@ -32,23 +32,16 @@ export async function POST(request: Request) {
         const organizerEmail = typeof formData.get('organizerEmail') === 'string' ? (formData.get('organizerEmail') as string).trim() : '';
 
         if (eventIdRaw) {
-            if (!organizerWallet && !organizerEmail) {
-                return NextResponse.json(
-                    { error: 'When updating a banner for an existing event, pass organizerWallet or organizerEmail alongside eventId.' },
-                    { status: 403 }
-                );
-            }
             const ev = await findEventByIdCaseInsensitive(eventIdRaw);
             if (!ev) {
                 return NextResponse.json({ error: 'Event not found' }, { status: 404 });
             }
-            if (
-                !serverOrganizerMatchesEvent(ev.organizer, {
-                    organizerWallet,
-                    organizerEmail,
-                })
-            ) {
-                return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+            const ownerAuth = await requireOrganizerSessionForEvent(ev.organizer, {
+                organizerWallet,
+                organizerEmail,
+            });
+            if (!ownerAuth.ok) {
+                return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status });
             }
             if (isPast(ev.date, ev.endDate)) {
                 return NextResponse.json({ error: 'Past events cannot be edited.' }, { status: 400 });

@@ -10,6 +10,9 @@ import { waitForTransactionReceipt } from '@wagmi/core';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Scanner } from '@/components/Scanner';
+import { CreateEventWizard } from '@/components/CreateEventWizard';
+import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
+import { EventLocationField } from '@/components/EventLocationField';
 import {
   isEventOrganizer,
   formatOrganizerShort,
@@ -21,6 +24,7 @@ import {
   formatEventTicketSummary,
   validateEventPaymentConfig,
 } from '@/lib/event-payment';
+import { matchesRosterSearch } from '@/lib/organizer-stats';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -90,6 +94,15 @@ function HomeContent() {
 
   const [showScanner, setShowScanner] = useState(false);
   const [minted, setMinted] = useState(false);
+  const [mintReceipt, setMintReceipt] = useState<{
+    ok: boolean;
+    chain?: string;
+    txHash?: string;
+    tokenId?: string;
+    explorerUrl?: string;
+    status?: string;
+    error?: string;
+  } | null>(null);
   const [scanning, setScanning] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   /** Organizer-scoped list from GET /api/events/managed (lighter than filtering the public catalog). */
@@ -130,6 +143,15 @@ function HomeContent() {
   };
   const [registrations, setRegistrations] = useState<RegRow[]>([]);
   const [loadingAttendees, setLoadingAttendees] = useState(false);
+  const [rosterSearch, setRosterSearch] = useState('');
+  type RosterDetail =
+    | {
+        kind: 'verified';
+        attendee: { wallet?: string | null; email?: string | null; checkedInAt: string; code?: string };
+        registration: RegRow | null;
+      }
+    | { kind: 'pending'; registration: RegRow };
+  const [rosterDetail, setRosterDetail] = useState<RosterDetail | null>(null);
   /** Server-backed registration row for the selected event (name / email / wallet). */
   const [eventRegProfile, setEventRegProfile] = useState<{
     email?: string | null;
@@ -331,6 +353,11 @@ function HomeContent() {
     }
   }, [selectedEvent, address, orgCtx]);
 
+  useEffect(() => {
+    setRosterSearch('');
+    setRosterDetail(null);
+  }, [selectedEvent?.id]);
+
   // Watch for confirmed payment → call vip-imprint API
   useEffect(() => {
     if (isTxConfirmed && txHash && vipStep === 'paying') {
@@ -407,10 +434,16 @@ function HomeContent() {
     mobileMoneyInstructions: '' as string,
     ticketAcceptUsdc: true,
     ticketAcceptMobileMoney: true,
+    ticketAcceptStellar: false,
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [uploadingBanner, setUploadingBanner] = useState(false);
+  const minStartDatetimeLocal = useMemo(() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }, [showCreateEvent]);
 
   /** Edit existing event (organizer-only): ticketing, capacity, basics. */
   const [showManageEvent, setShowManageEvent] = useState(false);
@@ -571,6 +604,12 @@ function HomeContent() {
       const body: Record<string, string> = { code: data };
       if (address) body.wallet = address;
       if (emailMode && regEmail) body.email = regEmail.trim().toLowerCase();
+      try {
+        const stellar = sessionStorage.getItem('gatefy-stellar-address');
+        if (stellar && /^G[A-Z0-9]{55}$/.test(stellar)) body.stellarAddress = stellar;
+      } catch {
+        /* ignore */
+      }
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -582,6 +621,7 @@ function HomeContent() {
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
         } else {
+          setMintReceipt(result.mint ?? null);
           setMinted(true);
         }
         setShowScanner(false);
@@ -642,6 +682,7 @@ function HomeContent() {
         ticketPriceUsdc: ticketAmt,
         ticketAcceptUsdc: form.ticketAcceptUsdc,
         ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+        ticketAcceptStellar: form.ticketAcceptStellar === true,
       });
       if (!pv.ok) {
         setCreateError(pv.error);
@@ -650,6 +691,7 @@ function HomeContent() {
       }
       payload.ticketAcceptUsdc = form.ticketAcceptUsdc;
       payload.ticketAcceptMobileMoney = form.ticketAcceptMobileMoney;
+      payload.ticketAcceptStellar = form.ticketAcceptStellar === true;
       if (address) {
         payload.organizer = address;
       } else {
@@ -681,6 +723,7 @@ function HomeContent() {
           mobileMoneyInstructions: '',
           ticketAcceptUsdc: true,
           ticketAcceptMobileMoney: true,
+          ticketAcceptStellar: false,
         });
         if (!address && form.organizerEmail.trim()) {
           commitOrganizerEmailSession(form.organizerEmail.trim(), { silent: true });
@@ -1038,43 +1081,6 @@ function HomeContent() {
     URL.revokeObjectURL(link.href);
   };
 
-  /** Organizer QR, verification code, and manifest — shown for wallet events when connected and for email events without requiring a wallet. */
-  const renderEmailOrganizerAccessGate = () => {
-    if (!selectedEvent || !isEmailOrganizerId(selectedEvent.organizer)) return null;
-    if (isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
-    // Only before go-live: hide from attendees once the event is live or finished
-    if (!isUpcoming(selectedEvent.date, selectedEvent.endDate)) return null;
-    return (
-      <div className="p-4 border border-amber-500/25 bg-gradient-to-br from-amber-500/[0.08] to-transparent space-y-3">
-        <p className="text-[10px] uppercase tracking-[0.25em] text-amber-400/95 font-black">Organizer sign-in</p>
-        <p className="text-[11px] text-white/75 leading-relaxed">
-          This event is tied to an <strong className="text-white font-semibold">email organizer account</strong>. Sign in with the{' '}
-          <strong className="text-white font-semibold">same email you used when you created the event</strong> — then you get the same
-          host tools as wallet organizers (check-in QR, attendee list, CSV export).
-        </p>
-        <form onSubmit={handleOrganizerSignInSubmit} className="flex flex-col sm:flex-row gap-2 pt-1">
-          <input
-            type="email"
-            value={organizerSignInDraft}
-            onChange={e => setOrganizerSignInDraft(e.target.value)}
-            placeholder="Organizer email"
-            autoComplete="email"
-            className="flex-1 min-w-0 bg-black/50 border border-white/15 px-3 py-2.5 text-sm font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-amber-400/40"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2.5 bg-white text-black text-[9px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200 shrink-0"
-          >
-            Sign in
-          </button>
-        </form>
-        <p className="text-[8px] text-white/35">
-          Tip: you can also sign in from <span className="text-white/50 font-bold">Your session</span> in the sidebar.
-        </p>
-      </div>
-    );
-  };
-
   const renderOrganizerEventPanel = () => {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
     const ev = selectedEvent;
@@ -1187,8 +1193,8 @@ function HomeContent() {
           <p className="text-[8px] tracking-[0.1em] uppercase text-white/10 font-medium text-center md:text-left">Share the registration link for sign-ups. Download the QR (includes event details) for check-in at the event.</p>
         </div>
 
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <p className="text-[9px] tracking-[0.35em] uppercase text-white/40 font-bold">
                 {isPast(ev.date, ev.endDate) ? 'Past event — visitor summary' : 'Registration & check-in roster'}
@@ -1216,21 +1222,190 @@ function HomeContent() {
               </button>
             </div>
           </div>
+          <input
+            type="search"
+            value={rosterSearch}
+            onChange={(e) => setRosterSearch(e.target.value)}
+            placeholder="Search attendees by name, email, wallet…"
+            className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-[11px] font-mono placeholder:text-white/25 focus:outline-none focus:border-white/25"
+          />
+          {rosterDetail ? (
+            <div className="border border-white/15 bg-white/[0.03] p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[8px] tracking-[0.3em] uppercase text-white/40 font-bold">Attendee details</p>
+                  <p className="text-sm text-white font-medium tracking-tight mt-1 truncate">
+                    {rosterDetail.kind === 'pending'
+                      ? rosterDetail.registration.name ||
+                        rosterDetail.registration.email ||
+                        (rosterDetail.registration.wallet
+                          ? `${rosterDetail.registration.wallet.slice(0, 10)}…${rosterDetail.registration.wallet.slice(-6)}`
+                          : 'Attendee')
+                      : rosterDetail.registration?.name ||
+                        rosterDetail.attendee.email ||
+                        (rosterDetail.attendee.wallet
+                          ? `${rosterDetail.attendee.wallet.slice(0, 10)}…${rosterDetail.attendee.wallet.slice(-6)}`
+                          : 'Attendee')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRosterDetail(null)}
+                  className="shrink-0 px-2.5 py-1 border border-white/20 text-[9px] uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5">
+                {(() => {
+                  const reg =
+                    rosterDetail.kind === 'pending'
+                      ? rosterDetail.registration
+                      : rosterDetail.registration;
+                  const email =
+                    reg?.email ||
+                    (rosterDetail.kind === 'verified' ? rosterDetail.attendee.email : null);
+                  const wallet =
+                    reg?.wallet ||
+                    (rosterDetail.kind === 'verified' ? rosterDetail.attendee.wallet : null);
+                  const rows: { label: string; value: string; mono?: boolean }[] = [
+                    { label: 'Status', value: rosterDetail.kind === 'verified' ? 'Verified' : 'Pending check-in' },
+                    ...(reg?.name ? [{ label: 'Name', value: reg.name }] : []),
+                    ...(email ? [{ label: 'Email', value: email, mono: true }] : []),
+                    ...(wallet ? [{ label: 'Wallet', value: wallet, mono: true }] : []),
+                    ...(reg
+                      ? [
+                          {
+                            label: 'Registered',
+                            value: new Date(reg.registeredAt).toLocaleString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }),
+                            mono: true,
+                          },
+                        ]
+                      : []),
+                    ...(rosterDetail.kind === 'verified'
+                      ? [
+                          {
+                            label: 'Checked in',
+                            value: new Date(rosterDetail.attendee.checkedInAt).toLocaleString('en-GB', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }),
+                            mono: true,
+                          },
+                        ]
+                      : []),
+                    ...(rosterDetail.kind === 'verified' && rosterDetail.attendee.code
+                      ? [{ label: 'Check-in code', value: rosterDetail.attendee.code, mono: true }]
+                      : []),
+                    ...(ticketSpot > 0 && reg
+                      ? [{ label: 'Payment', value: regPayLabel(reg), mono: true }]
+                      : []),
+                    ...(reg?.paymentTxHash?.trim()
+                      ? [{ label: 'Tx hash', value: reg.paymentTxHash.trim(), mono: true }]
+                      : []),
+                    ...(reg?.paymentReference?.trim()
+                      ? [{ label: 'Payment ref', value: reg.paymentReference.trim(), mono: true }]
+                      : []),
+                  ];
+                  return rows.map((row) => (
+                    <div key={row.label} className="space-y-0.5 min-w-0">
+                      <p className="text-[8px] tracking-[0.25em] uppercase text-white/35 font-bold">{row.label}</p>
+                      <p
+                        className={`text-[11px] text-white/80 break-all ${row.mono ? 'font-mono' : 'font-sans'}`}
+                      >
+                        {row.value}
+                      </p>
+                    </div>
+                  ));
+                })()}
+              </div>
+              {(() => {
+                const email =
+                  (rosterDetail.kind === 'pending'
+                    ? rosterDetail.registration.email
+                    : rosterDetail.registration?.email || rosterDetail.attendee.email) ?? null;
+                const wallet =
+                  (rosterDetail.kind === 'pending'
+                    ? rosterDetail.registration.wallet
+                    : rosterDetail.registration?.wallet || rosterDetail.attendee.wallet) ?? null;
+                if (!email && !wallet) return null;
+                return (
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-white/[0.06]">
+                    {email ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(email);
+                          showWalletToast('Email copied.');
+                        }}
+                        className="px-3 py-1.5 border border-white/15 text-[8px] uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10"
+                      >
+                        Copy email
+                      </button>
+                    ) : null}
+                    {wallet ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(wallet);
+                          showWalletToast('Wallet copied.');
+                        }}
+                        className="px-3 py-1.5 border border-white/15 text-[8px] uppercase tracking-widest text-white/60 hover:text-white hover:bg-white/10"
+                      >
+                        Copy wallet
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })()}
+            </div>
+          ) : null}
+          {(() => {
+            const filteredAttendees = attendees.filter((a) => matchesRosterSearch(a, rosterSearch));
+            const unverified = registrations.filter(
+              (r) =>
+                !attendees.some((a) => registrantMatchesCheckIn(r, a)) &&
+                matchesRosterSearch(r, rosterSearch)
+            );
+            const searching = rosterSearch.trim().length > 0;
+            return (
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="space-y-3">
               <div className="flex items-center justify-between border-b border-white/10 pb-2">
                 <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Verified check-ins</p>
-                <span className="text-[9px] font-mono text-green-500/80">{attendees.length}</span>
+                <span className="text-[9px] font-mono text-green-500/80">
+                  {searching ? `${filteredAttendees.length}/${attendees.length}` : attendees.length}
+                </span>
               </div>
               <div className="max-h-[280px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
                 {loadingAttendees ? (
                   <div className="p-4 text-center">
                     <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
                   </div>
-                ) : attendees.length > 0 ? (
+                ) : filteredAttendees.length > 0 ? (
                   <div className="divide-y divide-white/[0.04]">
-                    {attendees.map((a, i) => (
-                      <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                    {filteredAttendees.map((a, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() =>
+                          setRosterDetail({
+                            kind: 'verified',
+                            attendee: a,
+                            registration: registrations.find((r) => registrantMatchesCheckIn(r, a)) ?? null,
+                          })
+                        }
+                        className="w-full text-left p-3 flex items-center justify-between group hover:bg-white/[0.04] transition-colors"
+                      >
                         <div className="space-y-0.5 min-w-0">
                           <p className="text-[10px] font-mono text-white/70 truncate">
                             {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || '—')}
@@ -1243,12 +1418,16 @@ function HomeContent() {
                           </p>
                         </div>
                         <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ) : (
                   <div className="p-6 text-center">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">No verified check-ins yet</p>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">
+                      {searching
+                        ? 'No verified matches'
+                        : 'No verified check-ins yet'}
+                    </p>
                   </div>
                 )}
               </div>
@@ -1257,7 +1436,9 @@ function HomeContent() {
               <div className="flex items-center justify-between border-b border-white/10 pb-2">
                 <p className="text-[10px] uppercase tracking-[0.25em] font-black text-white">Registered — not verified</p>
                 <span className="text-[9px] font-mono text-white/40">
-                  {registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a))).length}
+                  {searching
+                    ? `${unverified.length}/${registrations.filter((r) => !attendees.some((a) => registrantMatchesCheckIn(r, a))).length}`
+                    : unverified.length}
                 </span>
               </div>
               <div className="max-h-[280px] overflow-y-auto border border-white/[0.06] bg-white/[0.02] rounded">
@@ -1265,12 +1446,15 @@ function HomeContent() {
                   <div className="p-4 text-center">
                     <span className="text-[10px] uppercase tracking-widest text-white/20 animate-pulse">Loading...</span>
                   </div>
-                ) : (() => {
-                  const unverified = registrations.filter(r => !attendees.some(a => registrantMatchesCheckIn(r, a)));
-                  return unverified.length > 0 ? (
+                ) : unverified.length > 0 ? (
                     <div className="divide-y divide-white/[0.04]">
                       {unverified.map((r, i) => (
-                        <div key={i} className="p-3 flex items-center justify-between group hover:bg-white/[0.02]">
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setRosterDetail({ kind: 'pending', registration: r })}
+                          className="w-full text-left p-3 flex items-center justify-between group hover:bg-white/[0.04] transition-colors"
+                        >
                           <div className="space-y-0.5 min-w-0">
                             <p className="text-[10px] text-white/70 truncate font-sans font-medium">
                               {r.wallet
@@ -1288,20 +1472,25 @@ function HomeContent() {
                             <span className="text-[8px] uppercase tracking-widest text-amber-400/50 font-bold">Pending</span>
                             <span className="text-[8px] font-mono text-white/35">{regPayLabel(r)}</span>
                           </div>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ) : (
                     <div className="p-6 text-center">
                       <p className="text-[10px] uppercase tracking-[0.2em] text-white/25">
-                        {registrations.length === 0 ? 'No registrations yet' : 'All registrants have checked in'}
+                        {searching
+                          ? 'No pending matches'
+                          : registrations.length === 0
+                            ? 'No registrations yet'
+                            : 'All registrants have checked in'}
                       </p>
                     </div>
-                  );
-                })()}
+                  )}
               </div>
             </div>
           </div>
+            );
+          })()}
         </div>
       </>
     );
@@ -1573,7 +1762,7 @@ function HomeContent() {
                 Autonomous Verification Protocol
               </span>
               <span className="block mt-2 text-[8px] lg:text-[9px] font-mono tracking-[0.2em] uppercase text-white/30">
-                Base Mini App · Web
+                Web App
               </span>
             </div>
 
@@ -1919,388 +2108,23 @@ function HomeContent() {
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 24 }}
-              className="w-full max-w-lg border border-white/10 bg-black max-h-[90vh] lg:max-h-[92vh] flex flex-col overflow-hidden"
+              className="w-full max-w-xl border border-white/10 bg-black max-h-[90vh] lg:max-h-[92vh] flex flex-col overflow-hidden"
             >
-              {/* Modal Header with Cancel */}
-              <div className="p-6 lg:p-8 flex items-center justify-between border-b border-white/5 shrink-0">
-                <div>
-                  {address ? (
-                    <>
-                      <p className="text-[9px] tracking-[0.4em] uppercase text-secondary/40 font-bold mb-1">Wallet connected</p>
-                      <span className="text-[10px] font-mono text-secondary/60 tracking-widest">
-                        {address.slice(0, 6)}...{address.slice(-4)}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-[9px] tracking-[0.4em] uppercase text-emerald-400/80 font-bold mb-1">No wallet</p>
-                      <span className="text-[10px] text-white/50 leading-relaxed max-w-[240px] block">
-                        Use the organizer email sign-in (sidebar) to unlock host tools — same idea as connecting a wallet for on-chain events.
-                      </span>
-                    </>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateEvent(false)}
-                  className="px-4 py-2 border border-white/20 text-[10px] font-bold tracking-[0.25em] uppercase text-white/70 hover:text-white hover:border-white/40 hover:bg-white/5 transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
-
-              <form onSubmit={handleCreateEvent} className="flex flex-col min-h-0 flex-1 overflow-hidden">
-                <div className="p-6 lg:p-8 pt-6 space-y-6 overflow-y-auto flex-1 min-h-0">
-                <div>
-                  <h2 className="text-2xl font-bold tracking-tighter mb-1">New Event</h2>
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-secondary/30 font-bold">Protocol registration</p>
-                </div>
-
-                {!address && (
-                  <div className="space-y-4 p-4 border border-emerald-500/20 bg-emerald-500/[0.04] rounded-sm">
-                    <p className="text-[9px] tracking-[0.25em] uppercase text-emerald-400/90 font-bold">Organizer (no wallet)</p>
-                    <div className="space-y-2">
-                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Your email *</label>
-                      <input
-                        type="email"
-                        required={!address}
-                        value={form.organizerEmail}
-                        onChange={e => setForm(f => ({ ...f, organizerEmail: e.target.value }))}
-                        placeholder="you@company.com"
-                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Your name or company *</label>
-                      <input
-                        type="text"
-                        required={!address}
-                        value={form.organizerDisplayName}
-                        onChange={e => setForm(f => ({ ...f, organizerDisplayName: e.target.value }))}
-                        placeholder="Jane Doe or Acme Inc."
-                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm"
-                      />
-                    </div>
-                    <p className="text-[8px] text-white/35 leading-relaxed">
-                      Your email is your <span className="text-white/55 font-semibold">organizer account</span> — like a wallet for hosts. After you create an event, we save it on this device so you can open QR, roster, and export without signing in again.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => commitOrganizerEmailSession(form.organizerEmail)}
-                      className="w-full py-2 border border-white/15 text-[8px] font-bold tracking-[0.2em] uppercase text-white/60 hover:text-white hover:border-white/25 transition-colors"
-                    >
-                      Save organizer email on this device (before or after creating)
-                    </button>
-                  </div>
-                )}
-
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Event Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={form.name}
-                      onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. GATE Launch Party"
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Start Date & Time *</label>
-                      <input
-                        type="datetime-local"
-                        required
-                        value={form.date}
-                        onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
-                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">End Date & Time</label>
-                      <input
-                        type="datetime-local"
-                        value={form.endDate}
-                        onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))}
-                        className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Location</label>
-                    <input
-                      type="text"
-                      value={form.location}
-                      onChange={e => setForm(f => ({ ...f, location: e.target.value }))}
-                      placeholder="e.g. Dubai, UAE"
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Max capacity</label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={form.maxAttendees}
-                      onChange={e => setForm(f => ({ ...f, maxAttendees: e.target.value }))}
-                      placeholder="Leave empty for unlimited"
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm [color-scheme:dark]"
-                    />
-                  </div>
-
-                  <div className="space-y-2 p-4 border border-white/10 bg-white/[0.02] rounded-sm">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                      Ticket price (USDC on Base) — optional
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={form.ticketPriceUsdc}
-                      onChange={e => setForm(f => ({ ...f, ticketPriceUsdc: e.target.value }))}
-                      placeholder="0 = free"
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm [color-scheme:dark]"
-                    />
-                    <p className="text-[8px] text-white/30 leading-relaxed">
-                      Wallet registrants pay this amount in USDC to your treasury. For email-only events, add mobile-money instructions so attendees can pay locally and paste a reference.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                      Mobile money instructions (optional)
-                    </label>
-                    <textarea
-                      value={form.mobileMoneyInstructions}
-                      onChange={e => setForm(f => ({ ...f, mobileMoneyInstructions: e.target.value }))}
-                      placeholder="For attendees paying with MTN / Airtel MoMo: number, amount in local currency, what reference to use…"
-                      rows={3}
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 rounded-sm resize-none"
-                    />
-                  </div>
-
-                  {(() => {
-                    const tp = parseFloat(form.ticketPriceUsdc.trim());
-                    const paid = Number.isFinite(tp) && tp > 0;
-                    if (!paid) return null;
-                    return (
-                      <div className="space-y-3 p-4 border border-cyan-500/20 bg-cyan-500/[0.05] rounded-sm">
-                        <p className="text-[9px] tracking-[0.25em] uppercase text-cyan-400/95 font-black">
-                          Accepted payment modes (paid ticket)
-                        </p>
-                        {form.isBlockchain ? (
-                          <label className="flex items-start gap-3 cursor-pointer group">
-                            <input
-                              type="checkbox"
-                              checked={form.ticketAcceptUsdc}
-                              onChange={e => setForm(f => ({ ...f, ticketAcceptUsdc: e.target.checked }))}
-                              className="mt-1 accent-white"
-                            />
-                            <span className="text-[10px] text-white/70 leading-relaxed">
-                              <span className="text-white font-bold group-hover:text-white">USDC on Base</span> — wallet
-                              registrants send {tp} USDC to your treasury when they sign up.
-                            </span>
-                          </label>
-                        ) : (
-                          <p className="text-[9px] text-white/40 font-mono">
-                            Email-only events collect payment via mobile reference (below). USDC is only used when
-                            registration is wallet-based.
-                          </p>
-                        )}
-                        <label className="flex items-start gap-3 cursor-pointer group">
-                          <input
-                            type="checkbox"
-                            checked={form.ticketAcceptMobileMoney}
-                            onChange={e => setForm(f => ({ ...f, ticketAcceptMobileMoney: e.target.checked }))}
-                            className="mt-1 accent-emerald-500"
-                          />
-                          <span className="text-[10px] text-white/70 leading-relaxed">
-                            <span className="text-emerald-400 font-bold group-hover:text-emerald-300">Mobile money</span>{' '}
-                            — attendee pays locally and submits a transaction reference (recommended for email
-                            signups). Add instructions in the box above when this is enabled.
-                          </span>
-                        </label>
-                      </div>
-                    );
-                  })()}
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Description</label>
-                    <textarea
-                      value={form.description}
-                      onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                      placeholder="Brief event description..."
-                      rows={3}
-                      className="w-full bg-white/[0.04] border border-white/10 px-4 py-3.5 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25 focus:bg-white/[0.06] transition-all rounded-sm resize-none"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">Banner image</label>
-                    {form.bannerUrl ? (
-                      <div className="relative bg-white/5 min-h-32 rounded border border-white/10 overflow-hidden">
-                        <img
-                          src={form.bannerUrl}
-                          alt="Banner preview"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          className="w-full h-32 object-cover"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setForm(f => ({ ...f, bannerUrl: '' }))}
-                          className="absolute top-2 right-2 text-[9px] uppercase tracking-wider font-bold bg-black/80 px-2 py-1 border border-white/20 hover:bg-white/10"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="block w-full bg-white/[0.04] border border-white/10 px-4 py-6 text-center text-white/40 text-sm font-mono cursor-pointer hover:border-white/20 hover:bg-white/[0.06] transition-all rounded-sm">
-                        {uploadingBanner ? 'Uploading…' : 'Choose image (optional)'}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          disabled={uploadingBanner}
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            setUploadingBanner(true);
-                            try {
-                              const fd = new FormData();
-                              fd.set('file', file);
-                              const res = await fetch('/api/events/upload-banner', { method: 'POST', body: fd });
-                              const data = await res.json();
-                              if (data.url) setForm(f => ({ ...f, bannerUrl: data.url }));
-                              else showWalletToast(data.error || 'Banner upload failed.');
-                            } catch {
-                              showWalletToast('Banner upload failed.');
-                            } finally {
-                              setUploadingBanner(false);
-                              e.target.value = '';
-                            }
-                          }}
-                        />
-                      </label>
-                    )}
-                  </div>
-
-                  <div className="pt-4 border-t border-white/5 space-y-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-1 min-w-0">
-                        <label className="text-[9px] tracking-[0.3em] uppercase text-white font-bold block">
-                          {form.isBlockchain ? 'Registration: wallet' : 'Registration: email'}
-                        </label>
-                        <p className="text-[8px] text-white/30 uppercase tracking-widest font-mono leading-relaxed">
-                          {form.isBlockchain
-                            ? 'Attendees connect a wallet to register & verify'
-                            : 'Attendees sign up with email only — no wallet'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        disabled={!address}
-                        role="switch"
-                        aria-checked={form.isBlockchain}
-                        aria-label="Toggle blockchain wallet registration versus email signup"
-                        title={!address ? 'Connect a wallet to enable blockchain (wallet) registration for attendees' : undefined}
-                        onClick={() => setForm(f => ({ ...f, isBlockchain: !f.isBlockchain }))}
-                        className={`w-10 h-5 shrink-0 relative transition-colors duration-300 ${form.isBlockchain ? 'bg-accent' : 'bg-emerald-600/80'} ${!address ? 'opacity-40 cursor-not-allowed' : ''}`}
-                      >
-                        <div className={`absolute top-1 w-3 h-3 bg-black transition-all duration-300 ${form.isBlockchain ? 'left-6' : 'left-1'}`} />
-                      </button>
-                    </div>
-                    <p className="text-[9px] text-white/50 leading-relaxed border border-white/10 bg-white/[0.03] px-3 py-2">
-                      {!address ? (
-                        <>
-                          <span className="font-bold text-white/70">Without a wallet</span>, events use{' '}
-                          <span className="text-emerald-400/90">email registration</span> for attendees. Connect a wallet to offer wallet-based registration.
-                        </>
-                      ) : (
-                        <>
-                          <span className="font-bold text-white/70">Email signup</span> appears on the event page when this is set to{' '}
-                          <span className="text-emerald-400/90">email</span> (toggle left). Default is wallet mode.
-                        </>
-                      )}
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-1">
-                        <label className="text-[9px] tracking-[0.3em] uppercase text-white font-bold block">VIP Access Gate</label>
-                        <p className="text-[8px] text-white/30 uppercase tracking-widest font-mono">Require token ownership to verify</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, isVip: !f.isVip }))}
-                        className={`w-10 h-5 relative transition-colors duration-300 ${form.isVip ? 'bg-yellow-500' : 'bg-white/10'}`}
-                      >
-                        <div className={`absolute top-1 w-3 h-3 bg-black transition-all duration-300 ${form.isVip ? 'left-6' : 'left-1'}`} />
-                      </button>
-                    </div>
-
-                    {form.isVip && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        className="space-y-4 pt-2"
-                      >
-                        <div className="space-y-2">
-                          <label className="text-[9px] tracking-[0.3em] uppercase text-yellow-500/60 font-bold block">Token Address (ERC20/NFT) *</label>
-                          <input
-                            type="text"
-                            required={form.isVip}
-                            value={form.vipTokenAddress}
-                            onChange={e => setForm(f => ({ ...f, vipTokenAddress: e.target.value }))}
-                            placeholder="0x..."
-                            className="w-full bg-yellow-500/[0.03] border border-yellow-500/20 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-yellow-500/40 transition-colors"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] tracking-[0.3em] uppercase text-yellow-500/60 font-bold block">Minimum Balance *</label>
-                          <input
-                            type="number"
-                            required={form.isVip}
-                            value={form.vipMinBalance}
-                            onChange={e => setForm(f => ({ ...f, vipMinBalance: e.target.value }))}
-                            placeholder="1"
-                            className="w-full bg-yellow-500/[0.03] border border-yellow-500/20 px-4 py-3 text-white text-sm font-mono placeholder:text-white/15 focus:outline-none focus:border-yellow-500/40 transition-colors"
-                          />
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-                </div>
-
-                {createError && (
-                  <p className="text-[9px] tracking-[0.2em] uppercase text-red-400 font-bold">{createError}</p>
-                )}
-
-                </div>
-
-                {/* Bottom actions — always visible */}
-                <div className="p-6 lg:p-8 pt-4 pb-6 border-t border-white/5 bg-black shrink-0 flex flex-col sm:flex-row gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateEvent(false)}
-                    className="order-2 sm:order-1 px-6 py-3 border border-white/20 text-[10px] font-bold tracking-[0.25em] uppercase text-white/70 hover:text-white hover:border-white/40 hover:bg-white/5 transition-all"
-                  >
-                    Save for later
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    className="btn-premium flex-1 py-4 disabled:opacity-50 order-1 sm:order-2"
-                  >
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold">
-                      {creating ? 'Registering...' : 'Register Event'}
-                    </span>
-                  </button>
-                </div>
-              </form>
+              <CreateEventWizard
+                form={form}
+                setForm={setForm}
+                address={address}
+                organizerSessionEmail={organizerSessionEmail}
+                creating={creating}
+                createError={createError}
+                uploadingBanner={uploadingBanner}
+                setUploadingBanner={setUploadingBanner}
+                minStartDatetimeLocal={minStartDatetimeLocal}
+                onSubmit={handleCreateEvent}
+                onCancel={() => setShowCreateEvent(false)}
+                showToast={showWalletToast}
+                onCommitOrganizerEmail={(email) => commitOrganizerEmailSession(email, { silent: true })}
+              />
             </motion.div>
           </motion.div>
         )}
@@ -2426,14 +2250,12 @@ function HomeContent() {
                       />
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Location</label>
-                    <input
-                      value={manageForm.location}
-                      onChange={(e) => setManageForm((f) => ({ ...f, location: e.target.value }))}
-                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-white/25"
-                    />
-                  </div>
+                  <EventLocationField
+                    id="manage-event-location"
+                    variant="manage"
+                    value={manageForm.location}
+                    onChange={(location) => setManageForm((f) => ({ ...f, location }))}
+                  />
                   <div className="space-y-1">
                     <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Max capacity</label>
                     <input
@@ -2540,111 +2362,114 @@ function HomeContent() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-start justify-center overflow-y-auto p-4 lg:p-8 pt-8 lg:pt-12"
+            className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-start justify-center overflow-y-auto p-3 lg:p-6 pt-6 lg:pt-8"
             onClick={(e) => e.target === e.currentTarget && setSelectedEvent(null)}
           >
             <motion.div
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 24 }}
-              className="w-full max-w-lg border border-white/10 bg-black overflow-y-auto max-h-[85vh] no-scrollbar flex flex-col shrink-0"
+              className="w-full max-w-lg border border-white/10 bg-black overflow-y-auto max-h-[90vh] no-scrollbar flex flex-col shrink-0"
             >
               {/* Sticky header: Back + status + Close (always visible) */}
-              <div className="sticky top-0 z-10 shrink-0 p-4 lg:p-6 flex items-center gap-4 border-b border-white/10 bg-black backdrop-blur-sm">
+              <div className="sticky top-0 z-10 shrink-0 px-3 py-2.5 flex items-center gap-2 border-b border-white/10 bg-black backdrop-blur-sm">
                 <button
                   type="button"
                   onClick={() => setSelectedEvent(null)}
-                  className="shrink-0 flex items-center gap-2 px-3 py-2 rounded border border-white/30 bg-white/10 hover:bg-white/20 text-white text-sm font-bold tracking-wide"
+                  className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-white/30 bg-white/10 hover:bg-white/20 text-white text-xs font-bold tracking-wide"
                   aria-label="Back"
                 >
                   Back
                 </button>
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
                   {isUpcoming(selectedEvent.date, selectedEvent.endDate) ? (
                     <>
                       <div className="w-1.5 h-1.5 bg-green-500 rounded-full shrink-0" />
-                      <span className="text-[9px] tracking-[0.3em] uppercase text-green-400 font-bold truncate">Upcoming</span>
+                      <span className="text-[8px] tracking-[0.25em] uppercase text-green-400 font-bold truncate">Upcoming</span>
                     </>
                   ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
                     <>
                       <div className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0 animate-pulse" />
-                      <span className="text-[9px] tracking-[0.3em] uppercase text-amber-400 font-bold truncate">Ongoing</span>
+                      <span className="text-[8px] tracking-[0.25em] uppercase text-amber-400 font-bold truncate">Ongoing</span>
                     </>
                   ) : (
                     <>
                       <div className="w-1.5 h-1.5 bg-white/20 rounded-full shrink-0" />
-                      <span className="text-[9px] tracking-[0.3em] uppercase text-white/30 font-bold truncate">Past Event</span>
+                      <span className="text-[8px] tracking-[0.25em] uppercase text-white/30 font-bold truncate">Past Event</span>
                     </>
                   )}
+                  {selectedEvent.isVip && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full" />
+                      <span className="text-[8px] tracking-[0.25em] uppercase text-yellow-500 font-bold">VIP</span>
+                    </div>
+                  )}
+                  {selectedEvent.isBlockchain === false && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="w-1.5 h-1.5 bg-white/50 rounded-full" />
+                      <span className="text-[8px] tracking-[0.25em] uppercase text-white/70 font-bold">Email signup</span>
+                    </div>
+                  )}
                 </div>
-                {selectedEvent.isVip && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full" />
-                    <span className="text-[9px] tracking-[0.3em] uppercase text-yellow-500 font-bold">VIP</span>
-                  </div>
-                )}
-                {selectedEvent.isBlockchain === false && (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="w-1.5 h-1.5 bg-white/50 rounded-full" />
-                    <span className="text-[9px] tracking-[0.3em] uppercase text-white/70 font-bold">Email signup</span>
-                  </div>
-                )}
                 <button
                   type="button"
                   onClick={() => setSelectedEvent(null)}
-                  className="ml-auto shrink-0 flex items-center gap-1.5 px-3 py-2 rounded border border-white/30 bg-white/10 hover:bg-white/20 text-white text-sm font-bold"
+                  className="ml-auto shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded border border-white/30 bg-white/10 hover:bg-white/20 text-white text-xs font-bold"
                   aria-label="Close"
                 >
-                  <span aria-hidden className="text-lg leading-none">×</span>
+                  <span aria-hidden className="text-base leading-none">×</span>
                   <span>Close</span>
                 </button>
               </div>
 
-              <div className="p-6 lg:p-8 space-y-8">
+              <div className="p-4 space-y-4">
                 {selectedEvent.bannerUrl && (
-                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2 bg-white/5 min-h-[13rem] lg:min-h-[18rem]">
+                  <div className="w-full -mx-4 -mt-4 mb-0 bg-white/5">
                     <img
                       src={selectedEvent.bannerUrl}
                       alt=""
                       referrerPolicy="no-referrer"
                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      className="w-full h-52 lg:h-72 object-cover"
+                      className="w-full h-36 sm:h-44 object-cover"
                     />
                   </div>
                 )}
                 <div>
-                  <h2 className="text-3xl font-bold tracking-tighter mb-2">{selectedEvent.name}</h2>
+                  <h2 className="text-xl sm:text-2xl font-bold tracking-tighter mb-1">{selectedEvent.name}</h2>
                   {selectedEvent.description && (
-                    <p className="text-secondary/60 text-sm font-light leading-relaxed">{selectedEvent.description}</p>
+                    <p className="text-secondary/60 text-xs font-light leading-snug line-clamp-3">{selectedEvent.description}</p>
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Start</p>
-                    <p className="text-sm font-mono text-white/70">{formatDateTime(selectedEvent.date)}</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+                  <div className="space-y-0.5">
+                    <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Start</p>
+                    <p className="text-xs font-mono text-white/70">{formatDateTime(selectedEvent.date)}</p>
                   </div>
                   {selectedEvent.endDate ? (
-                    <div className="space-y-1">
-                      <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">End</p>
-                      <p className="text-sm font-mono text-white/70">{formatDateTime(selectedEvent.endDate)}</p>
+                    <div className="space-y-0.5">
+                      <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">End</p>
+                      <p className="text-xs font-mono text-white/70">{formatDateTime(selectedEvent.endDate)}</p>
                     </div>
                   ) : null}
                   {selectedEvent.location && (
-                    <div className="space-y-1">
-                      <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Location</p>
-                      <p className="text-sm font-mono text-white/70">{selectedEvent.location}</p>
+                    <div className="col-span-2 space-y-1.5">
+                      <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Location</p>
+                      <p className="text-xs font-mono text-white/70 leading-snug line-clamp-2" title={selectedEvent.location}>
+                        {selectedEvent.location}
+                      </p>
+                      <EventLocationMapLazy location={selectedEvent.location} compact />
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Organizer</p>
-                    <p className="text-xs font-mono text-white/50">
+                  <div className="space-y-0.5">
+                    <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Organizer</p>
+                    <p className="text-[11px] font-mono text-white/50 truncate" title={selectedEvent.organizer}>
                       {selectedEvent.organizer.slice(0, 8)}...{selectedEvent.organizer.slice(-4)}
                     </p>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Attendees</p>
-                    <p className="text-sm font-mono text-white/70">
+                  <div className="space-y-0.5">
+                    <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Attendees</p>
+                    <p className="text-xs font-mono text-white/70">
                       {selectedEvent.maxAttendees != null && selectedEvent.maxAttendees > 0
                         ? `${getRegisteredCount(selectedEvent)} / ${selectedEvent.maxAttendees} (${selectedEvent.attendeeCount} verified)`
                         : selectedEvent.attendeeCount}
@@ -2652,13 +2477,13 @@ function HomeContent() {
                   </div>
                   {selectedEvent.maxAttendees != null && selectedEvent.maxAttendees > 0 && (
                     <>
-                      <div className="space-y-1">
-                        <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Capacity</p>
-                        <p className="text-sm font-mono text-white/70">{selectedEvent.maxAttendees} people</p>
+                      <div className="space-y-0.5">
+                        <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Capacity</p>
+                        <p className="text-xs font-mono text-white/70">{selectedEvent.maxAttendees} people</p>
                       </div>
-                      <div className="space-y-1">
-                        <p className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold">Remaining</p>
-                        <p className="text-sm font-mono text-white/70">
+                      <div className="space-y-0.5">
+                        <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Remaining</p>
+                        <p className="text-xs font-mono text-white/70">
                           {getRemainingSeats(selectedEvent) ?? 0} spots left
                         </p>
                       </div>
@@ -2667,9 +2492,9 @@ function HomeContent() {
                 </div>
 
                 {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && (
-                  <div className="p-4 border border-blue-500/25 bg-blue-500/[0.06] space-y-3">
-                    <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400/95 font-black">Ticket</p>
-                    <p className="text-sm text-white/90 font-semibold">
+                  <div className="p-3 border border-blue-500/25 bg-blue-500/[0.06] space-y-2">
+                    <p className="text-[9px] uppercase tracking-[0.25em] text-blue-400/95 font-black">Ticket</p>
+                    <p className="text-xs text-white/90 font-semibold">
                       <strong className="text-white">{selectedEvent.ticketPriceUsdc} USDC</strong>
                       {selectedEvent.isBlockchain !== false
                         ? eventAcceptsUsdc(selectedEvent)
@@ -2677,7 +2502,7 @@ function HomeContent() {
                           : ' · USDC checkout is turned off for this event.'
                         : null}
                     </p>
-                    <ul className="text-[10px] text-white/65 space-y-1.5 list-none font-mono leading-relaxed">
+                    <ul className="text-[9px] text-white/65 space-y-1 list-none font-mono leading-snug">
                       {selectedEvent.isBlockchain !== false && eventAcceptsUsdc(selectedEvent) && (
                         <li>
                           <span className="text-blue-300/90 font-bold">Crypto</span>: USDC on Base (wallet registration).
@@ -2695,8 +2520,8 @@ function HomeContent() {
                       ) : null}
                     </ul>
                     {selectedEvent.mobileMoneyInstructions ? (
-                      <div className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed border border-white/10 p-3 bg-black/40 font-sans">
-                        <p className="text-[8px] uppercase tracking-widest text-white/35 font-black mb-2">
+                      <div className="text-[10px] text-white/75 whitespace-pre-wrap leading-snug border border-white/10 p-2.5 bg-black/40 font-sans">
+                        <p className="text-[8px] uppercase tracking-widest text-white/35 font-black mb-1.5">
                           How to pay (mobile / local)
                         </p>
                         {selectedEvent.mobileMoneyInstructions}
@@ -2707,19 +2532,19 @@ function HomeContent() {
 
                 {/* Non-blockchain event: normal email signup (no wallet required) */}
                 {selectedEvent.isBlockchain === false ? (
-                  <div className="space-y-6">
-                    {renderEmailOrganizerAccessGate()}
+                  <div className="space-y-3">
                     {renderOrganizerEventPanel()}
-                    {!isUserRegistered ? (
+                    {/* Hosts only see organizer tools — not attendee register/confirm UI */}
+                    {!isEventOrganizer(selectedEvent.organizer, orgCtx) && (!isUserRegistered ? (
                       isPast(selectedEvent.date, selectedEvent.endDate) ? (
-                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                        <div className="p-3 border border-white/10 bg-white/[0.02] text-center">
                           <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
                           <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
                         </div>
                       ) : (
-                        <form onSubmit={handleRegisterNormal} className="space-y-4 p-4 border border-white/10 bg-white/[0.02]">
-                          <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Sign up with email</p>
-                          <div className="space-y-2">
+                        <form onSubmit={handleRegisterNormal} className="space-y-3 p-3 border border-white/10 bg-white/[0.02]">
+                          <p className="text-[8px] tracking-[0.25em] uppercase text-white/50 font-bold">Sign up with email</p>
+                          <div className="space-y-1">
                             <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">Email *</label>
                             <input
                               type="email"
@@ -2727,10 +2552,10 @@ function HomeContent() {
                               value={normalSignupEmail}
                               onChange={e => setNormalSignupEmail(e.target.value)}
                               placeholder="you@example.com"
-                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                              className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                             />
                           </div>
-                          <div className="space-y-2">
+                          <div className="space-y-1">
                             <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
                               First name or organization name *
                             </label>
@@ -2740,12 +2565,12 @@ function HomeContent() {
                               value={normalSignupName}
                               onChange={e => setNormalSignupName(e.target.value)}
                               placeholder="Jane Doe or Acme Inc."
-                              className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                              className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                             />
                           </div>
                           {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
                           eventAcceptsMobileMoney(selectedEvent) ? (
-                            <div className="space-y-2">
+                            <div className="space-y-1">
                               <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
                                 Mobile-money reference * (after payment)
                               </label>
@@ -2755,22 +2580,22 @@ function HomeContent() {
                                 value={normalPayRef}
                                 onChange={e => setNormalPayRef(e.target.value)}
                                 placeholder="Transaction ID from your provider"
-                                className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                                className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                               />
                             </div>
                           ) : null}
                           <button
                             type="submit"
                             disabled={registering}
-                            className="w-full py-4 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
+                            className="w-full py-3 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
                           >
                             {registering ? 'Processing...' : 'Register for Event'}
                           </button>
                         </form>
                       )
                     ) : (
-                      <div className="space-y-6">
-                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center space-y-2">
+                      <div className="space-y-3">
+                        <div className="p-3 border border-white/10 bg-white/[0.02] text-center space-y-1.5">
                           <div className="flex items-center justify-center gap-2">
                             <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
                             <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">You&apos;re registered</p>
@@ -2822,7 +2647,7 @@ function HomeContent() {
                           </div>
                         )}
                       </div>
-                    )}
+                    ))}
                   </div>
                 ) : !isConnected ? (
                   <button
@@ -2834,11 +2659,11 @@ function HomeContent() {
                   </button>
                 ) : (
                   <div className="space-y-6">
-                    {renderEmailOrganizerAccessGate()}
                     {renderOrganizerEventPanel()}
 
                     {/* Action Button: Register first, then Verify only when event has started and is not past */}
-                    {!isUserRegistered ? (
+                    {/* Hosts only see organizer tools — not attendee register/confirm UI */}
+                    {!isEventOrganizer(selectedEvent.organizer, orgCtx) && (!isUserRegistered ? (
                       isPast(selectedEvent.date, selectedEvent.endDate) ? (
                         <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
                           <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
@@ -2986,7 +2811,7 @@ function HomeContent() {
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
                         <p className="text-[9px] text-white/30 mt-1">Event starts {formatDateTime(selectedEvent.date)}</p>
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
@@ -2995,121 +2820,127 @@ function HomeContent() {
         )}
       </AnimatePresence>
 
-      {/* Event Created — QR Download Modal */}
+      {/* Event Created — QR Download Modal (compact) */}
       <AnimatePresence>
         {createdEvent && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-xl flex items-center justify-center p-8"
+            className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-xl flex items-center justify-center p-3 sm:p-4"
           >
             <motion.div
-              initial={{ opacity: 0, y: 32 }}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 32 }}
-              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-              className="w-full max-w-lg border border-white/10 bg-black overflow-y-auto max-h-[90vh] lg:max-h-none no-scrollbar"
+              exit={{ opacity: 0, y: 16 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full max-w-sm border border-white/10 bg-black overflow-y-auto max-h-[92vh] no-scrollbar"
             >
-              {/* Header */}
-              <div className="p-6 lg:p-8 border-b border-white/5 flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] tracking-[0.4em] uppercase text-green-400 font-bold mb-1">Event Registered</p>
-                  <p className="text-[10px] font-mono text-white/40 tracking-widest">{createdEvent.id}</p>
+              <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[8px] tracking-[0.35em] uppercase text-green-400 font-bold">Event registered</p>
+                  <p className="text-[9px] font-mono text-white/35 tracking-widest truncate">{createdEvent.id}</p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => {
                     setCreatedEvent(null);
                     setSelectedEvent(null);
                     fetchEvents();
                   }}
-                  className="text-[10px] font-bold tracking-[0.3em] uppercase opacity-40 hover:opacity-100 transition-opacity"
+                  className="shrink-0 text-[9px] font-bold tracking-[0.25em] uppercase text-white/40 hover:text-white"
                 >
                   Done
                 </button>
               </div>
 
-              <div className="p-6 lg:p-8 space-y-8">
-                {createdEvent.bannerUrl && (
-                  <div className="w-full -mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-2 bg-white/5 min-h-[12rem] lg:min-h-[14rem]">
-                    <img
-                      src={createdEvent.bannerUrl}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                      className="w-full h-48 lg:h-56 object-cover rounded-t"
-                    />
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <h2 className="text-2xl font-bold tracking-tighter">{createdEvent.name}</h2>
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-bold">
-                    {formatDateTime(createdEvent.date)}{createdEvent.location ? ` · ${createdEvent.location}` : ''}
+              <div className="p-4 space-y-3">
+                {createdEvent.bannerUrl ? (
+                  <img
+                    src={createdEvent.bannerUrl}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                    className="w-full h-20 object-cover border border-white/10"
+                  />
+                ) : null}
+
+                <div>
+                  <h2 className="text-base font-bold tracking-tight leading-snug">{createdEvent.name}</h2>
+                  <p
+                    className="text-[9px] uppercase tracking-[0.12em] text-white/35 font-bold mt-1 line-clamp-2"
+                    title={
+                      createdEvent.location
+                        ? `${formatDateTime(createdEvent.date)} · ${createdEvent.location}`
+                        : formatDateTime(createdEvent.date)
+                    }
+                  >
+                    {formatDateTime(createdEvent.date)}
+                    {createdEvent.location ? ` · ${createdEvent.location}` : ''}
                   </p>
                 </div>
 
-                {/* QR Code */}
-                <div className="flex flex-col items-center gap-6">
-                  <div className="p-5 bg-white">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white shrink-0">
                     <QRCodeCanvas
                       id="event-qr-canvas"
                       value={createdEvent.verificationCode}
-                      size={220}
+                      size={128}
                       level="H"
                       bgColor="#ffffff"
                       fgColor="#000000"
                     />
                   </div>
-
-                  <div className="text-center space-y-2">
-                    <p className="text-[9px] uppercase tracking-[0.3em] text-white/40 font-bold">Verification Code</p>
-                    <p className="font-mono text-2xl tracking-[0.35em] text-white">{createdEvent.verificationCode}</p>
+                  <div className="min-w-0 space-y-1">
+                    <p className="text-[8px] uppercase tracking-[0.25em] text-white/40 font-bold">Verification code</p>
+                    <p className="font-mono text-lg tracking-[0.28em] text-white break-all leading-none">
+                      {createdEvent.verificationCode}
+                    </p>
+                    <p className="text-[9px] text-white/35 leading-snug">
+                      Share the link. Attendees register, then scan at the door.
+                    </p>
                   </div>
                 </div>
 
-                {/* Info */}
-                <div className="p-4 border border-white/[0.06] bg-white/[0.02] space-y-1">
-                  <p className="text-[8px] uppercase tracking-[0.25em] text-white/40 font-bold">How it works</p>
-                  <p className="text-xs text-white/40 font-light leading-relaxed">
-                    Download the QR (includes event details) or copy the registration link to share. Attendees register first, then scan the code at the event to verify and mint their proof-of-presence.
-                  </p>
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-col gap-4">
-                  <div className="flex gap-4">
-                    <button
-                      onClick={() => handleDownloadQR(createdEvent, 'event-qr-canvas')}
-                      className="btn-premium flex-1 py-4 flex items-center justify-center gap-3"
-                    >
-                      <span className="tracking-[0.2em] uppercase text-sm font-bold">Download QR</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(createdEvent.verificationCode);
-                      }}
-                      className="flex-1 py-4 border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center"
-                    >
-                      <span className="tracking-[0.2em] uppercase text-sm font-bold opacity-60">Copy Code</span>
-                    </button>
-                  </div>
+                <div className="flex gap-2">
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(getRegistrationLink(createdEvent));
-                      showWalletToast('Registration link copied to clipboard.');
-                    }}
-                    className="w-full py-4 border border-white/10 hover:bg-white/5 transition-colors flex items-center justify-center gap-2"
+                    type="button"
+                    onClick={() => handleDownloadQR(createdEvent, 'event-qr-canvas')}
+                    className="btn-premium flex-1 py-2.5 flex items-center justify-center"
                   >
-                    <span className="tracking-[0.2em] uppercase text-sm font-bold opacity-60">Copy Registration Link</span>
+                    <span className="tracking-[0.15em] uppercase text-[10px] font-bold">Download QR</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(createdEvent.verificationCode);
+                    }}
+                    className="flex-1 py-2.5 border border-white/15 hover:bg-white/5 transition-colors"
+                  >
+                    <span className="tracking-[0.15em] uppercase text-[10px] font-bold text-white/70">Copy code</span>
                   </button>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(getRegistrationLink(createdEvent));
+                    showWalletToast('Registration link copied to clipboard.');
+                  }}
+                  className="w-full py-2.5 border border-white/15 hover:bg-white/5 transition-colors"
+                >
+                  <span className="tracking-[0.15em] uppercase text-[10px] font-bold text-white/70">
+                    Copy registration link
+                  </span>
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Minting Success */}
+      {/* Verify + Soroban mint success */}
       <AnimatePresence>
         {minted && (
           <motion.div
@@ -3124,17 +2955,45 @@ function HomeContent() {
               className="max-w-2xl w-full text-center"
             >
               <div className="mb-12">
-                <span className="text-[10px] font-bold tracking-[0.5em] uppercase text-accent">Registration Complete</span>
+                <span className="text-[10px] font-bold tracking-[0.5em] uppercase text-accent">
+                  {mintReceipt?.ok ? 'Minted on Stellar' : 'Attendance verified'}
+                </span>
               </div>
               <h2 className="text-5xl md:text-8xl font-medium tracking-tighter mb-8 italic">VERIFIED.</h2>
-              <p className="text-lg md:text-xl text-secondary font-light mb-16 max-w-sm mx-auto">Your presence has been etched into the ledger. Welcome to the collective.</p>
+              <p className="text-lg md:text-xl text-secondary font-light mb-8 max-w-sm mx-auto">
+                {mintReceipt?.ok
+                  ? 'Your attendance proof was minted on Soroban. Base minting comes later.'
+                  : mintReceipt?.error
+                    ? `Checked in. Mint: ${mintReceipt.error}`
+                    : 'Your presence is recorded. Connect a Stellar wallet before verify to mint on Soroban.'}
+              </p>
+              {mintReceipt?.ok && mintReceipt.tokenId ? (
+                <p className="text-[10px] font-mono text-white/40 mb-8">
+                  Token #{mintReceipt.tokenId}
+                  {mintReceipt.txHash ? ` · ${mintReceipt.txHash.slice(0, 10)}…` : ''}
+                </p>
+              ) : null}
               <div className="flex flex-col gap-6 items-center">
-                <button onClick={() => setMinted(false)} className="btn-premium w-full max-w-xs py-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMinted(false);
+                    setMintReceipt(null);
+                  }}
+                  className="btn-premium w-full max-w-xs py-5"
+                >
                   <span className="tracking-widest uppercase text-xs font-bold">Return</span>
                 </button>
-                <a href="https://basescan.org" target="_blank" className="text-[10px] tracking-[0.3em] hover:opacity-100 opacity-40 uppercase transition-opacity">
-                  View Block Detail
-                </a>
+                {mintReceipt?.ok && mintReceipt.explorerUrl ? (
+                  <a
+                    href={mintReceipt.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] tracking-[0.3em] hover:opacity-100 opacity-40 uppercase transition-opacity"
+                  >
+                    View on Stellar Expert
+                  </a>
+                ) : null}
               </div>
             </motion.div>
           </motion.div>

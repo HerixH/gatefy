@@ -34,6 +34,14 @@ export interface Event {
     ticketAcceptUsdc?: boolean;
     /** Paid events: accept mobile-money reference (default true). Required for email-only paid events. */
     ticketAcceptMobileMoney?: boolean;
+    /** Paid events: accept USDC on Stellar (default false — opt-in). */
+    ticketAcceptStellar?: boolean;
+    /** Soft-cancel timestamp; when set, event is offline for public signup. */
+    cancelledAt?: string;
+    /** True when platform admin cancelled (misconduct); hosts cannot restore. */
+    cancelledByAdmin?: boolean;
+    /** Optional admin cancel note. */
+    cancelReason?: string;
 }
 
 type EventRow = {
@@ -58,6 +66,10 @@ type EventRow = {
     mobile_money_instructions?: string | null;
     ticket_accept_usdc?: boolean | null;
     ticket_accept_mobile_money?: boolean | null;
+    ticket_accept_stellar?: boolean | null;
+    cancelled_at?: string | null;
+    cancelled_by_admin?: boolean | null;
+    cancel_reason?: string | null;
 };
 
 /** DB / drivers may return boolean or string; null/undefined defaults to wallet (blockchain) mode. */
@@ -81,8 +93,9 @@ const MISSING_PAID_TICKET_COLUMNS_HINT =
     'alter table public.events add column if not exists mobile_money_instructions text;\n' +
     'alter table public.events add column if not exists ticket_accept_usdc boolean default true;\n' +
     'alter table public.events add column if not exists ticket_accept_mobile_money boolean default true;\n' +
+    'alter table public.events add column if not exists ticket_accept_stellar boolean default false;\n' +
     "notify pgrst, 'reload schema';\n" +
-    '\n(See supabase/patches/05_ticket_payment_modes.sql)\n';
+    '\n(See supabase/patches/05_ticket_payment_modes.sql and 06_ticket_accept_stellar.sql)\n';
 
 function isMissingPaidTicketColumnError(err: { message?: string }): boolean {
     const m = err.message ?? '';
@@ -91,7 +104,8 @@ function isMissingPaidTicketColumnError(err: { message?: string }): boolean {
         m.includes('ticket_price_usdc') ||
         m.includes('mobile_money_instructions') ||
         m.includes('ticket_accept_usdc') ||
-        m.includes('ticket_accept_mobile_money')
+        m.includes('ticket_accept_mobile_money') ||
+        m.includes('ticket_accept_stellar')
     );
 }
 
@@ -99,6 +113,11 @@ function isMissingPaidTicketColumnError(err: { message?: string }): boolean {
 function acceptFlagFromDb(value: unknown): boolean {
     if (value === false || value === 'false' || value === 0) return false;
     return true;
+}
+
+/** Opt-in flags (Stellar): missing/null → false. */
+function acceptFlagOptInFromDb(value: unknown): boolean {
+    return value === true || value === 'true' || value === 1;
 }
 
 function rowToEvent(r: EventRow): Event {
@@ -124,10 +143,15 @@ function rowToEvent(r: EventRow): Event {
         mobileMoneyInstructions: r.mobile_money_instructions?.trim() || undefined,
         ticketAcceptUsdc: acceptFlagFromDb(r.ticket_accept_usdc),
         ticketAcceptMobileMoney: acceptFlagFromDb(r.ticket_accept_mobile_money),
+        ticketAcceptStellar: acceptFlagOptInFromDb(r.ticket_accept_stellar),
+        cancelledAt: r.cancelled_at ?? undefined,
+        cancelledByAdmin: r.cancelled_by_admin === true,
+        cancelReason: r.cancel_reason?.trim() || undefined,
     };
 }
 
-export async function getEvents(): Promise<Event[]> {
+export async function getEvents(opts?: { includeCancelled?: boolean }): Promise<Event[]> {
+    const includeCancelled = opts?.includeCancelled === true;
     if (isSupabaseConfigured) {
         const supabase = getSupabase();
         const { data, error } = await supabase
@@ -135,11 +159,13 @@ export async function getEvents(): Promise<Event[]> {
             .select('*')
             .order('date', { ascending: true });
         if (error) throw error;
-        return (data ?? []).map(rowToEvent);
+        const mapped = (data ?? []).map(rowToEvent);
+        return includeCancelled ? mapped : mapped.filter((e) => !e.cancelledAt);
     }
     try {
         const raw = JSON.parse(fs.readFileSync(EVENTS_PATH, 'utf8')) as (Event & { bannerUrl?: string })[];
-        return raw.map(e => ({ ...e, bannerUrl: e.bannerUrl ?? undefined }));
+        const mapped = raw.map(e => ({ ...e, bannerUrl: e.bannerUrl ?? undefined }));
+        return includeCancelled ? mapped : mapped.filter((e) => !e.cancelledAt);
     } catch {
         return [];
     }
@@ -157,6 +183,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         attendeeCount: 0,
         ticketAcceptUsdc: data.ticketAcceptUsdc !== false,
         ticketAcceptMobileMoney: data.ticketAcceptMobileMoney !== false,
+        ticketAcceptStellar: data.ticketAcceptStellar === true,
     };
 
     if (isSupabaseConfigured) {
@@ -168,6 +195,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         if (momo) ticketCols.mobile_money_instructions = momo;
         ticketCols.ticket_accept_usdc = event.ticketAcceptUsdc !== false;
         ticketCols.ticket_accept_mobile_money = event.ticketAcceptMobileMoney !== false;
+        ticketCols.ticket_accept_stellar = event.ticketAcceptStellar === true;
 
         const { error } = await supabase.from('events').insert({
             id: event.id,
@@ -237,7 +265,7 @@ export async function getEventById(eventId: string): Promise<Event | undefined> 
         if (error) throw error;
         return data ? rowToEvent(data as EventRow) : undefined;
     }
-    const events = await getEvents();
+    const events = await getEvents({ includeCancelled: true });
     return events.find((e) => e.id.toLowerCase() === id.toLowerCase());
 }
 
@@ -270,6 +298,11 @@ export type OrganizerMutableEventPatch = Partial<{
     mobileMoneyInstructions: string | null;
     ticketAcceptUsdc?: boolean;
     ticketAcceptMobileMoney?: boolean;
+    ticketAcceptStellar?: boolean;
+    /** ISO string to cancel; null to clear (uncancel). */
+    cancelledAt?: string | null;
+    cancelledByAdmin?: boolean | null;
+    cancelReason?: string | null;
 }>;
 
 function patchToSupabaseRow(patch: OrganizerMutableEventPatch): Record<string, string | number | boolean | null> {
@@ -298,6 +331,17 @@ function patchToSupabaseRow(patch: OrganizerMutableEventPatch): Record<string, s
     }
     if (patch.ticketAcceptUsdc !== undefined) row.ticket_accept_usdc = !!patch.ticketAcceptUsdc;
     if (patch.ticketAcceptMobileMoney !== undefined) row.ticket_accept_mobile_money = !!patch.ticketAcceptMobileMoney;
+    if (patch.ticketAcceptStellar !== undefined) row.ticket_accept_stellar = !!patch.ticketAcceptStellar;
+    if (patch.cancelledAt !== undefined) {
+        row.cancelled_at = patch.cancelledAt === null || patch.cancelledAt === '' ? null : patch.cancelledAt;
+    }
+    if (patch.cancelledByAdmin !== undefined) {
+        row.cancelled_by_admin = patch.cancelledByAdmin === true;
+    }
+    if (patch.cancelReason !== undefined) {
+        const r = patch.cancelReason;
+        row.cancel_reason = r === null || String(r).trim() === '' ? null : String(r).trim().slice(0, 500);
+    }
     return row;
 }
 
@@ -323,7 +367,7 @@ export async function updateEventById(
         return getEventById(id);
     }
 
-    const events = await getEvents();
+    const events = await getEvents({ includeCancelled: true });
     const idx = events.findIndex((e) => e.id.toLowerCase() === id.toLowerCase());
     if (idx === -1) return undefined;
 
@@ -353,6 +397,17 @@ export async function updateEventById(
     }
     if (patch.ticketAcceptUsdc !== undefined) next.ticketAcceptUsdc = patch.ticketAcceptUsdc;
     if (patch.ticketAcceptMobileMoney !== undefined) next.ticketAcceptMobileMoney = patch.ticketAcceptMobileMoney;
+    if (patch.ticketAcceptStellar !== undefined) next.ticketAcceptStellar = patch.ticketAcceptStellar;
+    if (patch.cancelledAt !== undefined) {
+        next.cancelledAt = patch.cancelledAt === null || patch.cancelledAt === '' ? undefined : patch.cancelledAt;
+    }
+    if (patch.cancelledByAdmin !== undefined) {
+        next.cancelledByAdmin = patch.cancelledByAdmin === true;
+    }
+    if (patch.cancelReason !== undefined) {
+        const r = patch.cancelReason;
+        next.cancelReason = r === null || !String(r).trim() ? undefined : String(r).trim().slice(0, 500);
+    }
 
     events[idx] = next;
     try {

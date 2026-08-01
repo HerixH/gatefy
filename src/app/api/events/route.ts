@@ -4,8 +4,9 @@ import { validateEventPaymentConfig } from '@/lib/event-payment';
 import { getRegistrations } from '@/lib/registrations';
 import { makeEmailOrganizerId, isEmailOrganizerId } from '@/lib/event-organizer';
 import { sendOrganizerEventCreatedEmail } from '@/lib/email';
-import { findEventByIdCaseInsensitive, serverOrganizerMatchesEvent } from '@/lib/organizer-access';
-import { isPast } from '@/lib/event-status';
+import { findEventByIdCaseInsensitive, requireOrganizerSessionForEvent } from '@/lib/organizer-access';
+import { getOrganizerSessionFromCookies } from '@/lib/organizer-auth';
+import { isPast, isUpcoming } from '@/lib/event-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
             mobileMoneyInstructions,
             ticketAcceptUsdc,
             ticketAcceptMobileMoney,
+            ticketAcceptStellar,
         } = body;
 
         let ticketPrice: number | undefined;
@@ -70,6 +72,7 @@ export async function POST(request: Request) {
         }
         const acceptUsdc = ticketAcceptUsdc !== false;
         const acceptMobile = ticketAcceptMobileMoney !== false;
+        const acceptStellar = ticketAcceptStellar === true;
         const mmInstr =
             typeof mobileMoneyInstructions === 'string' && mobileMoneyInstructions.trim()
                 ? mobileMoneyInstructions.trim()
@@ -102,6 +105,31 @@ export async function POST(request: Request) {
             );
         }
 
+        const hostSession = await getOrganizerSessionFromCookies();
+        if (!hostSession) {
+            return NextResponse.json(
+                {
+                    error: 'Sign in as host first: verify your email with a code, or connect a wallet and sign the challenge.',
+                },
+                { status: 401 }
+            );
+        }
+        if (wallet) {
+            if (!hostSession.wallet || hostSession.wallet !== wallet.toLowerCase()) {
+                return NextResponse.json(
+                    { error: 'Connect and sign with this wallet before creating the event.' },
+                    { status: 403 }
+                );
+            }
+        } else if (emailRaw) {
+            if (!hostSession.email || hostSession.email !== emailRaw.trim().toLowerCase()) {
+                return NextResponse.json(
+                    { error: 'Verify this organizer email with a sign-in code before creating the event.' },
+                    { status: 403 }
+                );
+            }
+        }
+
         const blockchain = isBlockchain !== false;
         if (blockchain && !wallet) {
             return NextResponse.json(
@@ -115,6 +143,7 @@ export async function POST(request: Request) {
             ticketPriceUsdc: ticketPrice,
             ticketAcceptUsdc: acceptUsdc,
             ticketAcceptMobileMoney: acceptMobile,
+            ticketAcceptStellar: acceptStellar,
         });
         if (!paymentCheck.ok) {
             return NextResponse.json({ error: paymentCheck.error }, { status: 400 });
@@ -138,6 +167,7 @@ export async function POST(request: Request) {
             mobileMoneyInstructions: mmInstr,
             ticketAcceptUsdc: acceptUsdc,
             ticketAcceptMobileMoney: acceptMobile,
+            ticketAcceptStellar: acceptStellar,
         });
 
         if (!wallet && emailRaw) {
@@ -180,28 +210,17 @@ export async function PATCH(request: Request) {
         if (!eventId) {
             return NextResponse.json({ error: 'eventId is required' }, { status: 400 });
         }
-        if (!organizerWallet && !organizerEmail) {
-            return NextResponse.json(
-                { error: 'organizerWallet or organizerEmail is required to update an event.' },
-                { status: 403 }
-            );
-        }
 
         const event = await findEventByIdCaseInsensitive(eventId);
         if (!event) {
             return NextResponse.json({ error: 'Event not found' }, { status: 404 });
         }
-        if (
-            !serverOrganizerMatchesEvent(event.organizer, {
-                organizerWallet,
-                organizerEmail,
-            })
-        ) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        if (isPast(event.date, event.endDate)) {
-            return NextResponse.json({ error: 'Past events cannot be edited.' }, { status: 400 });
+        const ownerAuth = await requireOrganizerSessionForEvent(event.organizer, {
+            organizerWallet,
+            organizerEmail,
+        });
+        if (!ownerAuth.ok) {
+            return NextResponse.json({ error: ownerAuth.error }, { status: ownerAuth.status });
         }
 
         const patch: OrganizerMutableEventPatch = {};
@@ -273,6 +292,51 @@ export async function PATCH(request: Request) {
         if ('ticketAcceptMobileMoney' in body && typeof body.ticketAcceptMobileMoney === 'boolean') {
             patch.ticketAcceptMobileMoney = body.ticketAcceptMobileMoney;
         }
+        if ('ticketAcceptStellar' in body && typeof body.ticketAcceptStellar === 'boolean') {
+            patch.ticketAcceptStellar = body.ticketAcceptStellar;
+        }
+
+        // Soft-cancel / restore (upcoming only). Admin takedowns cannot be restored by hosts.
+        if ('cancelled' in body && typeof body.cancelled === 'boolean') {
+            if (!isUpcoming(event.date, event.endDate)) {
+                return NextResponse.json(
+                    { error: 'Only upcoming events can be cancelled or restored.' },
+                    { status: 400 }
+                );
+            }
+            if (body.cancelled) {
+                if (event.cancelledAt) {
+                    return NextResponse.json({ error: 'Event is already cancelled.' }, { status: 400 });
+                }
+                patch.cancelledAt = new Date().toISOString();
+                patch.cancelledByAdmin = false;
+                patch.cancelReason = null;
+            } else {
+                if (event.cancelledByAdmin) {
+                    return NextResponse.json(
+                        {
+                            error:
+                                'This event was cancelled by Gate Protocol admin for policy reasons. Contact support to appeal.',
+                        },
+                        { status: 403 }
+                    );
+                }
+                patch.cancelledAt = null;
+                patch.cancelledByAdmin = false;
+                patch.cancelReason = null;
+            }
+        }
+
+        if (isPast(event.date, event.endDate)) {
+            return NextResponse.json({ error: 'Past events cannot be edited.' }, { status: 400 });
+        }
+
+        const onlyCancelToggle =
+            Object.keys(patch).length === 1 && patch.cancelledAt !== undefined;
+
+        if (Object.keys(patch).length === 0) {
+            return NextResponse.json({ error: 'No changes provided.' }, { status: 400 });
+        }
 
         let mergedPrice = event.ticketPriceUsdc ?? 0;
         if (patch.ticketPriceUsdc !== undefined) {
@@ -286,15 +350,22 @@ export async function PATCH(request: Request) {
             patch.ticketAcceptMobileMoney !== undefined
                 ? patch.ticketAcceptMobileMoney
                 : event.ticketAcceptMobileMoney !== false;
+        const mergedStellar =
+            patch.ticketAcceptStellar !== undefined
+                ? patch.ticketAcceptStellar
+                : event.ticketAcceptStellar === true;
 
-        const paymentMerged = validateEventPaymentConfig({
-            isBlockchain: mergedBlockchain,
-            ticketPriceUsdc: mergedPrice > 0 ? mergedPrice : undefined,
-            ticketAcceptUsdc: mergedUsdc,
-            ticketAcceptMobileMoney: mergedMob,
-        });
-        if (!paymentMerged.ok) {
-            return NextResponse.json({ error: paymentMerged.error }, { status: 400 });
+        if (!onlyCancelToggle) {
+            const paymentMerged = validateEventPaymentConfig({
+                isBlockchain: mergedBlockchain,
+                ticketPriceUsdc: mergedPrice > 0 ? mergedPrice : undefined,
+                ticketAcceptUsdc: mergedUsdc,
+                ticketAcceptMobileMoney: mergedMob,
+                ticketAcceptStellar: mergedStellar,
+            });
+            if (!paymentMerged.ok) {
+                return NextResponse.json({ error: paymentMerged.error }, { status: 400 });
+            }
         }
 
         const updated = await updateEventById(event.id, patch);

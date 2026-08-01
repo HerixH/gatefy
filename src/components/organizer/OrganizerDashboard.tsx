@@ -3,17 +3,20 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount } from 'wagmi';
+import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
+import { useAccount, useSignMessage } from 'wagmi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
     eventAcceptsMobileMoney,
+    eventAcceptsStellar,
     eventAcceptsUsdc,
     formatEventTicketSummary,
     isPaidRegistration,
+    isPendingMobileRegistration,
 } from '@/lib/event-payment';
 import { getEventStatus, formatEventDateTime, isPast, isOngoing, isUpcoming } from '@/lib/event-status';
+import { isEventOrganizer, organizerAuthParamsForEvent, organizerListAuthSuffixForEvent } from '@/lib/event-organizer';
 import type { OrganizerEvent } from '@/lib/organizer-event';
 import { getPublicRegistrationLink } from '@/lib/organizer-event';
 import { downloadEventQrImage } from '@/lib/organizer-qr';
@@ -40,24 +43,39 @@ import { OrganizerManageModal } from '@/components/organizer/OrganizerManageModa
 import { PageFooter } from '@/components/PageFooter';
 
 type StatusFilter = 'all' | 'upcoming' | 'ongoing' | 'past';
-type RosterFilter = 'all' | 'pending' | 'verified' | 'paid' | 'unpaid';
+type RosterFilter = 'all' | 'pending' | 'verified' | 'paid' | 'unpaid' | 'awaiting';
 
 function OrganizerDashboardInner() {
     const { address, isConnected } = useAccount();
+    const { openConnectModal } = useConnectModal();
+    const { signMessageAsync } = useSignMessage();
     const searchParams = useSearchParams();
     const router = useRouter();
     const pathname = usePathname();
 
     const {
         organizerSessionEmail,
+        sessionWallet,
         signedIn,
+        sessionLoading,
         managedQuery,
-        listAuthSuffix,
-        commitEmailSession,
+        requestEmailCode,
+        verifyEmailCode,
+        requestWalletChallenge,
+        verifyWalletSignature,
         clearEmailSession,
     } = useOrganizerSession(address);
 
+    useEffect(() => {
+        if (searchParams.get('create') === '1') {
+            router.replace('/?create=1');
+        }
+    }, [searchParams, router]);
+
     const [signInDraft, setSignInDraft] = useState('');
+    const [otpDraft, setOtpDraft] = useState('');
+    const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+    const [authBusy, setAuthBusy] = useState(false);
     const [events, setEvents] = useState<OrganizerEvent[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -79,14 +97,14 @@ function OrganizerDashboardInner() {
     };
 
     const fetchManaged = useCallback(async () => {
-        if (!managedQuery) {
+        if (!signedIn) {
             setEvents([]);
             return;
         }
         setLoading(true);
         setError('');
         try {
-            const res = await fetch(`/api/events/managed?${managedQuery}`, { cache: 'no-store' });
+            const res = await fetch('/api/events/managed', { cache: 'no-store', credentials: 'include' });
             const data = await res.json();
             if (!res.ok) {
                 setError(typeof data?.error === 'string' ? data.error : 'Failed to load events');
@@ -100,7 +118,7 @@ function OrganizerDashboardInner() {
         } finally {
             setLoading(false);
         }
-    }, [managedQuery]);
+    }, [signedIn]);
 
     useEffect(() => {
         fetchManaged();
@@ -110,6 +128,21 @@ function OrganizerDashboardInner() {
         () => events.find((e) => e.id.toLowerCase() === (selectedId ?? '').toLowerCase()) ?? null,
         [events, selectedId]
     );
+
+    const orgCtx = useMemo(
+        () => ({ address: address ?? null, organizerSessionEmail }),
+        [address, organizerSessionEmail]
+    );
+
+    const isSelectedOwner = useMemo(
+        () => !!selectedEvent && isEventOrganizer(selectedEvent.organizer, orgCtx),
+        [selectedEvent, orgCtx]
+    );
+
+    const selectedEventAuthSuffix = useMemo(() => {
+        if (!selectedEvent) return '';
+        return organizerListAuthSuffixForEvent(selectedEvent.organizer, orgCtx);
+    }, [selectedEvent, orgCtx]);
 
     const selectEvent = useCallback(
         (id: string | null) => {
@@ -138,12 +171,12 @@ function OrganizerDashboardInner() {
     }, [events, selectedId, searchParams, selectEvent]);
 
     const fetchRoster = useCallback(async () => {
-        if (!selectedEvent || !listAuthSuffix) return;
+        if (!selectedEvent || !isSelectedOwner || !selectedEventAuthSuffix) return;
         setRosterLoading(true);
         try {
             const [aRes, rRes] = await Promise.all([
-                fetch(`/api/events/attendees?eventId=${selectedEvent.id}${listAuthSuffix}`, { cache: 'no-store' }),
-                fetch(`/api/events/registrations?eventId=${selectedEvent.id}${listAuthSuffix}`, {
+                fetch(`/api/events/attendees?eventId=${selectedEvent.id}${selectedEventAuthSuffix}`, { cache: 'no-store' }),
+                fetch(`/api/events/registrations?eventId=${selectedEvent.id}${selectedEventAuthSuffix}`, {
                     cache: 'no-store',
                 }),
             ]);
@@ -154,15 +187,15 @@ function OrganizerDashboardInner() {
         } finally {
             setRosterLoading(false);
         }
-    }, [selectedEvent, listAuthSuffix]);
+    }, [selectedEvent, isSelectedOwner, selectedEventAuthSuffix]);
 
     useEffect(() => {
         setAttendees([]);
         setRegistrations([]);
         setRosterSearch('');
         setRosterFilter('all');
-        if (selectedEvent && listAuthSuffix) fetchRoster();
-    }, [selectedEvent?.id, listAuthSuffix, fetchRoster]);
+        if (selectedEvent && isSelectedOwner && selectedEventAuthSuffix) fetchRoster();
+    }, [selectedEvent?.id, isSelectedOwner, selectedEventAuthSuffix, fetchRoster]);
 
     const filteredEvents = useMemo(() => {
         const q = eventSearch.trim().toLowerCase();
@@ -194,6 +227,7 @@ function OrganizerDashboardInner() {
             if (rosterFilter === 'verified') return false;
             if (rosterFilter === 'paid') return isPaidRegistration(r.paymentStatus);
             if (rosterFilter === 'unpaid') return isUnpaidRegistration(r.paymentStatus, price);
+            if (rosterFilter === 'awaiting') return isPendingMobileRegistration(r.paymentStatus);
             return true;
         });
     }, [pendingRegs, rosterSearch, rosterFilter, selectedEvent?.ticketPriceUsdc]);
@@ -204,7 +238,69 @@ function OrganizerDashboardInner() {
         rosterFilter === 'all' ||
         rosterFilter === 'pending' ||
         rosterFilter === 'paid' ||
-        rosterFilter === 'unpaid';
+        rosterFilter === 'unpaid' ||
+        rosterFilter === 'awaiting';
+
+    const setEventCancelled = useCallback(
+        async (cancelled: boolean) => {
+            if (!selectedEvent || !isSelectedOwner) return;
+            const auth = organizerAuthParamsForEvent(selectedEvent.organizer, orgCtx);
+            if (!auth) return;
+            const label = cancelled ? 'Cancel this event? Signup closes; roster is kept.' : 'Restore this event?';
+            if (!window.confirm(label)) return;
+            try {
+                const res = await fetch('/api/events', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        eventId: selectedEvent.id,
+                        cancelled,
+                        ...auth,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showToast(typeof data?.error === 'string' ? data.error : 'Update failed');
+                    return;
+                }
+                showToast(cancelled ? 'Event cancelled' : 'Event restored');
+                await fetchManaged();
+            } catch {
+                showToast('Network error');
+            }
+        },
+        [selectedEvent, isSelectedOwner, orgCtx, fetchManaged]
+    );
+
+    const hostPaymentAction = useCallback(
+        async (registrationId: number, action: 'confirm_mobile' | 'reject_mobile') => {
+            if (!selectedEvent || !isSelectedOwner) return;
+            const auth = organizerAuthParamsForEvent(selectedEvent.organizer, orgCtx);
+            if (!auth) return;
+            try {
+                const res = await fetch('/api/events/registrations', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        eventId: selectedEvent.id,
+                        registrationId,
+                        action,
+                        ...auth,
+                    }),
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showToast(typeof data?.error === 'string' ? data.error : 'Payment update failed');
+                    return;
+                }
+                showToast(action === 'confirm_mobile' ? 'Mobile money confirmed' : 'Mobile money rejected');
+                await Promise.all([fetchRoster(), fetchManaged()]);
+            } catch {
+                showToast('Network error');
+            }
+        },
+        [selectedEvent, isSelectedOwner, orgCtx, fetchRoster, fetchManaged]
+    );
 
     const selectedInsights = useMemo(() => {
         if (!selectedEvent) return null;
@@ -246,6 +342,13 @@ function OrganizerDashboardInner() {
     }, [events]);
 
     const statusBadge = (ev: OrganizerEvent) => {
+        if (ev.cancelledAt) {
+            return (
+                <span className="text-[7px] font-black uppercase tracking-wider px-1.5 py-0.5 border text-red-300/90 border-red-500/35">
+                    Cancelled
+                </span>
+            );
+        }
         const s = getEventStatus(ev.date, ev.endDate);
         const cls =
             s === 'upcoming'
@@ -308,52 +411,229 @@ function OrganizerDashboardInner() {
                         )}
                     </div>
 
-                    {!signedIn ? (
-                        <div className="border border-white/10 bg-white/[0.02] p-6 sm:p-8 space-y-4 max-w-lg">
-                            <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Sign in as host</p>
-                            <p className="text-[11px] text-white/55 leading-relaxed">
-                                Connect the wallet you used to create events, or sign in with your organizer email.
-                            </p>
-                            <form
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    if (!commitEmailSession(signInDraft)) showToast('Enter a valid email.');
-                                }}
-                                className="flex flex-col sm:flex-row gap-2"
+                    {sessionLoading ? (
+                        <p className="text-[10px] uppercase tracking-widest text-white/35">Checking host session…</p>
+                    ) : !signedIn ? (
+                        <div className="border border-white/10 bg-white/[0.02] p-6 sm:p-8 space-y-6 max-w-xl">
+                            <div>
+                                <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Sign up / sign in as host</p>
+                                <p className="text-[11px] text-white/55 leading-relaxed mt-2">
+                                    Prove control of your wallet or email. Typing an email alone is no longer enough.
+                                </p>
+                            </div>
+                            <div className="space-y-3 p-4 border border-blue-500/20 bg-blue-500/[0.04]">
+                                <p className="text-[9px] uppercase tracking-widest text-blue-300/90 font-black">Wallet</p>
+                                <p className="text-[10px] text-white/50 leading-relaxed">
+                                    Connect, then sign a one-time message to verify ownership.
+                                </p>
+                                {!isConnected || !address ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => openConnectModal?.()}
+                                        className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200"
+                                    >
+                                        Connect wallet
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        disabled={authBusy}
+                                        onClick={async () => {
+                                            setAuthBusy(true);
+                                            try {
+                                                const ch = await requestWalletChallenge(address);
+                                                if (!ch.ok) {
+                                                    showToast(ch.error);
+                                                    return;
+                                                }
+                                                const signature = await signMessageAsync({ message: ch.message });
+                                                const v = await verifyWalletSignature(address, signature);
+                                                if (!v.ok) showToast(v.error);
+                                                else showToast('Wallet verified. Loading your events…');
+                                            } catch {
+                                                showToast('Signature cancelled or failed.');
+                                            } finally {
+                                                setAuthBusy(false);
+                                            }
+                                        }}
+                                        className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
+                                    >
+                                        {authBusy ? 'Waiting for signature…' : `Sign to verify ${address.slice(0, 6)}…${address.slice(-4)}`}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-3 text-[8px] uppercase tracking-widest text-white/25 font-bold">
+                                <span className="flex-1 h-px bg-white/10" />
+                                or
+                                <span className="flex-1 h-px bg-white/10" />
+                            </div>
+                            <div className="space-y-3 p-4 border border-emerald-500/20 bg-emerald-500/[0.04]">
+                                <p className="text-[9px] uppercase tracking-widest text-emerald-400/90 font-black">Email</p>
+                                <p className="text-[10px] text-white/50 leading-relaxed">
+                                    We email a 6-digit code. Enter it here to create a secure host session.
+                                </p>
+                                {!otpSentTo ? (
+                                    <form
+                                        onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            setAuthBusy(true);
+                                            try {
+                                                const r = await requestEmailCode(signInDraft);
+                                                if (!r.ok) {
+                                                    showToast(r.error);
+                                                    return;
+                                                }
+                                                setOtpSentTo(r.email);
+                                                if (r.devCode) {
+                                                    showToast(`Dev code: ${r.devCode}`);
+                                                    setOtpDraft(r.devCode);
+                                                } else {
+                                                    showToast(r.message);
+                                                }
+                                            } finally {
+                                                setAuthBusy(false);
+                                            }
+                                        }}
+                                        className="flex flex-col sm:flex-row gap-2"
+                                    >
+                                        <input
+                                            type="email"
+                                            value={signInDraft}
+                                            onChange={(e) => setSignInDraft(e.target.value)}
+                                            placeholder="you@company.com"
+                                            autoComplete="email"
+                                            className="flex-1 bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm font-mono"
+                                        />
+                                        <button
+                                            type="submit"
+                                            disabled={authBusy}
+                                            className="px-4 py-2.5 bg-white text-black text-[9px] font-black uppercase tracking-widest shrink-0 disabled:opacity-50"
+                                        >
+                                            Send code
+                                        </button>
+                                    </form>
+                                ) : (
+                                    <form
+                                        onSubmit={async (e) => {
+                                            e.preventDefault();
+                                            setAuthBusy(true);
+                                            try {
+                                                const r = await verifyEmailCode(otpSentTo, otpDraft);
+                                                if (!r.ok) showToast(r.error);
+                                                else {
+                                                    showToast('Email verified. Loading your events…');
+                                                    setOtpDraft('');
+                                                    setOtpSentTo(null);
+                                                }
+                                            } finally {
+                                                setAuthBusy(false);
+                                            }
+                                        }}
+                                        className="space-y-2"
+                                    >
+                                        <p className="text-[9px] text-white/40 font-mono">Code sent to {otpSentTo}</p>
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                            <input
+                                                type="text"
+                                                inputMode="numeric"
+                                                autoComplete="one-time-code"
+                                                maxLength={6}
+                                                value={otpDraft}
+                                                onChange={(e) => setOtpDraft(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                                placeholder="6-digit code"
+                                                className="flex-1 bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm font-mono tracking-[0.3em]"
+                                            />
+                                            <button
+                                                type="submit"
+                                                disabled={authBusy || otpDraft.length !== 6}
+                                                className="px-4 py-2.5 bg-white text-black text-[9px] font-black uppercase tracking-widest shrink-0 disabled:opacity-50"
+                                            >
+                                                Verify
+                                            </button>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="text-[8px] uppercase tracking-widest text-white/40 hover:text-white"
+                                            onClick={() => {
+                                                setOtpSentTo(null);
+                                                setOtpDraft('');
+                                            }}
+                                        >
+                                            Use a different email
+                                        </button>
+                                    </form>
+                                )}
+                            </div>
+                            <Link
+                                href="/"
+                                className="inline-block text-[9px] uppercase tracking-widest text-white/40 hover:text-white"
                             >
-                                <input
-                                    type="email"
-                                    value={signInDraft}
-                                    onChange={(e) => setSignInDraft(e.target.value)}
-                                    placeholder="organizer@email.com"
-                                    className="flex-1 bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm font-mono"
-                                />
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2.5 bg-white text-black text-[9px] font-black uppercase tracking-widest"
-                                >
-                                    Email sign-in
-                                </button>
-                            </form>
+                                Back to events
+                            </Link>
                         </div>
                     ) : (
                         <>
-                            <div className="flex flex-wrap items-center justify-between gap-3 text-[9px] font-mono text-white/40">
+                            <div className="flex flex-wrap items-center justify-between gap-3 text-[9px] font-mono text-white/40 border border-white/10 bg-white/[0.02] px-4 py-3">
                                 <span>
-                                    {isConnected && address
-                                        ? `Wallet ${address.slice(0, 6)}…${address.slice(-4)}`
-                                        : `Email ${organizerSessionEmail}`}
+                                    {sessionWallet
+                                        ? `Verified wallet ${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
+                                        : ''}
+                                    {sessionWallet && organizerSessionEmail ? ' · ' : ''}
+                                    {organizerSessionEmail ? `Verified email ${organizerSessionEmail}` : ''}
                                 </span>
-                                {organizerSessionEmail ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {isConnected && address && !sessionWallet ? (
+                                        <button
+                                            type="button"
+                                            disabled={authBusy}
+                                            onClick={async () => {
+                                                setAuthBusy(true);
+                                                try {
+                                                    const ch = await requestWalletChallenge(address);
+                                                    if (!ch.ok) {
+                                                        showToast(ch.error);
+                                                        return;
+                                                    }
+                                                    const signature = await signMessageAsync({ message: ch.message });
+                                                    const v = await verifyWalletSignature(address, signature);
+                                                    if (!v.ok) showToast(v.error);
+                                                    else showToast('Wallet verified');
+                                                } catch {
+                                                    showToast('Signature cancelled or failed.');
+                                                } finally {
+                                                    setAuthBusy(false);
+                                                }
+                                            }}
+                                            className="text-[8px] uppercase tracking-widest border border-blue-500/30 px-2 py-1 text-blue-300/90 hover:text-blue-200"
+                                        >
+                                            Sign wallet
+                                        </button>
+                                    ) : null}
                                     <button
                                         type="button"
-                                        onClick={clearEmailSession}
+                                        onClick={() => clearEmailSession()}
                                         className="text-[8px] uppercase tracking-widest border border-white/15 px-2 py-1 hover:text-white"
                                     >
-                                        Sign out email
+                                        Sign out
                                     </button>
-                                ) : null}
+                                </div>
                             </div>
+
+                            {!loading && events.length === 0 ? (
+                                <div className="border border-amber-500/25 bg-amber-500/[0.05] p-4 space-y-2">
+                                    <p className="text-[10px] uppercase tracking-widest text-amber-400/90 font-bold">No events for this sign-in</p>
+                                    <p className="text-[11px] text-white/55 leading-relaxed">
+                                        {isConnected && !organizerSessionEmail
+                                            ? 'This wallet has no hosted events yet — or your events were created with email. Add your organizer email above.'
+                                            : !isConnected && organizerSessionEmail
+                                              ? 'No events for this email — connect the wallet you used, or check the spelling matches create-event email.'
+                                              : 'Try the other sign-in method above, or create your first event.'}
+                                    </p>
+                                    <Link href="/?create=1" className="inline-block text-[9px] uppercase text-white font-bold hover:underline">
+                                        Create event →
+                                    </Link>
+                                </div>
+                            ) : null}
 
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                                 {[
@@ -366,7 +646,7 @@ function OrganizerDashboardInner() {
                                         sub: totals.unpaid > 0 ? `${totals.unpaid} unpaid` : undefined,
                                     },
                                     {
-                                        label: 'Est. USDC',
+                                        label: 'Est. paid',
                                         value: totals.revenue > 0 ? totals.revenue : '—',
                                         sub: totals.revenue > 0 ? 'paid × ticket price' : 'free events',
                                     },
@@ -383,6 +663,8 @@ function OrganizerDashboardInner() {
 
                             {error ? <p className="text-[10px] text-red-400 font-mono">{error}</p> : null}
 
+                            {events.length > 0 ? (
+                            <>
                             <div className="flex flex-wrap gap-2">
                                 {(['all', 'upcoming', 'ongoing', 'past'] as const).map((f) => (
                                     <button
@@ -495,15 +777,39 @@ function OrganizerDashboardInner() {
                                                     )}
                                                 </p>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {isPast(selectedEvent.date, selectedEvent.endDate) ? (
+                                                    {selectedEvent.cancelledAt ? (
+                                                        <span className="px-3 py-1.5 border border-red-500/30 text-[8px] font-bold uppercase tracking-wider text-red-300/90">
+                                                            {selectedEvent.cancelledByAdmin
+                                                                ? 'Cancelled by admin'
+                                                                : 'Cancelled'}
+                                                        </span>
+                                                    ) : isPast(selectedEvent.date, selectedEvent.endDate) ? (
                                                         <span className="px-3 py-1.5 border border-white/10 text-[8px] font-bold uppercase tracking-wider text-white/35">
                                                             Past — read only
                                                         </span>
-                                                    ) : (
+                                                    ) : isSelectedOwner ? (
                                                         <ActionBtn onClick={() => setShowManage(true)}>
                                                             Edit event
                                                         </ActionBtn>
-                                                    )}
+                                                    ) : null}
+                                                    {isSelectedOwner &&
+                                                    isUpcoming(selectedEvent.date, selectedEvent.endDate) ? (
+                                                        selectedEvent.cancelledAt ? (
+                                                            selectedEvent.cancelledByAdmin ? (
+                                                                <span className="px-3 py-1.5 border border-white/10 text-[8px] font-bold uppercase tracking-wider text-white/35">
+                                                                    Admin hold — contact support
+                                                                </span>
+                                                            ) : (
+                                                                <ActionBtn onClick={() => setEventCancelled(false)}>
+                                                                    Restore event
+                                                                </ActionBtn>
+                                                            )
+                                                        ) : (
+                                                            <ActionBtn onClick={() => setEventCancelled(true)}>
+                                                                Cancel event
+                                                            </ActionBtn>
+                                                        )
+                                                    ) : null}
                                                     <Link
                                                         href={getPublicRegistrationLink(selectedEvent.id)}
                                                         target="_blank"
@@ -533,7 +839,7 @@ function OrganizerDashboardInner() {
                                                                 accent="emerald"
                                                             />
                                                             <InsightChip
-                                                                label="Est. USDC"
+                                                                label="Est. paid"
                                                                 value={String(selectedInsights.revenue)}
                                                                 accent="cyan"
                                                             />
@@ -589,9 +895,14 @@ function OrganizerDashboardInner() {
 
                                             {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
                                                 <p className="text-[8px] font-mono text-white/30">
-                                                    Accepts:{' '}
-                                                    {eventAcceptsUsdc(selectedEvent) ? 'USDC ' : ''}
-                                                    {eventAcceptsMobileMoney(selectedEvent) ? 'Mobile money' : ''}
+                                                    Rails:{' '}
+                                                    {[
+                                                        eventAcceptsUsdc(selectedEvent) ? 'Base' : null,
+                                                        eventAcceptsStellar(selectedEvent) ? 'Stellar' : null,
+                                                        eventAcceptsMobileMoney(selectedEvent) ? 'Mobile' : null,
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(' · ') || 'none'}
                                                     {selectedInsights && selectedInsights.unpaid > 0 ? (
                                                         <button
                                                             type="button"
@@ -694,6 +1005,7 @@ function OrganizerDashboardInner() {
                                                             'verified',
                                                             'paid',
                                                             'unpaid',
+                                                            'awaiting',
                                                         ] as const
                                                     ).map((f) => (
                                                         <button
@@ -828,6 +1140,36 @@ function OrganizerDashboardInner() {
                                                                             </button>
                                                                         </div>
                                                                     ) : null}
+                                                                    {isSelectedOwner &&
+                                                                    typeof r.id === 'number' &&
+                                                                    (isPendingMobileRegistration(r.paymentStatus) ||
+                                                                        r.paymentStatus === 'rejected_mobile') ? (
+                                                                        <div className="flex flex-wrap gap-2 pt-1">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() =>
+                                                                                    hostPaymentAction(r.id!, 'confirm_mobile')
+                                                                                }
+                                                                                className="px-2 py-1 text-[7px] font-black uppercase tracking-wider border border-emerald-500/40 text-emerald-300/90 hover:bg-emerald-500/15"
+                                                                            >
+                                                                                Confirm MoMo
+                                                                            </button>
+                                                                            {isPendingMobileRegistration(r.paymentStatus) ? (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        hostPaymentAction(
+                                                                                            r.id!,
+                                                                                            'reject_mobile'
+                                                                                        )
+                                                                                    }
+                                                                                    className="px-2 py-1 text-[7px] font-black uppercase tracking-wider border border-red-500/35 text-red-300/85 hover:bg-red-500/10"
+                                                                                >
+                                                                                    Reject
+                                                                                </button>
+                                                                            ) : null}
+                                                                        </div>
+                                                                    ) : null}
                                                                     <p className="text-[8px] text-white/20">
                                                                         Registered{' '}
                                                                         {new Date(r.registeredAt).toLocaleDateString(
@@ -845,6 +1187,8 @@ function OrganizerDashboardInner() {
                                     )}
                                 </div>
                             </div>
+                            </>
+                            ) : null}
 
                             <button
                                 type="button"
@@ -859,7 +1203,7 @@ function OrganizerDashboardInner() {
                 </div>
             </main>
 
-            {selectedEvent && !isPast(selectedEvent.date, selectedEvent.endDate) && (
+            {selectedEvent && isSelectedOwner && !isPast(selectedEvent.date, selectedEvent.endDate) && (
                 <OrganizerManageModal
                     event={selectedEvent}
                     open={showManage}

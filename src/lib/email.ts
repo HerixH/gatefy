@@ -215,7 +215,7 @@ export async function sendRegistrationConfirmationEmail(opts: {
     const subject = `You're registered · ${event.name}`;
     const ticketLine =
         ticketPriceUsdc != null && ticketPriceUsdc > 0
-            ? `Ticket: ${ticketPriceUsdc} USDC on Base${paymentLabel ? ` (${paymentLabel})` : ''}.`
+            ? `Ticket: ${ticketPriceUsdc}${paymentLabel ? ` (${paymentLabel})` : ''}.`
             : '';
     const text = [
         `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
@@ -250,7 +250,7 @@ ${
         ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;">
   <tr>
     <td style="padding:14px 18px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:${C.text};">
-      <strong style="color:${C.accent};">Ticket</strong> · ${escapeHtml(String(ticketPriceUsdc))} USDC on Base${
+      <strong style="color:${C.accent};">Ticket</strong> · ${escapeHtml(String(ticketPriceUsdc))}${
             paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''
         }
     </td>
@@ -443,6 +443,62 @@ ${bulletproofButtonHref(link, 'View event')}
     if (!res.ok) {
         const err = typeof chkBody?.message === 'string' ? chkBody.message : JSON.stringify(chkBody);
         console.error('[email] Resend error (check-in):', res.status, err);
+        return { ok: false, error: err };
+    }
+    return { ok: true };
+}
+
+/** One-time code for organizer email sign-up / sign-in. */
+export async function sendOrganizerSignInCodeEmail(opts: {
+    to: string;
+    code: string;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+    const key = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+    const { to, code } = opts;
+    const subject = `${code} is your Gate Protocol host code`;
+    const text = [
+        'Your Gate Protocol host sign-in code:',
+        '',
+        code,
+        '',
+        'This code expires in 10 minutes. If you did not request it, ignore this email.',
+        '',
+        `— ${brandName()}`,
+    ].join('\n');
+
+    const preheader = `Your host code is ${code}`;
+    const inner = `
+<p style="margin:0 0 16px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  Use this code to sign in as a host:
+</p>
+<p style="margin:0 0 20px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:32px;letter-spacing:0.2em;font-weight:700;color:${C.white};">
+  ${escapeHtml(code)}
+</p>
+<p style="margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+  Expires in 10 minutes. Anyone with this code can manage events for this email.
+</p>`;
+
+    const html = emailShell({ preheader, innerHtml: inner });
+
+    if (!key) {
+        console.warn('[email] RESEND_API_KEY not set; organizer OTP for', to, 'code:', code);
+        return { ok: false, skipped: true };
+    }
+
+    const res = await fetch(RESEND_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from, to: [to], subject, html, text }),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const err = typeof body?.message === 'string' ? body.message : JSON.stringify(body);
+        console.error('[email] Resend error (organizer OTP):', res.status, err);
         return { ok: false, error: err };
     }
     return { ok: true };
