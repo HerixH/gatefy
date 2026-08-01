@@ -75,16 +75,18 @@ git tag v0.1.2-attendance && git push origin v0.1.2-attendance
 stellar contract deploy --wasm attendance_proof.wasm --source-account gate-minter --network testnet
 ```
 
-**Deployed testnet instance (Gate — attested release):**
+**Deployed testnet instance (Gate — SEP-55 + SEP-58 release `v0.1.2-attendance`):**
 
 | | |
 |--|--|
-| Contract | `CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G` |
+| Contract | `CBG2JH4H7YFLD2PJJMXHNRNQGCLIID7MOWMVPXDZVTVMZWBNDPXBUNA7` |
 | Admin / minter | `gate-minter` → `GBDH542K3AF3WTRHPXIBH6IUQVJHJBZZ7FGGMUG7BBFWML46ZVEF6ERJ` |
-| Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.0-attendance |
-| Lab | https://lab.stellar.org/r/testnet/contract/CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G |
+| Wasm hash | `44ddf8319685682af18d841a1e65d78911d8885a381da8cce82673497cd2f64e` |
+| Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.2-attendance |
+| Actions | https://github.com/HerixH/gatefy/actions/runs/30713788351 |
+| Lab | https://lab.stellar.org/r/testnet/contract/CBG2JH4H7YFLD2PJJMXHNRNQGCLIID7MOWMVPXDZVTVMZWBNDPXBUNA7 |
 
-After `v0.1.1-attendance` ships, update `SOROBAN_CONTRACT_ID` to the new deploy from that release WASM.
+Set `SOROBAN_CONTRACT_ID` to the contract ID above (already done in local `.env.local`).
 
 ## App env
 
