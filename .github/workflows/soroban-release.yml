@@ -1,8 +1,8 @@
-# Builds attendance_proof with source meta + GitHub attestation (SEP-55).
-# Lab "Verified Build" needs an attestation for the exact on-chain WASM hash.
+# SEP-55 (GitHub attestation) + SEP-58 (reproducible Docker build meta).
+# Lab "Verified Build" = attestation. "Source Code Verified" needs bldimg + source_uri/sha256.
 #
-# Trigger: tag a release, e.g.  git tag v0.1.0-attendance && git push origin v0.1.0-attendance
-# Then deploy the WASM from the GitHub Release (not a local build).
+# Trigger: git tag v0.1.1-attendance && git push origin v0.1.1-attendance
+# Then deploy the release WASM (not a local rebuild).
 
 name: Build & attest Soroban contracts
 
@@ -22,51 +22,112 @@ permissions:
   contents: write
   attestations: write
 
+env:
+  # Single-arch amd64 digest (SEP-58: not the multi-arch list digest)
+  STELLAR_CLI_IMAGE: docker.io/stellar/stellar-cli@sha256:a63366ef5fcd709759994f9f9109b68144f7158abd68e97421357fa8932df78d
+  CONTRACT_DIR: contracts/soroban/attendance_proof
+
 jobs:
   release-attendance-proof:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32v1-none
+      - name: Resolve release tag
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=manual-${{ github.event.inputs.release_name }}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Install Stellar CLI
+      - name: Create source archive
+        run: |
+          mkdir -p dist
+          tar -czf dist/attendance_proof-source.tar.gz \
+            --exclude=target --exclude=dist \
+            -C contracts/soroban attendance_proof
+          SOURCE_SHA256=$(sha256sum dist/attendance_proof-source.tar.gz | cut -d' ' -f1)
+          echo "SOURCE_SHA256=$SOURCE_SHA256" >> "$GITHUB_ENV"
+          echo "source_sha256=$SOURCE_SHA256" >> "$GITHUB_OUTPUT"
+          echo "Archive sha256=$SOURCE_SHA256"
+
+      - name: Reproducible Docker build (SEP-58)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.STELLAR_CLI_IMAGE }}"
+          TAG="${{ steps.meta.outputs.tag }}"
+          SOURCE_URI="https://github.com/${{ github.repository }}/releases/download/${TAG}/attendance_proof-source.tar.gz"
+          RUSTUP_TOOLCHAIN=$(docker run --rm --entrypoint rustup "$IMAGE" default | awk '{print $1}')
+          echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN"
+          mkdir -p "${{ env.CONTRACT_DIR }}/dist"
+          docker run --rm \
+            -v "$PWD:/source" \
+            -e "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" \
+            "$IMAGE" \
+            contract build \
+              --manifest-path=contracts/soroban/attendance_proof/Cargo.toml \
+              --locked \
+              --optimize \
+              --out-dir=/source/contracts/soroban/attendance_proof/dist \
+              --meta "bldimg=$IMAGE" \
+              --meta "bldopt=--manifest-path=contracts/soroban/attendance_proof/Cargo.toml" \
+              --meta "bldopt=--locked" \
+              --meta "bldopt=--optimize" \
+              --meta "source_repo=github:${{ github.repository }}" \
+              --meta "source_rev=${{ github.sha }}" \
+              --meta "commit_sha=${{ github.sha }}" \
+              --meta "source_uri=$SOURCE_URI" \
+              --meta "source_sha256=${{ env.SOURCE_SHA256 }}" \
+              --meta "name=gate-attendance-proof" \
+              --meta "version=$TAG"
+          cp "${{ env.CONTRACT_DIR }}/dist/attendance_proof.wasm" dist/attendance_proof.wasm
+          ls -la dist/
+          stellar --version || true
+
+      - name: Install Stellar CLI (inspect)
         uses: stellar/stellar-cli@v27.0.0
         with:
           version: '27.0.0'
 
-      - name: Build with source meta
-        working-directory: contracts/soroban/attendance_proof
+      - name: Inspect WASM meta
         run: |
-          stellar contract build \
-            --out-dir ./dist \
-            --meta "source_repo=github:${{ github.repository }}" \
-            --meta "commit_sha=${{ github.sha }}" \
-            --meta "source_rev=${{ github.sha }}" \
-            --meta "name=gate-attendance-proof" \
-            --meta "version=${{ github.ref_name || github.event.inputs.release_name }}"
+          stellar contract info meta --wasm dist/attendance_proof.wasm
+          stellar contract info hash --wasm dist/attendance_proof.wasm
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: attendance_proof.wasm
-          path: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+          name: attendance_proof-release
+          path: |
+            dist/attendance_proof.wasm
+            dist/attendance_proof-source.tar.gz
 
-      - name: Attest build provenance
+      - name: Attest build provenance (SEP-55)
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: attendance_proof.wasm
-          subject-path: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+          subject-path: dist/attendance_proof.wasm
 
-      - name: Create / update release & attach WASM
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('manual-{0}', github.event.inputs.release_name) }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.release_name }}
-          files: contracts/soroban/attendance_proof/dist/attendance_proof.wasm
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          files: |
+            dist/attendance_proof.wasm
+            dist/attendance_proof-source.tar.gz
           generate_release_notes: true
+          body: |
+            Reproducible Soroban attendance proof (SEP-58 meta + SEP-55 attestation).
+
+            Deploy **this** `attendance_proof.wasm` (not a local rebuild):
+            ```bash
+            stellar contract deploy \
+              --wasm attendance_proof.wasm \
+              --source-account gate-minter \
+              --network testnet
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

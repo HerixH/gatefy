@@ -58,27 +58,33 @@ stellar contract invoke \
   -- initialize --admin $(stellar keys address gate-minter)
 ```
 
-### Verified Build badge (Lab)
+### Lab badges (SEP-55 + SEP-58)
 
-Embedding `--meta` alone is **not** enough. Lab shows **Verified Build** only when a **GitHub attestation** exists for the exact on-chain WASM hash (SEP-55).
+| Badge | How we get it |
+|-------|----------------|
+| **Verified Build** | GitHub Actions attestation (SEP-55) on the release WASM |
+| **Source Code Verified** | Digest-pinned Docker build that stamps `bldimg`, `bldopt`, `source_uri`, `source_sha256` (SEP-58) |
 
-1. Commit + push `contracts/soroban/` and `.github/workflows/soroban-release.yml`
-2. Tag & push: `git tag v0.1.0-attendance && git push origin v0.1.0-attendance`
-3. Download `attendance_proof.wasm` from the GitHub Release (attested)
-4. Deploy **that** WASM (hash must match the attestation)
-5. Reload the contract in Lab
+Release workflow: `.github/workflows/soroban-release.yml` (Docker image `stellar/stellar-cli` pinned by **amd64** digest).
 
-Until step 4, Lab may still show **Unverified Build** even though meta lists `source_repo`.
+```bash
+git tag v0.1.1-attendance && git push origin v0.1.1-attendance
+# wait for Actions → download BOTH assets from the release:
+#   attendance_proof.wasm
+#   attendance_proof-source.tar.gz
+stellar contract deploy --wasm attendance_proof.wasm --source-account gate-minter --network testnet
+```
 
-**Deployed testnet instance (Gate — attested GitHub Release `v0.1.0-attendance`):**
+**Deployed testnet instance (Gate — attested release):**
 
 | | |
 |--|--|
 | Contract | `CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G` |
 | Admin / minter | `gate-minter` → `GBDH542K3AF3WTRHPXIBH6IUQVJHJBZZ7FGGMUG7BBFWML46ZVEF6ERJ` |
-| Wasm hash | `ed517af1199f63079e84536e4b939e52719c038babd847e9b87cf87e700167a4` |
 | Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.0-attendance |
 | Lab | https://lab.stellar.org/r/testnet/contract/CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G |
+
+After `v0.1.1-attendance` ships, update `SOROBAN_CONTRACT_ID` to the new deploy from that release WASM.
 
 ## App env
 
