@@ -70,16 +70,15 @@ Embedding `--meta` alone is **not** enough. Lab shows **Verified Build** only wh
 
 Until step 4, Lab may still show **Unverified Build** even though meta lists `source_repo`.
 
-**Deployed testnet instance (Gate — with source meta):**
+**Deployed testnet instance (Gate — attested GitHub Release `v0.1.0-attendance`):**
 
 | | |
 |--|--|
-| Contract | `CBX7FFXZ7PIOXLKPKXELZRK5XNZSGJS7PKQR4P423ZJ2FXYDGQC35XEV` |
+| Contract | `CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G` |
 | Admin / minter | `gate-minter` → `GBDH542K3AF3WTRHPXIBH6IUQVJHJBZZ7FGGMUG7BBFWML46ZVEF6ERJ` |
-| Wasm hash | `a63fd5e9570d5eff74ec1863770caab341cda7e1f77534281185b73ec03b8c5c` |
-| Lab | https://lab.stellar.org/r/testnet/contract/CBX7FFXZ7PIOXLKPKXELZRK5XNZSGJS7PKQR4P423ZJ2FXYDGQC35XEV |
-
-Previous instance (no meta): `CBM3JGJD6K222PDOB7DJRNHBTUG3YUWMVPKRS37NV4QS7OTZTMNXVXMM`
+| Wasm hash | `ed517af1199f63079e84536e4b939e52719c038babd847e9b87cf87e700167a4` |
+| Release | https://github.com/HerixH/gatefy/releases/tag/v0.1.0-attendance |
+| Lab | https://lab.stellar.org/r/testnet/contract/CC5JCFYV4VKMG2LP3SW6K7LPJCUIYEPZ2YOUJL2SYILRYYTQQDIWHD7G |
 
 ## App env
 
