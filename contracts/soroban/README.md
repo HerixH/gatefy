@@ -68,7 +68,7 @@ stellar contract invoke \
 Release workflow: `.github/workflows/soroban-release.yml` (Docker image `stellar/stellar-cli` pinned by **amd64** digest).
 
 ```bash
-git tag v0.1.1-attendance && git push origin v0.1.1-attendance
+git tag v0.1.2-attendance && git push origin v0.1.2-attendance
 # wait for Actions → download BOTH assets from the release:
 #   attendance_proof.wasm
 #   attendance_proof-source.tar.gz

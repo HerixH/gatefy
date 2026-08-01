@@ -1,7 +1,7 @@
 # SEP-55 (GitHub attestation) + SEP-58 (reproducible Docker build meta).
 # Lab "Verified Build" = attestation. "Source Code Verified" needs bldimg + source_uri/sha256.
 #
-# Trigger: git tag v0.1.1-attendance && git push origin v0.1.1-attendance
+# Trigger: git tag v0.1.2-attendance && git push origin v0.1.2-attendance
 # Then deploy the release WASM (not a local rebuild).
 
 name: Build & attest Soroban contracts
@@ -24,7 +24,7 @@ permissions:
 
 env:
   # Single-arch amd64 digest (SEP-58: not the multi-arch list digest)
-  STELLAR_CLI_IMAGE: docker.io/stellar/stellar-cli@sha256:a63366ef5fcd709759994f9f9109b68144f7158abd68e97421357fa8932df78d
+  STELLAR_CLI_IMAGE: docker.io/stellar/stellar-cli:27.0.0-rust1.96.0-slim-trixie-amd64@sha256:c280e64614eae7a5ebb4c60625fd8cc5f79fc5c075f0fb892a1a5c08c43abe35
   CONTRACT_DIR: contracts/soroban/attendance_proof
 
 jobs:
@@ -45,12 +45,12 @@ jobs:
       - name: Create source archive
         run: |
           mkdir -p dist
+          # Single top-level dir required by SEP-58 (verifier mounts that dir at /source)
           tar -czf dist/attendance_proof-source.tar.gz \
             --exclude=target --exclude=dist \
             -C contracts/soroban attendance_proof
           SOURCE_SHA256=$(sha256sum dist/attendance_proof-source.tar.gz | cut -d' ' -f1)
           echo "SOURCE_SHA256=$SOURCE_SHA256" >> "$GITHUB_ENV"
-          echo "source_sha256=$SOURCE_SHA256" >> "$GITHUB_OUTPUT"
           echo "Archive sha256=$SOURCE_SHA256"
 
       - name: Reproducible Docker build (SEP-58)
@@ -59,32 +59,49 @@ jobs:
           IMAGE="${{ env.STELLAR_CLI_IMAGE }}"
           TAG="${{ steps.meta.outputs.tag }}"
           SOURCE_URI="https://github.com/${{ github.repository }}/releases/download/${TAG}/attendance_proof-source.tar.gz"
-          RUSTUP_TOOLCHAIN=$(docker run --rm --entrypoint rustup "$IMAGE" default | awk '{print $1}')
+          SRC_DIR="${{ env.CONTRACT_DIR }}"
+
+          # Image bakes RUSTUP_TOOLCHAIN; fall back to `rustup default` if needed.
+          RUSTUP_TOOLCHAIN=$(docker run --rm --entrypoint printenv "$IMAGE" RUSTUP_TOOLCHAIN || true)
+          if [ -z "${RUSTUP_TOOLCHAIN:-}" ]; then
+            RUSTUP_TOOLCHAIN=$(docker run --rm --entrypoint rustup "$IMAGE" default | awk '{print $1}')
+          fi
           echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN"
-          mkdir -p "${{ env.CONTRACT_DIR }}/dist"
+
+          # Image runs as UID 1000 (`stellar`); checkout is owned by the runner user.
+          sudo chown -R 1000:1000 "$SRC_DIR"
+          mkdir -p /tmp/stellar-home
+          sudo chown -R 1000:1000 /tmp/stellar-home
+
+          # Mount the same tree as the source archive (crate root → /source).
           docker run --rm \
-            -v "$PWD:/source" \
+            -v "$PWD/$SRC_DIR:/source" \
+            -v /tmp/stellar-home:/stellar \
             -e "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" \
             "$IMAGE" \
             contract build \
-              --manifest-path=contracts/soroban/attendance_proof/Cargo.toml \
               --locked \
               --optimize \
-              --out-dir=/source/contracts/soroban/attendance_proof/dist \
               --meta "bldimg=$IMAGE" \
-              --meta "bldopt=--manifest-path=contracts/soroban/attendance_proof/Cargo.toml" \
               --meta "bldopt=--locked" \
               --meta "bldopt=--optimize" \
+              --meta "source_uri=$SOURCE_URI" \
+              --meta "source_sha256=${{ env.SOURCE_SHA256 }}" \
               --meta "source_repo=github:${{ github.repository }}" \
               --meta "source_rev=${{ github.sha }}" \
               --meta "commit_sha=${{ github.sha }}" \
-              --meta "source_uri=$SOURCE_URI" \
-              --meta "source_sha256=${{ env.SOURCE_SHA256 }}" \
               --meta "name=gate-attendance-proof" \
               --meta "version=$TAG"
-          cp "${{ env.CONTRACT_DIR }}/dist/attendance_proof.wasm" dist/attendance_proof.wasm
+
+          WASM=$(find "$SRC_DIR/target" -name 'attendance_proof.wasm' -type f | head -n1)
+          if [ -z "$WASM" ]; then
+            echo "WASM not found under $SRC_DIR/target" >&2
+            find "$SRC_DIR/target" -name '*.wasm' -type f || true
+            exit 1
+          fi
+          cp "$WASM" dist/attendance_proof.wasm
           ls -la dist/
-          stellar --version || true
+          sudo chown -R "$(id -u):$(id -g)" "$SRC_DIR" || true
 
       - name: Install Stellar CLI (inspect)
         uses: stellar/stellar-cli@v27.0.0
