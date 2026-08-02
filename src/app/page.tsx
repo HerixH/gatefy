@@ -28,6 +28,42 @@ import { matchesRosterSearch } from '@/lib/organizer-stats';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
+
+/** Local hint only — real registration lives in Supabase `registrations`. */
+function regCacheKey(eventId: string) {
+  return `gatefy-reg-${eventId}`;
+}
+
+function readRegCache(eventId: string): { email?: string; name?: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw =
+      localStorage.getItem(regCacheKey(eventId)) ||
+      sessionStorage.getItem(regCacheKey(eventId));
+    if (!raw) return null;
+    return JSON.parse(raw) as { email?: string; name?: string };
+  } catch {
+    return null;
+  }
+}
+
+function writeRegCache(eventId: string, data: { email: string; name?: string | null }) {
+  if (typeof window === 'undefined') return;
+  const payload = JSON.stringify({
+    email: data.email.trim().toLowerCase(),
+    name: data.name ?? undefined,
+  });
+  try {
+    localStorage.setItem(regCacheKey(eventId), payload);
+  } catch {
+    /* ignore */
+  }
+  try {
+    sessionStorage.setItem(regCacheKey(eventId), payload);
+  } catch {
+    /* ignore */
+  }
+}
 // Treasury wallet that receives the 10 USDC — set in env or hardcode for hackathon
 const TREASURY_ADDRESS = (process.env.NEXT_PUBLIC_TREASURY_ADDRESS ?? '0x0000000000000000000000000000000000000001') as `0x${string}`;
 const USDC_AMOUNT = parseUnits('10', 6); // 10 USDC
@@ -320,12 +356,11 @@ function HomeContent() {
       setRegistrations([]);
     }
 
-    // For non-blockchain events: check if stored email is registered (from previous signup)
+    // For non-blockchain events: restore local email hint, then confirm against Supabase
     if (selectedEvent.isBlockchain === false && typeof window !== 'undefined') {
-      const stored = sessionStorage.getItem(`gatefy-reg-${selectedEvent.id}`);
-      if (stored) {
+      const parsed = readRegCache(selectedEvent.id);
+      if (parsed) {
         try {
-          const parsed = JSON.parse(stored) as { email?: string; name?: string };
           const email = parsed.email;
           if (email) {
             fetch(`/api/register?eventId=${selectedEvent.id}&email=${encodeURIComponent(email)}`, { cache: 'no-store' })
@@ -337,6 +372,10 @@ function HomeContent() {
                     email: data.email ?? email,
                     name: data.name ?? parsed.name ?? null,
                     wallet: data.wallet ?? null,
+                  });
+                  writeRegCache(selectedEvent.id, {
+                    email: data.email ?? email,
+                    name: data.name ?? parsed.name ?? null,
                   });
                   return fetch(
                     `/api/events/verified?eventId=${selectedEvent.id}&email=${encodeURIComponent(email)}`,
@@ -597,13 +636,8 @@ function HomeContent() {
       (emailFromScanner || '').trim().toLowerCase() ||
       eventRegProfile?.email?.trim().toLowerCase() ||
       undefined;
-    if (!regEmail && typeof window !== 'undefined' && ev?.id) {
-      try {
-        const raw = sessionStorage.getItem(`gatefy-reg-${ev.id}`);
-        if (raw) regEmail = (JSON.parse(raw).email as string | undefined)?.trim().toLowerCase();
-      } catch {
-        /* ignore */
-      }
+    if (!regEmail && ev?.id) {
+      regEmail = readRegCache(ev.id)?.email?.trim().toLowerCase() || undefined;
     }
     const emailMode = ev?.isBlockchain === false;
     if (emailMode && !regEmail) {
@@ -647,15 +681,8 @@ function HomeContent() {
       if (result.success) {
         setIsUserVerified(true);
         setScannerStatus(null);
-        if (regEmail && ev?.id && typeof window !== 'undefined') {
-          try {
-            sessionStorage.setItem(
-              `gatefy-reg-${ev.id}`,
-              JSON.stringify({ email: regEmail, name: eventRegProfile?.name ?? undefined })
-            );
-          } catch {
-            /* ignore */
-          }
+        if (regEmail && ev?.id) {
+          writeRegCache(ev.id, { email: regEmail, name: eventRegProfile?.name ?? null });
         }
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
@@ -1692,12 +1719,7 @@ function HomeContent() {
           showWalletToast('Registered — check your email for confirmation.');
         }
         setIsUserRegistered(true);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(
-            `gatefy-reg-${selectedEvent.id}`,
-            JSON.stringify({ email, name: nameTrim })
-          );
-        }
+        writeRegCache(selectedEvent.id, { email, name: nameTrim });
         setEventRegProfile({
           email,
           name: nameTrim,
@@ -1708,12 +1730,7 @@ function HomeContent() {
         if (updated) setSelectedEvent(updated);
       } else if (data.error === 'Already registered') {
         setIsUserRegistered(true);
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(
-            `gatefy-reg-${selectedEvent.id}`,
-            JSON.stringify({ email, name: nameTrim })
-          );
-        }
+        writeRegCache(selectedEvent.id, { email, name: nameTrim });
         setEventRegProfile({
           email,
           name: nameTrim,
