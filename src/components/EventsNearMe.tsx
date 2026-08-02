@@ -7,6 +7,7 @@ import {
     getBrowserPosition,
     type GeoPoint,
 } from '@/lib/osm-location';
+import { COUNTRIES, findCountry, guessCountryFromLocation } from '@/lib/countries';
 import { EventsNearMeMapLazy } from '@/components/EventsNearMeMapLazy';
 
 export type NearMeEvent = {
@@ -20,6 +21,7 @@ export type NearMeEvent = {
 type Located = NearMeEvent & {
     point: GeoPoint;
     distanceKm: number | null;
+    countryCode: string;
 };
 
 type Props = {
@@ -83,6 +85,18 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
     const [pointsByKey, setPointsByKey] = useState<Record<string, GeoPoint>>({});
     const [geocoding, setGeocoding] = useState(false);
     const [selectedId, setSelectedId] = useState<string | null>(null);
+    const [countryCode, setCountryCode] = useState('');
+    const [countryQuery, setCountryQuery] = useState('');
+
+    const country = countryCode ? findCountry(countryCode) ?? null : null;
+
+    const countryOptions = useMemo(() => {
+        const q = countryQuery.trim().toLowerCase();
+        if (!q) return COUNTRIES;
+        return COUNTRIES.filter(
+            (c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
+        );
+    }, [countryQuery]);
 
     const withLocation = useMemo(
         () => events.filter((e) => e.location.trim().length >= 2).slice(0, MAX_GEOCODE),
@@ -101,7 +115,6 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
         let cancelled = false;
         const cache = { ...readGeoCache() };
 
-        // Seed coordinate-style locations immediately
         const seed: Record<string, GeoPoint> = {};
         for (const ev of withLocation) {
             const key = ev.location.trim().toLowerCase();
@@ -131,9 +144,9 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
             for (const ev of pending) {
                 if (cancelled) break;
                 const key = ev.location.trim().toLowerCase();
-                const point = await geocodeLocationQuery(ev.location);
+                const hint = guessCountryFromLocation(ev.location) || countryCode || undefined;
+                const point = await geocodeLocationQuery(ev.location, hint);
                 if (point) next[key] = point;
-                // Be gentle with Nominatim
                 await new Promise((r) => setTimeout(r, 350));
             }
             if (cancelled) return;
@@ -147,7 +160,7 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
         return () => {
             cancelled = true;
         };
-    }, [locationFingerprint, withLocation]);
+    }, [locationFingerprint, withLocation, countryCode]);
 
     const located: Located[] = useMemo(() => {
         const rows: Located[] = [];
@@ -155,9 +168,13 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
             const key = ev.location.trim().toLowerCase();
             const point = pointsByKey[key] || parseCoordLocation(ev.location);
             if (!point) continue;
-            const distanceKm =
-                user != null ? distanceMeters(user, point) / 1000 : null;
-            rows.push({ ...ev, point, distanceKm });
+            const distanceKm = user != null ? distanceMeters(user, point) / 1000 : null;
+            rows.push({
+                ...ev,
+                point,
+                distanceKm,
+                countryCode: guessCountryFromLocation(ev.location) || guessCountryFromLocation(point.label),
+            });
         }
         rows.sort((a, b) => {
             if (a.distanceKm == null && b.distanceKm == null) return a.name.localeCompare(b.name);
@@ -168,12 +185,20 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
         return rows;
     }, [withLocation, pointsByKey, user]);
 
+    const filtered = useMemo(() => {
+        if (!countryCode) return located;
+        return located.filter((e) => {
+            if (e.countryCode === countryCode) return true;
+            const name = country?.name.toLowerCase() ?? '';
+            return name.length > 0 && e.location.toLowerCase().includes(name);
+        });
+    }, [located, countryCode, country]);
+
     const nearby = useMemo(() => {
-        if (!user) return located.slice(0, 8);
-        // Prefer within ~80 km, else still show closest
-        const close = located.filter((e) => e.distanceKm != null && e.distanceKm <= 80);
-        return (close.length ? close : located).slice(0, 8);
-    }, [located, user]);
+        if (!user) return filtered.slice(0, 12);
+        const close = filtered.filter((e) => e.distanceKm != null && e.distanceKm <= 80);
+        return (close.length ? close : filtered).slice(0, 12);
+    }, [filtered, user]);
 
     const findNearMe = async () => {
         setLocating(true);
@@ -202,11 +227,13 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
                 <div className="min-w-0">
                     <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Events near me</p>
                     <p className="text-[8px] font-mono text-white/35 tracking-wider mt-1">
-                        {user
-                            ? `${nearby.length} closest with a mapped location`
-                            : geocoding
-                              ? 'Mapping venues…'
-                              : 'Share location to sort by distance'}
+                        {country
+                            ? `${nearby.length} in ${country.name}`
+                            : user
+                              ? `${nearby.length} closest with a mapped location`
+                              : geocoding
+                                ? 'Mapping venues…'
+                                : 'Filter by country or share location'}
                     </p>
                 </div>
                 <button
@@ -219,6 +246,48 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
                 </button>
             </div>
 
+            <div className="space-y-2">
+                <label className="block text-[8px] uppercase tracking-[0.2em] text-white/40 font-bold">
+                    Search by country
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                        type="search"
+                        value={countryQuery}
+                        onChange={(e) => setCountryQuery(e.target.value)}
+                        placeholder="Type country name…"
+                        className="w-full sm:flex-1 bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-[11px] font-mono placeholder:text-white/25 focus:outline-none focus:border-white/25"
+                    />
+                    <select
+                        value={countryCode}
+                        onChange={(e) => {
+                            setCountryCode(e.target.value);
+                            setSelectedId(null);
+                        }}
+                        className="w-full sm:w-56 bg-black border border-white/10 px-3 py-2 text-white text-[11px] font-mono focus:outline-none focus:border-white/25"
+                    >
+                        <option value="">All countries</option>
+                        {countryOptions.map((c) => (
+                            <option key={c.code} value={c.code}>
+                                {c.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                {countryCode ? (
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setCountryCode('');
+                            setCountryQuery('');
+                        }}
+                        className="text-[8px] font-bold uppercase tracking-widest text-white/40 hover:text-white"
+                    >
+                        Clear country filter
+                    </button>
+                ) : null}
+            </div>
+
             {geoError ? (
                 <p className="text-[9px] text-amber-400/90 font-mono">{geoError}</p>
             ) : null}
@@ -227,6 +296,8 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
                 user={user}
                 events={mapEvents}
                 selectedId={selectedId}
+                country={country}
+                onUserLocated={(point) => setUser(point)}
                 onSelectEvent={(id) => {
                     setSelectedId(id);
                     onSelectEvent(id);
@@ -243,7 +314,11 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
                 ) : nearby.length === 0 ? (
                     <div className="p-6 text-center space-y-2">
                         <p className="text-[10px] tracking-[0.25em] uppercase text-white/30">
-                            {geocoding ? 'Finding venues on the map…' : 'Could not map event locations'}
+                            {geocoding
+                                ? 'Finding venues on the map…'
+                                : country
+                                  ? `No mapped events in ${country.name}`
+                                  : 'Could not map event locations'}
                         </p>
                         {!user ? (
                             <button
@@ -285,6 +360,11 @@ export function EventsNearMe({ events, onSelectEvent, formatDate = defaultFormat
                                         <p className="text-[8px] font-mono text-secondary/40">
                                             {formatDate(ev.date)}
                                         </p>
+                                        {selectedId === ev.id ? (
+                                            <p className="text-[7px] uppercase tracking-widest text-amber-300/80 font-bold">
+                                                Selected · use Directions
+                                            </p>
+                                        ) : null}
                                     </div>
                                 </div>
                             </button>
