@@ -1883,11 +1883,11 @@ function HomeContent() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground grid-bg selection:bg-white selection:text-black overflow-x-hidden">
+    <div className="min-h-screen w-full max-w-[100vw] bg-background text-foreground grid-bg selection:bg-white selection:text-black overflow-x-clip">
       {/* Header / Navigation */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 sm:gap-4 px-4 py-4 sm:px-6 lg:px-12 lg:py-6 pointer-events-none bg-gradient-to-b from-black to-transparent">
-        <Link href="/" className="flex items-center gap-2 sm:gap-3 pointer-events-auto cursor-pointer group shrink-0 min-w-0">
-          <svg width="36" height="36" viewBox="0 0 28 28" fill="none" className="shrink-0">
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-1.5 sm:gap-4 px-3 py-3 sm:px-6 lg:px-12 lg:py-6 pointer-events-none bg-gradient-to-b from-black to-transparent">
+        <Link href="/" className="flex items-center gap-1.5 sm:gap-3 pointer-events-auto cursor-pointer group shrink-0 min-w-0 max-w-[42%] sm:max-w-none">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="shrink-0 sm:w-9 sm:h-9">
             <defs>
               <filter id="nav-glow" x="-40%" y="-40%" width="180%" height="180%">
                 <feGaussianBlur stdDeviation="1.2" result="blur" />
@@ -1903,41 +1903,41 @@ function HomeContent() {
               <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
             </g>
           </svg>
-          <div className="flex flex-col leading-[1.1] gap-0">
-            <span className="text-[10px] lg:text-xs font-semibold tracking-[0.14em] text-white group-hover:text-white/90">
-              Gate <span className="text-white/65 font-medium tracking-[0.1em]">Protocol</span>
+          <div className="flex flex-col leading-[1.1] gap-0 min-w-0">
+            <span className="text-[9px] sm:text-[10px] lg:text-xs font-semibold tracking-[0.08em] sm:tracking-[0.14em] text-white group-hover:text-white/90 truncate">
+              Gate <span className="text-white/65 font-medium tracking-[0.06em] sm:tracking-[0.1em]">Protocol</span>
             </span>
           </div>
         </Link>
 
-        <nav className="flex flex-1 items-center justify-center gap-2 sm:gap-5 md:gap-8 pointer-events-auto min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-1">
+        <nav className="flex flex-1 items-center justify-center gap-1.5 sm:gap-5 md:gap-8 pointer-events-auto min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-0.5">
           <Link
             href="/#events"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
           >
             Events
           </Link>
           <Link
             href="/about"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
           >
             About
           </Link>
           <Link
             href="/leaderboard"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
           >
             Leaderboard
           </Link>
           <Link
             href="/organizer"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.15em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
+            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
           >
             Host
           </Link>
         </nav>
 
-        <div className="pointer-events-auto shrink-0 flex items-center gap-2 scale-[0.72] sm:scale-90 lg:scale-100 origin-right">
+        <div className="pointer-events-auto shrink-0 flex items-center gap-1.5 sm:gap-2 max-w-[48%] sm:max-w-none justify-end scale-[0.68] sm:scale-90 lg:scale-100 origin-right">
           <ConnectStellarButton compact />
           <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
         </div>
@@ -1964,41 +1964,41 @@ function HomeContent() {
       </AnimatePresence>
 
       {/* Hero Section */}
-      <main className="relative pt-32 lg:pt-48 pb-20 lg:pb-32 px-6 lg:px-12 max-w-[1400px] mx-auto min-h-screen flex flex-col justify-center">
-        <div className="grid lg:grid-cols-[1fr_400px] gap-12 lg:gap-24 items-start">
+      <main className="relative w-full max-w-[1400px] mx-auto min-h-screen flex flex-col justify-center pt-28 sm:pt-32 lg:pt-48 pb-16 sm:pb-20 lg:pb-32 px-4 sm:px-6 lg:px-12 box-border">
+        <div className="grid w-full min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] gap-10 lg:gap-24 items-start">
           {/* Left: Hero */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-            className="flex flex-col items-center lg:items-start text-center lg:text-left"
+            className="flex flex-col items-stretch sm:items-center lg:items-start text-left sm:text-center lg:text-left w-full min-w-0 max-w-full"
           >
-            <div className="inline-block py-2 border-b border-white/20 mb-8 lg:mb-12">
-              <span className="text-[9px] lg:text-[10px] font-bold tracking-[0.3em] lg:tracking-[0.4em] uppercase text-secondary/80">
+            <div className="w-full max-w-full py-2 border-b border-white/20 mb-6 sm:mb-8 lg:mb-12">
+              <span className="block text-[8px] sm:text-[9px] lg:text-[10px] font-bold tracking-[0.12em] sm:tracking-[0.22em] lg:tracking-[0.4em] uppercase text-secondary/80 break-words">
                 Autonomous Verification Protocol
               </span>
-              <span className="block mt-2 text-[8px] lg:text-[9px] font-mono tracking-[0.2em] uppercase text-white/30">
+              <span className="block mt-2 text-[8px] lg:text-[9px] font-mono tracking-[0.16em] uppercase text-white/30">
                 Web App
               </span>
             </div>
 
-            <h1 className="text-[18vw] sm:text-[12vw] lg:text-[10rem] font-medium leading-[0.8] tracking-tighter mb-6 lg:mb-16 text-gradient">
+            <h1 className="w-full max-w-full text-[clamp(2.75rem,14vw,10rem)] sm:text-[12vw] lg:text-[10rem] font-medium leading-[0.85] tracking-tighter mb-6 lg:mb-16 text-gradient break-words">
               THE<br />
               PRESENT<br />
               IS PROOF
             </h1>
 
-            <div className="max-w-xl space-y-8 lg:space-y-12">
-              <p className="text-lg lg:text-2xl text-secondary/80 font-light leading-relaxed">
+            <div className="w-full max-w-xl space-y-6 sm:space-y-8 lg:space-y-12 mx-0 sm:mx-auto lg:mx-0">
+              <p className="text-base sm:text-lg lg:text-2xl text-secondary/80 font-light leading-relaxed">
                 A digital imprint of your physical journey. Immutable, elegant, and verified on the Base architecture.
               </p>
 
-              <div className="flex flex-col sm:flex-row gap-4 lg:gap-6">
+              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 lg:gap-6 w-full">
                 <button
                   onClick={() => setShowScanner(true)}
-                  className="btn-premium flex items-center justify-center gap-4 py-5 lg:py-4"
+                  className="btn-premium flex w-full sm:w-auto items-center justify-center gap-4 py-4 lg:py-4"
                 >
-                  <span className="tracking-[0.2em] uppercase text-sm font-bold">Initiate Scan</span>
+                  <span className="tracking-[0.14em] sm:tracking-[0.2em] uppercase text-xs sm:text-sm font-bold">Initiate Scan</span>
                 </button>
 
                 <button
@@ -2009,9 +2009,9 @@ function HomeContent() {
                       setForm(f => ({ ...f, isBlockchain: false }));
                     }
                   }}
-                  className="px-8 py-5 lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
+                  className="w-full sm:w-auto px-6 sm:px-8 py-4 lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
                 >
-                  <span className="tracking-[0.2em] uppercase text-sm font-bold">Create Event</span>
+                  <span className="tracking-[0.14em] sm:tracking-[0.2em] uppercase text-xs sm:text-sm font-bold">Create Event</span>
                 </button>
               </div>
 
@@ -2024,11 +2024,11 @@ function HomeContent() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1.2, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="space-y-8 pb-12 lg:sticky lg:top-32 scroll-mt-28 lg:scroll-mt-36"
+            className="space-y-8 pb-12 w-full min-w-0 max-w-full lg:sticky lg:top-32 scroll-mt-28 lg:scroll-mt-36"
           >
             {/* Live Events */}
             {/* Session: DB status + wallet + email registration (this event) */}
-            <div className="border border-white/5 bg-white/[0.02] backdrop-blur-3xl p-4 space-y-3">
+            <div className="border border-white/5 bg-white/[0.02] backdrop-blur-3xl p-4 space-y-3 w-full min-w-0 max-w-full box-border">
               <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Your session</p>
               <div className="space-y-2 text-[9px] font-mono tracking-wider">
                 <div className="flex items-center justify-between gap-2">
@@ -2085,7 +2085,7 @@ function HomeContent() {
                       />
                       <button
                         type="submit"
-                        className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200"
+                        className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200"
                       >
                         Sign in as organizer
                       </button>

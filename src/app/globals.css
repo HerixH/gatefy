@@ -36,11 +36,18 @@
     --accent: #3b82f6;
   }
 
+  html {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
     @apply antialiased selection:bg-white selection:text-black;
     font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+    overflow-x: clip;
+    max-width: 100%;
   }
 }
 
@@ -83,7 +90,7 @@
 }
 
 .btn-premium {
-  @apply relative px-8 py-4 bg-white text-black font-medium transition-all duration-500 hover:scale-[1.02] active:scale-[0.98] overflow-hidden;
+  @apply relative px-6 sm:px-8 py-4 bg-white text-black font-medium transition-all duration-500 hover:scale-[1.02] active:scale-[0.98] overflow-hidden max-w-full;
 }
 
 .grid-bg {
