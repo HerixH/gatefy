@@ -202,26 +202,36 @@ export async function sendRegistrationConfirmationEmail(opts: {
     /** If set, email mentions paid ticket */
     ticketPriceUsdc?: number;
     paymentLabel?: string;
+    /** On-chain / Stepay payment proof */
+    paymentTxHash?: string | null;
+    paymentExplorerUrl?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
     const key = process.env.RESEND_API_KEY?.trim();
     const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
 
-    const { to, event, attendeeName, ticketPriceUsdc, paymentLabel } = opts;
+    const { to, event, attendeeName, ticketPriceUsdc, paymentLabel, paymentTxHash, paymentExplorerUrl } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
     const qrBase64 = await qrPngBase64ForEmail(event.verificationCode);
     const qrImgSrc = qrBase64 ? `cid:${CHECKIN_QR_CONTENT_ID}` : null;
+    const paid = ticketPriceUsdc != null && ticketPriceUsdc > 0;
 
-    const subject = `You're registered · ${event.name}`;
+    const subject = paid
+        ? `Payment receipt · ${event.name}`
+        : `You're registered · ${event.name}`;
     const ticketLine =
-        ticketPriceUsdc != null && ticketPriceUsdc > 0
+        paid
             ? `Ticket: ${ticketPriceUsdc}${paymentLabel ? ` (${paymentLabel})` : ''}.`
             : '';
     const text = [
         `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
         '',
-        `You're registered for "${event.name}".`,
+        paid
+            ? `Payment received — you're registered for "${event.name}".`
+            : `You're registered for "${event.name}".`,
         ticketLine,
+        paymentTxHash ? `Payment tx: ${paymentTxHash}` : '',
+        paymentExplorerUrl ? `Explorer: ${paymentExplorerUrl}` : '',
         '',
         `When: ${formatEventWhen(event)}`,
         event.location ? `Where: ${event.location}` : '',
@@ -237,21 +247,35 @@ export async function sendRegistrationConfirmationEmail(opts: {
         .join('\n');
 
     const greet = attendeeName ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,` : 'Hi there,';
-    const preheader = `Your check-in code is ${event.verificationCode} · ${event.name}`;
+    const preheader = paid
+        ? `Receipt · ${ticketPriceUsdc} paid · ${event.name}`
+        : `Your check-in code is ${event.verificationCode} · ${event.name}`;
     const inner = `
 <p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
   ${greet}
 </p>
 <p style="margin:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
-  You’re registered for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
+  ${
+      paid
+          ? `Payment received — you’re registered for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>. Keep this email as your receipt.`
+          : `You’re registered for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.`
+  }
 </p>
 ${
-    ticketPriceUsdc != null && ticketPriceUsdc > 0
+    paid
         ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;">
   <tr>
     <td style="padding:14px 18px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:${C.text};">
-      <strong style="color:${C.accent};">Ticket</strong> · ${escapeHtml(String(ticketPriceUsdc))}${
+      <strong style="color:${C.accent};">Receipt</strong> · ${escapeHtml(String(ticketPriceUsdc))} USDC${
             paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''
+        }${
+            paymentTxHash
+                ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Tx ${escapeHtml(
+                      paymentTxHash.length > 24
+                          ? `${paymentTxHash.slice(0, 10)}…${paymentTxHash.slice(-8)}`
+                          : paymentTxHash
+                  )}</span>`
+                : ''
         }
     </td>
   </tr>
@@ -261,6 +285,7 @@ ${
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
 ${verificationCodeBlock(event.verificationCode, qrImgSrc)}
+${paymentExplorerUrl ? bulletproofButtonHref(paymentExplorerUrl, 'View payment on Stellar') : ''}
 ${bulletproofButtonHref(link, 'View event details')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Prefer a plain link?

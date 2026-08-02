@@ -8,6 +8,7 @@ import {
     registerForEventWithEmail,
 } from '@/lib/registrations';
 import { sendRegistrationConfirmationEmail } from '@/lib/email';
+import { stellarExplorerTxUrl } from '@/lib/attendance-mint';
 import {
     stepayConfigured,
     stepayWebhookSecret,
@@ -17,8 +18,15 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+function paymentExplorerUrl(txHash: string): string | null {
+    if (!txHash || txHash.startsWith('stepay:')) return null;
+    return stellarExplorerTxUrl(txHash);
+}
+
 /**
  * Stepay checkout.paid webhook.
+ * Registers the attendee, emails a payment receipt (Stepay tx is the on-chain receipt).
+ * Attendance POAP still mints at check-in / mint CTA.
  * Docs: https://stepay.pro/developers
  */
 export async function POST(request: Request) {
@@ -70,45 +78,59 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
+    const paymentTx = txHash || `stepay:${checkoutId || event.referenceId || Date.now()}`;
+    const explorer = paymentExplorerUrl(paymentTx);
+    const price = Number(ev.ticketPriceUsdc);
+
     if (txHash && (await isPaymentTxHashUsed(txHash))) {
         return NextResponse.json({ ok: true, already: true });
     }
 
     const payment = {
-        txHash: txHash || `stepay:${checkoutId || event.referenceId || Date.now()}`,
+        txHash: paymentTx,
         rail: 'stepay' as const,
         stepayCheckoutId: checkoutId || undefined,
     };
 
+    let newlyRegistered = false;
     try {
         const emailMode = ev.isBlockchain === false;
         if (emailMode || !wallet) {
-            if (await isRegisteredByEmail(ev.id, email)) {
-                return NextResponse.json({ ok: true, already: true });
+            if (!(await isRegisteredByEmail(ev.id, email))) {
+                newlyRegistered = await registerForEventWithEmail(ev.id, email, name || undefined, payment);
             }
-            const ok = await registerForEventWithEmail(ev.id, email, name || undefined, payment);
-            if (!ok) return NextResponse.json({ ok: true, already: true });
-        } else {
-            if (await isRegistered(ev.id, wallet)) {
-                return NextResponse.json({ ok: true, already: true });
-            }
-            if (await isRegisteredByEmail(ev.id, email)) {
-                return NextResponse.json({ ok: true, already: true });
-            }
-            const ok = await registerForEvent(ev.id, wallet, { email, name: name || undefined }, payment);
-            if (!ok) return NextResponse.json({ ok: true, already: true });
+        } else if (!(await isRegistered(ev.id, wallet)) && !(await isRegisteredByEmail(ev.id, email))) {
+            newlyRegistered = await registerForEvent(
+                ev.id,
+                wallet,
+                { email, name: name || undefined },
+                payment
+            );
         }
 
-        const price = Number(ev.ticketPriceUsdc);
-        void sendRegistrationConfirmationEmail({
+        // Payment receipt email (Stepay USDC tx = on-chain payment receipt).
+        const mailed = await sendRegistrationConfirmationEmail({
             to: email,
             event: ev,
             attendeeName: name || null,
             ticketPriceUsdc: Number.isFinite(price) && price > 0 ? price : undefined,
-            paymentLabel: 'Stepay (USDC)',
-        }).catch((e) => console.error('[stepay webhook] email failed:', e));
+            paymentLabel: 'Stepay (USDC on Stellar)',
+            paymentTxHash: paymentTx.startsWith('stepay:') ? null : paymentTx,
+            paymentExplorerUrl: explorer,
+        });
 
-        return NextResponse.json({ ok: true, registered: true });
+        if (!mailed.ok && !mailed.skipped) {
+            console.error('[stepay webhook] receipt email failed:', mailed.error);
+        }
+
+        return NextResponse.json({
+            ok: true,
+            registered: true,
+            newlyRegistered,
+            receiptEmailed: mailed.ok || !!mailed.skipped,
+            paymentTx: paymentTx.startsWith('stepay:') ? null : paymentTx,
+            paymentExplorerUrl: explorer,
+        });
     } catch (e) {
         console.error('[stepay webhook] register failed:', e);
         const msg = e instanceof Error ? e.message : 'Registration failed';

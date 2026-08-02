@@ -1279,20 +1279,102 @@ function HomeContent() {
 
   useEffect(() => {
     const stepay = searchParams.get('stepay');
-    if (stepay === 'paid') {
-      showWalletToast('Stepay payment received — your registration should appear shortly.');
+    if (!stepay) return;
+
+    const eventId = (searchParams.get('event') || selectedEvent?.id || '').trim();
+    const emailFromUrl = (searchParams.get('email') || '').trim().toLowerCase();
+
+    const clearStepayParams = () => {
       const next = new URLSearchParams(searchParams.toString());
       next.delete('stepay');
+      next.delete('email');
       const q = next.toString();
-      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
-    } else if (stepay === 'cancel') {
+      router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
+    };
+
+    if (stepay === 'cancel') {
       showWalletToast('Stepay checkout cancelled.');
-      const next = new URLSearchParams(searchParams.toString());
-      next.delete('stepay');
-      const q = next.toString();
-      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+      clearStepayParams();
+      return;
     }
-  }, [searchParams, pathname, router]);
+
+    if (stepay !== 'paid' || !eventId) {
+      clearStepayParams();
+      return;
+    }
+
+    let email = emailFromUrl;
+    let name = '';
+    try {
+      const raw = sessionStorage.getItem(`gatefy-stepay-pending-${eventId}`);
+      if (raw) {
+        const p = JSON.parse(raw) as { email?: string; name?: string };
+        if (!email && p.email) email = p.email.trim().toLowerCase();
+        if (p.name) name = p.name.trim();
+      }
+    } catch {
+      /* ignore */
+    }
+
+    if (email) {
+      writeRegCache(eventId, { email, name: name || undefined });
+      setNormalSignupEmail(email);
+      if (name) setNormalSignupName(name);
+    }
+
+    showWalletToast('Confirming Stepay payment…');
+
+    let cancelled = false;
+    const confirmRegistration = async () => {
+      if (!email) {
+        showWalletToast('Payment returned — open this event and refresh if registration is missing.');
+        clearStepayParams();
+        return;
+      }
+      for (let i = 0; i < 20 && !cancelled; i++) {
+        try {
+          const res = await fetch(
+            `/api/register?eventId=${encodeURIComponent(eventId)}&email=${encodeURIComponent(email)}`,
+            { cache: 'no-store' }
+          );
+          const data = await res.json();
+          if (data.registered) {
+            setIsUserRegistered(true);
+            setEventRegProfile({
+              email: data.email ?? email,
+              name: data.name ?? name ?? null,
+              wallet: data.wallet ?? null,
+            });
+            writeRegCache(eventId, {
+              email: data.email ?? email,
+              name: data.name ?? name ?? null,
+            });
+            try {
+              sessionStorage.removeItem(`gatefy-stepay-pending-${eventId}`);
+            } catch {
+              /* ignore */
+            }
+            showWalletToast('You’re registered — check your email for the payment receipt.');
+            void fetchEvents();
+            clearStepayParams();
+            return;
+          }
+        } catch {
+          /* retry */
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      if (!cancelled) {
+        showWalletToast('Still confirming payment — refresh this event in a few seconds.');
+        clearStepayParams();
+      }
+    };
+
+    void confirmRegistration();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, pathname, router, selectedEvent?.id]);
 
   useEffect(() => {
     const eventId = searchParams.get('event');

@@ -42,6 +42,26 @@ export function StepayPayButton({ eventId, email, name, wallet, amountUsdc, disa
                 setError('Stepay did not return a checkout URL.');
                 return;
             }
+            // Persist identity so return redirect can show "registered" before/without webhook race.
+            try {
+                const pending = {
+                    email: email.trim().toLowerCase(),
+                    name: name.trim(),
+                    eventId,
+                    at: Date.now(),
+                };
+                sessionStorage.setItem(`gatefy-stepay-pending-${eventId}`, JSON.stringify(pending));
+                localStorage.setItem(
+                    `gatefy-reg-${eventId}`,
+                    JSON.stringify({ email: pending.email, name: pending.name })
+                );
+                sessionStorage.setItem(
+                    `gatefy-reg-${eventId}`,
+                    JSON.stringify({ email: pending.email, name: pending.name })
+                );
+            } catch {
+                /* ignore */
+            }
             window.location.href = url;
         } catch {
             setError('Network error starting Stepay.');

@@ -73,8 +73,8 @@ export async function POST(request: Request) {
     }
 
     const base = appPublicUrl();
-    const successUrl = `${base}/?event=${encodeURIComponent(ev.id)}&stepay=paid`;
-    const cancelUrl = `${base}/?event=${encodeURIComponent(ev.id)}&stepay=cancel`;
+    const successUrl = `${base}/?event=${encodeURIComponent(ev.id)}&stepay=paid&email=${encodeURIComponent(email)}`;
+    const cancelUrl = `${base}/?event=${encodeURIComponent(ev.id)}&stepay=cancel&email=${encodeURIComponent(email)}`;
     const webhookUrl = `${base}/api/webhooks/stepay`;
 
     const reference = `gatefy_${ev.id.slice(0, 24)}_${email.replace(/[^a-z0-9]/g, '').slice(0, 32)}`;

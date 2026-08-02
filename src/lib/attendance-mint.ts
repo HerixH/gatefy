@@ -73,7 +73,7 @@ function networkPassphrase(): string {
     return clientStellarNetwork() === 'testnet' ? Networks.TESTNET : Networks.PUBLIC;
 }
 
-function stellarExplorerTxUrl(txHash: string): string {
+export function stellarExplorerTxUrl(txHash: string): string {
     const net = clientStellarNetwork() === 'testnet' ? 'testnet' : 'public';
     return `https://stellar.expert/explorer/${net}/tx/${txHash}`;
 }
