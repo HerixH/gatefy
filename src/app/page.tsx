@@ -2,7 +2,7 @@
 
 import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Suspense, useState, useEffect, useMemo } from 'react';
+import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, useConfig } from 'wagmi';
@@ -104,6 +104,8 @@ function HomeContent() {
     error?: string;
   } | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scannerStatus, setScannerStatus] = useState<string | null>(null);
+  const verifyInFlightRef = useRef(false);
   const [events, setEvents] = useState<Event[]>([]);
   /** Organizer-scoped list from GET /api/events/managed (lighter than filtering the public catalog). */
   const [managedEvents, setManagedEvents] = useState<Event[]>([]);
@@ -578,8 +580,10 @@ function HomeContent() {
   };
 
   const handleScan = async (data: string) => {
+    if (verifyInFlightRef.current) return;
     const code = String(data || '').trim().toUpperCase();
     if (!code) {
+      setScannerStatus('Enter or scan a verification code.');
       showWalletToast('Enter or scan a verification code.');
       return;
     }
@@ -600,21 +604,27 @@ function HomeContent() {
     }
     const emailMode = ev?.isBlockchain === false;
     if (emailMode && !regEmail) {
-      setShowScanner(false);
-      showWalletToast('Register with your email for this event first, then verify.');
+      const msg = 'Register with your email for this event first, then verify.';
+      setScannerStatus(msg);
+      showWalletToast(msg);
       return;
     }
     if (!emailMode && !address && !regEmail) {
-      setShowScanner(false);
-      showWalletToast('Connect your wallet (or register with email) to verify attendance.');
+      const msg = 'Connect your wallet (or register with email) to verify attendance.';
+      setScannerStatus(msg);
+      showWalletToast(msg);
       return;
     }
     if (ev && isPast(ev.date, ev.endDate)) {
-      setShowScanner(false);
-      showWalletToast('Verification is closed — this event has ended.');
+      const msg = 'Verification is closed — this event has ended.';
+      setScannerStatus(msg);
+      showWalletToast(msg);
       return;
     }
+
+    verifyInFlightRef.current = true;
     setScanning(true);
+    setScannerStatus('Verifying attendance…');
     try {
       const body: Record<string, string> = { code };
       if (address) body.wallet = address;
@@ -633,6 +643,7 @@ function HomeContent() {
       const result = await res.json();
       if (result.success) {
         setIsUserVerified(true);
+        setScannerStatus(null);
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
         } else {
@@ -649,12 +660,17 @@ function HomeContent() {
         setShowScanner(false);
         refetchOrganizerLists();
       } else {
-        showWalletToast(result.message || result.error || 'Verification failed. Check your code and try again.');
+        const msg = result.message || result.error || 'Verification failed. Check your code and try again.';
+        setScannerStatus(msg);
+        showWalletToast(msg);
       }
     } catch {
-      showWalletToast('Network error during verification. Please try again.');
+      const msg = 'Network error during verification. Please try again.';
+      setScannerStatus(msg);
+      showWalletToast(msg);
     } finally {
       setScanning(false);
+      verifyInFlightRef.current = false;
     }
   };
 
@@ -1758,7 +1774,7 @@ function HomeContent() {
             exit={{ opacity: 0, y: 8 }}
             role="status"
             onClick={() => setWalletToast(null)}
-            className="fixed bottom-4 left-4 z-[90] max-w-[min(22rem,calc(100vw-2rem))] px-4 py-2.5 border border-white/15 bg-black/88 backdrop-blur-md flex items-start gap-2.5 shadow-lg cursor-pointer pointer-events-auto"
+            className="fixed bottom-4 left-4 z-[400] max-w-[min(22rem,calc(100vw-2rem))] px-4 py-2.5 border border-white/15 bg-black/88 backdrop-blur-md flex items-start gap-2.5 shadow-lg cursor-pointer pointer-events-auto"
             title="Dismiss"
           >
             <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0 mt-1" />
@@ -2112,7 +2128,16 @@ function HomeContent() {
       {/* Scanner */}
       <AnimatePresence>
         {showScanner && (
-          <Scanner onScan={handleScan} onClose={() => setShowScanner(false)} />
+          <Scanner
+            onScan={handleScan}
+            onClose={() => {
+              if (scanning) return;
+              setScannerStatus(null);
+              setShowScanner(false);
+            }}
+            busy={scanning}
+            status={scannerStatus}
+          />
         )}
       </AnimatePresence>
 
