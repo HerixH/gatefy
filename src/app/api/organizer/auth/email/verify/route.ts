@@ -10,6 +10,7 @@ import {
     shortLivedCookieOptions,
     verifyEmailOtpChallenge,
 } from '@/lib/organizer-auth';
+import { organizerDbAvailable } from '@/lib/organizer-session-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     const store = await cookies();
     const cookieValue = store.get(ORGANIZER_OTP_COOKIE)?.value;
 
-    const check = verifyEmailOtpChallenge(cookieValue, email, code);
+    const check = await verifyEmailOtpChallenge(cookieValue, email, code);
     if (!check.ok) {
         const res = NextResponse.json({ error: check.error }, { status: 401 });
         if (check.bumpCookie) {
@@ -46,12 +47,30 @@ export async function POST(request: Request) {
     }
 
     const existing = await getOrganizerSessionFromCookies();
-    const token = createOrganizerSessionToken({
-        email,
-        wallet: existing?.wallet,
-    });
+    let token: string;
+    try {
+        token = await createOrganizerSessionToken({
+            email,
+            wallet: existing?.wallet,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not create host session.';
+        return NextResponse.json(
+            {
+                error: msg.includes('organizer_sessions')
+                    ? 'Host auth tables missing. Run supabase/patches/11_organizer_sessions.sql in Supabase SQL Editor.'
+                    : msg,
+            },
+            { status: 503 }
+        );
+    }
 
-    const res = NextResponse.json({ ok: true, email, wallet: existing?.wallet ?? null });
+    const res = NextResponse.json({
+        ok: true,
+        email,
+        wallet: existing?.wallet ?? null,
+        stored: organizerDbAvailable() ? 'database' : 'cookie',
+    });
     res.cookies.set(ORGANIZER_SESSION_COOKIE, token, organizerSessionCookieOptions());
     res.cookies.set(ORGANIZER_OTP_COOKIE, '', { ...shortLivedCookieOptions(0), maxAge: 0 });
     return res;

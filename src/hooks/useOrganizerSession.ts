@@ -29,7 +29,10 @@ export function useOrganizerSession(walletAddress?: string) {
 
     const refreshSession = useCallback(async () => {
         try {
-            const res = await fetch('/api/organizer/auth/session', { cache: 'no-store' });
+            const res = await fetch('/api/organizer/auth/session', {
+                cache: 'no-store',
+                credentials: 'include',
+            });
             const data = await res.json();
             setSession({
                 loading: false,
@@ -77,6 +80,7 @@ export function useOrganizerSession(walletAddress?: string) {
         const res = await fetch('/api/organizer/auth/email/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ email: em }),
         });
         const data = await res.json();
@@ -97,6 +101,7 @@ export function useOrganizerSession(walletAddress?: string) {
             const res = await fetch('/api/organizer/auth/email/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ email: em, code: code.trim() }),
             });
             const data = await res.json();
@@ -114,6 +119,7 @@ export function useOrganizerSession(walletAddress?: string) {
             const res = await fetch('/api/organizer/auth/wallet/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ address, signature }),
             });
             const data = await res.json();
@@ -133,6 +139,7 @@ export function useOrganizerSession(walletAddress?: string) {
         const res = await fetch('/api/organizer/auth/wallet/challenge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({ address }),
         });
         const data = await res.json();
@@ -149,7 +156,7 @@ export function useOrganizerSession(walletAddress?: string) {
     }, []);
 
     const clearEmailSession = useCallback(async () => {
-        await fetch('/api/organizer/auth/session', { method: 'DELETE' });
+        await fetch('/api/organizer/auth/session', { method: 'DELETE', credentials: 'include' });
         await refreshSession();
     }, [refreshSession]);
 

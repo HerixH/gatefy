@@ -11,6 +11,7 @@ import {
     shortLivedCookieOptions,
     verifyWalletChallenge,
 } from '@/lib/organizer-auth';
+import { organizerDbAvailable } from '@/lib/organizer-session-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,12 +40,30 @@ export async function POST(request: Request) {
     }
 
     const existing = await getOrganizerSessionFromCookies();
-    const token = createOrganizerSessionToken({
-        wallet: address,
-        email: existing?.email,
-    });
+    let token: string;
+    try {
+        token = await createOrganizerSessionToken({
+            wallet: address,
+            email: existing?.email,
+        });
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not create host session.';
+        return NextResponse.json(
+            {
+                error: msg.includes('organizer_sessions')
+                    ? 'Host auth tables missing. Run supabase/patches/11_organizer_sessions.sql in Supabase SQL Editor.'
+                    : msg,
+            },
+            { status: 503 }
+        );
+    }
 
-    const res = NextResponse.json({ ok: true, wallet: address, email: existing?.email ?? null });
+    const res = NextResponse.json({
+        ok: true,
+        wallet: address,
+        email: existing?.email ?? null,
+        stored: organizerDbAvailable() ? 'database' : 'cookie',
+    });
     res.cookies.set(ORGANIZER_SESSION_COOKIE, token, organizerSessionCookieOptions());
     res.cookies.set(ORGANIZER_WALLET_CHALLENGE_COOKIE, '', { ...shortLivedCookieOptions(0), maxAge: 0 });
     return res;

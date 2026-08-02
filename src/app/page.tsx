@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useConfig } from 'wagmi';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useConfig, useSignMessage } from 'wagmi';
+import { useOrganizerSession } from '@/hooks/useOrganizerSession';
 import { waitForTransactionReceipt } from '@wagmi/core';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -22,7 +23,6 @@ import {
   formatOrganizerShort,
   isEmailOrganizerId,
   organizerListAuthSuffixForEvent,
-  organizerManagedQueryString,
 } from '@/lib/event-organizer';
 import {
   eventAcceptsMobileMoney,
@@ -132,7 +132,21 @@ interface Event {
 function HomeContent() {
   const { address, isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
-
+  const { signMessageAsync } = useSignMessage();
+  const {
+    organizerSessionEmail,
+    sessionWallet,
+    signedIn: hostSignedIn,
+    orgCtx,
+    managedQuery: managedEventsQuerySuffix,
+    requestEmailCode,
+    verifyEmailCode,
+    requestWalletChallenge,
+    verifyWalletSignature,
+    clearEmailSession,
+    refreshSession,
+  } = useOrganizerSession(address);
+  const [hostAuthBusy, setHostAuthBusy] = useState(false);
 
   const [showScanner, setShowScanner] = useState(false);
   const [minted, setMinted] = useState(false);
@@ -219,24 +233,16 @@ function HomeContent() {
     wallet?: string | null;
   } | null>(null);
   const [databaseConfigured, setDatabaseConfigured] = useState<boolean | null>(null);
-  /** Email used to create events without a wallet (session). */
-  const [organizerSessionEmail, setOrganizerSessionEmail] = useState<string | null>(null);
-  /** Draft for “Sign in as organizer” (email-hosted events — wallet parity). */
+  /** Draft for “Sign in as organizer” (email OTP). */
   const [organizerSignInDraft, setOrganizerSignInDraft] = useState('');
-
-  const orgCtx = useMemo(
-    () => ({ address: address ?? null, organizerSessionEmail }),
-    [address, organizerSessionEmail]
-  );
+  const [organizerOtpDraft, setOrganizerOtpDraft] = useState('');
+  const [organizerOtpSentTo, setOrganizerOtpSentTo] = useState<string | null>(null);
 
   /** Required on `/api/events/registrations` and `/api/events/attendees` (must match this event’s organizer). */
   const organizerListAuthSuffix = useMemo(() => {
     if (!selectedEvent) return '';
     return organizerListAuthSuffixForEvent(selectedEvent.organizer, orgCtx);
   }, [selectedEvent, orgCtx]);
-
-  /** Query string for GET `/api/events/managed` (no leading `?`). */
-  const managedEventsQuerySuffix = useMemo(() => organizerManagedQueryString(orgCtx), [orgCtx]);
 
   const { writeContract, writeContractAsync, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
   const { isSuccess: isTxConfirmed, isLoading: isTxConfirming } = useWaitForTransactionReceipt({ hash: txHash });
@@ -406,11 +412,6 @@ function HomeContent() {
         });
       })
       .catch(() => setDatabaseConfigured(false));
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    setOrganizerSessionEmail(sessionStorage.getItem('gatefy-organizer-email'));
   }, []);
 
   useEffect(() => {
@@ -741,41 +742,64 @@ function HomeContent() {
     setTimeout(() => setWalletToast(null), 4000);
   };
 
-  const ORG_SESSION_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  const commitOrganizerEmailSession = (raw: string, opts?: { silent?: boolean }) => {
-    const em = raw.trim().toLowerCase();
-    if (!ORG_SESSION_EMAIL_RE.test(em)) {
-      showWalletToast('Enter a valid organizer email.');
-      return false;
+  const signInHostWallet = async () => {
+    if (!address) {
+      openConnectModal?.();
+      return { ok: false as const, error: 'Connect a wallet first.' };
     }
+    setHostAuthBusy(true);
     try {
-      sessionStorage.setItem('gatefy-organizer-email', em);
+      const ch = await requestWalletChallenge(address);
+      if (!ch.ok) return { ok: false as const, error: ch.error };
+      const signature = await signMessageAsync({ message: ch.message });
+      const v = await verifyWalletSignature(address, signature);
+      if (!v.ok) return { ok: false as const, error: v.error };
+      return { ok: true as const };
     } catch {
-      showWalletToast('Could not save organizer session (storage blocked).');
-      return false;
+      return { ok: false as const, error: 'Signature cancelled or failed.' };
+    } finally {
+      setHostAuthBusy(false);
     }
-    setOrganizerSessionEmail(em);
-    setOrganizerSignInDraft('');
-    if (!opts?.silent) {
-      showWalletToast('Organizer session active — host tools unlocked for your email events.');
-    }
-    return true;
   };
 
-  const clearOrganizerEmailSession = () => {
-    try {
-      sessionStorage.removeItem('gatefy-organizer-email');
-    } catch {
-      /* ignore */
-    }
-    setOrganizerSessionEmail(null);
-    showWalletToast('Organizer email signed out.');
-  };
-
-  const handleOrganizerSignInSubmit = (e: React.FormEvent) => {
+  const handleOrganizerSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    commitOrganizerEmailSession(organizerSignInDraft);
+    setHostAuthBusy(true);
+    try {
+      if (!organizerOtpSentTo) {
+        const r = await requestEmailCode(organizerSignInDraft);
+        if (!r.ok) {
+          showWalletToast(r.error);
+          return;
+        }
+        setOrganizerOtpSentTo(r.email);
+        if (r.devCode) {
+          setOrganizerOtpDraft(r.devCode);
+          showWalletToast(`Dev code: ${r.devCode}`);
+        } else {
+          showWalletToast(r.message);
+        }
+        return;
+      }
+      const v = await verifyEmailCode(organizerOtpSentTo, organizerOtpDraft);
+      if (!v.ok) {
+        showWalletToast(v.error);
+        return;
+      }
+      setOrganizerSignInDraft('');
+      setOrganizerOtpDraft('');
+      setOrganizerOtpSentTo(null);
+      showWalletToast('Host session verified and stored in the database.');
+    } finally {
+      setHostAuthBusy(false);
+    }
+  };
+
+  const clearOrganizerEmailSession = async () => {
+    await clearEmailSession();
+    setOrganizerOtpSentTo(null);
+    setOrganizerOtpDraft('');
+    showWalletToast('Host session signed out.');
   };
 
   const handleScan = async (data: string, emailFromScanner?: string) => {
@@ -904,6 +928,20 @@ function HomeContent() {
         setCreating(false);
         return;
       }
+      if (address) {
+        if (!sessionWallet || sessionWallet !== address.toLowerCase()) {
+          setCreateError('Sign the host wallet challenge first (Verify host step). Your session is stored in the database.');
+          setCreating(false);
+          return;
+        }
+      } else if (
+        !organizerSessionEmail ||
+        organizerSessionEmail !== form.organizerEmail.trim().toLowerCase()
+      ) {
+        setCreateError('Verify your host email with the 6-digit code first. Your session is stored in the database.');
+        setCreating(false);
+        return;
+      }
       // datetime-local returns YYYY-MM-DDTHH:mm (no timezone). Convert to ISO so the user's
       // local time is stored correctly; otherwise Postgres treats it as server (UTC) time.
       const dateIso = form.date ? new Date(form.date).toISOString() : form.date;
@@ -954,6 +992,7 @@ function HomeContent() {
       const res = await fetch('/api/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(payload),
       });
       if (res.ok) {
@@ -978,9 +1017,7 @@ function HomeContent() {
           ticketAcceptMobileMoney: true,
           ticketAcceptStellar: false,
         });
-        if (!address && form.organizerEmail.trim()) {
-          commitOrganizerEmailSession(form.organizerEmail.trim(), { silent: true });
-        }
+        await refreshSession();
         setShowCreateEvent(false);
         setCreatedEvent(newEvent); // show QR download modal
         await Promise.all([fetchEvents(), fetchManagedEvents()]);
@@ -2095,42 +2132,89 @@ function HomeContent() {
                 )}
                 <div className="pt-2 border-t border-white/[0.06] space-y-2">
                   <span className="text-white/40 uppercase tracking-[0.2em] text-[9px] block font-bold">
-                    Organizer (email-hosted events)
+                    Host sign-in (database session)
                   </span>
                   <p className="text-[8px] text-white/25 leading-relaxed">
-                    Same role as connecting a wallet for on-chain events — sign in to unlock QR, roster, and export for events you created with this email.
+                    Verify email with a code or sign a wallet challenge. Sessions are stored in Supabase — connecting a wallet alone is not enough.
                   </p>
-                  {organizerSessionEmail ? (
+                  {hostSignedIn && (organizerSessionEmail || sessionWallet) ? (
                     <div className="space-y-2">
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-white/40 uppercase tracking-[0.2em] shrink-0 text-[8px]">Signed in</span>
-                        <span className="text-white/75 text-right break-all text-[9px] font-mono">{organizerSessionEmail}</span>
+                        <span className="text-white/75 text-right break-all text-[9px] font-mono">
+                          {organizerSessionEmail || sessionWallet}
+                        </span>
                       </div>
+                      {address && (!sessionWallet || sessionWallet !== address.toLowerCase()) && (
+                        <button
+                          type="button"
+                          disabled={hostAuthBusy}
+                          onClick={async () => {
+                            const r = await signInHostWallet();
+                            showWalletToast(r.ok ? 'Wallet host session saved.' : r.error);
+                          }}
+                          className="text-[8px] font-bold tracking-[0.2em] uppercase text-blue-300/90 hover:text-white border border-blue-500/30 px-2 py-1.5 w-full disabled:opacity-50"
+                        >
+                          {hostAuthBusy ? 'Waiting…' : 'Sign wallet as host'}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={clearOrganizerEmailSession}
+                        onClick={() => void clearOrganizerEmailSession()}
                         className="text-[8px] font-bold tracking-[0.2em] uppercase text-white/35 hover:text-white border border-white/10 px-2 py-1.5 w-full"
                       >
-                        Sign out organizer
+                        Sign out host
                       </button>
                     </div>
                   ) : (
-                    <form onSubmit={handleOrganizerSignInSubmit} className="space-y-2">
-                      <input
-                        type="email"
-                        value={organizerSignInDraft}
-                        onChange={e => setOrganizerSignInDraft(e.target.value)}
-                        placeholder="you@company.com"
-                        autoComplete="email"
-                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-[11px] font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
-                      />
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200"
-                      >
-                        Sign in as organizer
-                      </button>
-                    </form>
+                    <div className="space-y-2">
+                      {address ? (
+                        <button
+                          type="button"
+                          disabled={hostAuthBusy}
+                          onClick={async () => {
+                            const r = await signInHostWallet();
+                            showWalletToast(r.ok ? 'Wallet host session saved.' : r.error);
+                          }}
+                          className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200 disabled:opacity-50"
+                        >
+                          {hostAuthBusy ? 'Waiting for signature…' : 'Sign wallet as host'}
+                        </button>
+                      ) : null}
+                      <form onSubmit={handleOrganizerSignInSubmit} className="space-y-2">
+                        {!organizerOtpSentTo ? (
+                          <input
+                            type="email"
+                            value={organizerSignInDraft}
+                            onChange={e => setOrganizerSignInDraft(e.target.value)}
+                            placeholder="you@company.com"
+                            autoComplete="email"
+                            className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-[11px] font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={organizerOtpDraft}
+                            onChange={e => setOrganizerOtpDraft(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                            placeholder="6-digit code"
+                            className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-[11px] font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                          />
+                        )}
+                        <button
+                          type="submit"
+                          disabled={hostAuthBusy}
+                          className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200 disabled:opacity-50"
+                        >
+                          {hostAuthBusy
+                            ? 'Working…'
+                            : organizerOtpSentTo
+                              ? 'Verify code'
+                              : 'Email code as host'}
+                        </button>
+                      </form>
+                    </div>
                   )}
                 </div>
                 {selectedEvent?.isBlockchain === false &&
@@ -2412,7 +2496,38 @@ function HomeContent() {
                 form={form}
                 setForm={setForm}
                 address={address}
-                organizerSessionEmail={organizerSessionEmail}
+                hostAuth={{
+                  signedIn: hostSignedIn,
+                  sessionEmail: organizerSessionEmail,
+                  sessionWallet,
+                  busy: hostAuthBusy,
+                  onRequestEmailCode: async (email) => {
+                    setHostAuthBusy(true);
+                    try {
+                      const r = await requestEmailCode(email);
+                      if (!r.ok) return { ok: false, error: r.error };
+                      return {
+                        ok: true,
+                        devCode: r.devCode,
+                        message: r.message,
+                      };
+                    } finally {
+                      setHostAuthBusy(false);
+                    }
+                  },
+                  onVerifyEmailCode: async (email, code) => {
+                    setHostAuthBusy(true);
+                    try {
+                      const r = await verifyEmailCode(email, code);
+                      if (!r.ok) return { ok: false, error: r.error };
+                      return { ok: true };
+                    } finally {
+                      setHostAuthBusy(false);
+                    }
+                  },
+                  onSignWallet: signInHostWallet,
+                  onConnectWallet: () => openConnectModal?.(),
+                }}
                 creating={creating}
                 createError={createError}
                 uploadingBanner={uploadingBanner}
@@ -2421,7 +2536,6 @@ function HomeContent() {
                 onSubmit={handleCreateEvent}
                 onCancel={() => setShowCreateEvent(false)}
                 showToast={showWalletToast}
-                onCommitOrganizerEmail={(email) => commitOrganizerEmailSession(email, { silent: true })}
               />
             </motion.div>
           </motion.div>

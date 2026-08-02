@@ -56,11 +56,27 @@ function PreviewChip({ label, value }: { label: string; value: string }) {
     );
 }
 
+export type HostAuthHandlers = {
+    signedIn: boolean;
+    sessionEmail: string | null;
+    sessionWallet: string | null;
+    busy: boolean;
+    onRequestEmailCode: (
+        email: string
+    ) => Promise<{ ok: boolean; error?: string; devCode?: string; message?: string }>;
+    onVerifyEmailCode: (
+        email: string,
+        code: string
+    ) => Promise<{ ok: boolean; error?: string }>;
+    onSignWallet: () => Promise<{ ok: boolean; error?: string }>;
+    onConnectWallet?: () => void;
+};
+
 type Props = {
     form: CreateEventFormState;
     setForm: Dispatch<SetStateAction<CreateEventFormState>>;
     address?: string | null;
-    organizerSessionEmail?: string | null;
+    hostAuth: HostAuthHandlers;
     creating: boolean;
     createError: string;
     uploadingBanner: boolean;
@@ -69,15 +85,13 @@ type Props = {
     onSubmit: (e: FormEvent) => void;
     onCancel: () => void;
     showToast: (msg: string) => void;
-    /** Optional: persist organizer email session on host step. */
-    onCommitOrganizerEmail?: (email: string) => void;
 };
 
 export function CreateEventWizard({
     form,
     setForm,
     address,
-    organizerSessionEmail,
+    hostAuth,
     creating,
     createError,
     uploadingBanner,
@@ -86,19 +100,26 @@ export function CreateEventWizard({
     onSubmit,
     onCancel,
     showToast,
-    onCommitOrganizerEmail,
 }: Props) {
+    const walletVerified =
+        !!address &&
+        !!hostAuth.sessionWallet &&
+        hostAuth.sessionWallet === address.toLowerCase();
+    const emailVerified =
+        !!hostAuth.sessionEmail &&
+        hostAuth.sessionEmail === form.organizerEmail.trim().toLowerCase();
+    const hostVerified = address ? walletVerified : emailVerified;
+
     const steps = useMemo<StepDef[]>(() => {
-        const list: StepDef[] = [];
-        if (!address) {
-            list.push({
+        const list: StepDef[] = [
+            {
                 id: 'host',
                 label: 'Host',
-                title: 'Who is hosting',
-                hint: 'Your email is your host identity for this event.',
-            });
-        }
-        list.push(
+                title: 'Verify host',
+                hint: address
+                    ? 'Sign a one-time message — stored as your host session in the database.'
+                    : 'Verify your email with a code — stored as your host session in the database.',
+            },
             {
                 id: 'basics',
                 label: 'Basics',
@@ -122,17 +143,21 @@ export function CreateEventWizard({
                 label: 'Publish',
                 title: 'Details & publish',
                 hint: 'Banner, signup mode, then register.',
-            }
-        );
+            },
+        ];
         return list;
     }, [address]);
 
     const [stepIndex, setStepIndex] = useState(0);
     const [stepError, setStepError] = useState('');
+    const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+    const [otpDraft, setOtpDraft] = useState('');
 
     useEffect(() => {
         setStepIndex(0);
         setStepError('');
+        setOtpSentTo(null);
+        setOtpDraft('');
     }, [address]);
 
     useEffect(() => {
@@ -168,8 +193,17 @@ export function CreateEventWizard({
 
     const validateStep = (id: StepId): string | null => {
         if (id === 'host') {
+            if (address) {
+                if (!walletVerified) {
+                    return 'Connect your wallet and sign the host challenge before continuing.';
+                }
+                return null;
+            }
             if (!form.organizerEmail.trim() || !form.organizerDisplayName.trim()) {
                 return 'Enter your email and name or company.';
+            }
+            if (!emailVerified) {
+                return 'Verify your email with the 6-digit code before continuing.';
             }
             return null;
         }
@@ -224,9 +258,6 @@ export function CreateEventWizard({
         if (err) {
             setStepError(err);
             return;
-        }
-        if (step.id === 'host' && onCommitOrganizerEmail) {
-            onCommitOrganizerEmail(form.organizerEmail.trim());
         }
         setStepError('');
         if (!isLast) setStepIndex((i) => Math.min(i + 1, steps.length - 1));
@@ -338,46 +369,182 @@ export function CreateEventWizard({
                         className="space-y-5"
                     >
                         {step.id === 'host' && (
-                            <div className="space-y-4 p-4 border border-emerald-500/25 bg-emerald-500/[0.05]">
-                                <p className="text-[9px] tracking-[0.25em] uppercase text-emerald-400/90 font-bold">
-                                    Organizer (no wallet)
-                                </p>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                                        Your email *
-                                    </label>
-                                    <input
-                                        type="email"
-                                        value={form.organizerEmail}
-                                        onChange={(e) =>
-                                            setForm((f) => ({ ...f, organizerEmail: e.target.value }))
-                                        }
-                                        placeholder="you@company.com"
-                                        className={inputCls}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                                        Your name or company *
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={form.organizerDisplayName}
-                                        onChange={(e) =>
-                                            setForm((f) => ({ ...f, organizerDisplayName: e.target.value }))
-                                        }
-                                        placeholder="Jane Doe or Acme Inc."
-                                        className={inputCls}
-                                    />
-                                </div>
-                                {organizerSessionEmail &&
-                                organizerSessionEmail === form.organizerEmail.trim().toLowerCase() ? (
-                                    <p className="text-[8px] text-emerald-400/90 font-bold uppercase tracking-widest">
-                                        Host session active for this email
-                                    </p>
+                            <div className="space-y-4">
+                                {address ? (
+                                    <div className="space-y-4 p-4 border border-blue-500/25 bg-blue-500/[0.05]">
+                                        <p className="text-[9px] tracking-[0.25em] uppercase text-blue-300/90 font-bold">
+                                            Wallet host sign-in
+                                        </p>
+                                        <p className="text-[10px] text-white/50 leading-relaxed">
+                                            Connecting a wallet is not enough. Sign once so we store a host
+                                            session in the database.
+                                        </p>
+                                        <p className="text-[10px] font-mono text-white/70 break-all">
+                                            {address}
+                                        </p>
+                                        {walletVerified ? (
+                                            <p className="text-[8px] text-emerald-400/90 font-bold uppercase tracking-widest">
+                                                Host session verified & stored
+                                            </p>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                disabled={hostAuth.busy}
+                                                onClick={async () => {
+                                                    setStepError('');
+                                                    const r = await hostAuth.onSignWallet();
+                                                    if (!r.ok) {
+                                                        setStepError(r.error || 'Wallet sign-in failed.');
+                                                        showToast(r.error || 'Wallet sign-in failed.');
+                                                    } else {
+                                                        showToast('Host wallet verified and saved.');
+                                                    }
+                                                }}
+                                                className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
+                                            >
+                                                {hostAuth.busy
+                                                    ? 'Waiting for signature…'
+                                                    : 'Sign to verify as host'}
+                                            </button>
+                                        )}
+                                    </div>
                                 ) : (
-                                    <p className="text-[8px] text-white/40 leading-relaxed">
-                                        Continue saves this email as your host session on this device.
+                                    <div className="space-y-4 p-4 border border-emerald-500/25 bg-emerald-500/[0.05]">
+                                        <p className="text-[9px] tracking-[0.25em] uppercase text-emerald-400/90 font-bold">
+                                            Email host sign-in
+                                        </p>
+                                        <p className="text-[10px] text-white/50 leading-relaxed">
+                                            We email a 6-digit code. After you verify, your host session is
+                                            stored in the database (not only in this browser).
+                                        </p>
+                                        <div className="space-y-2">
+                                            <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
+                                                Your email *
+                                            </label>
+                                            <input
+                                                type="email"
+                                                value={form.organizerEmail}
+                                                onChange={(e) => {
+                                                    setForm((f) => ({
+                                                        ...f,
+                                                        organizerEmail: e.target.value,
+                                                    }));
+                                                    setOtpSentTo(null);
+                                                    setOtpDraft('');
+                                                }}
+                                                placeholder="you@company.com"
+                                                className={inputCls}
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
+                                                Your name or company *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={form.organizerDisplayName}
+                                                onChange={(e) =>
+                                                    setForm((f) => ({
+                                                        ...f,
+                                                        organizerDisplayName: e.target.value,
+                                                    }))
+                                                }
+                                                placeholder="Jane Doe or Acme Inc."
+                                                className={inputCls}
+                                            />
+                                        </div>
+                                        {emailVerified ? (
+                                            <p className="text-[8px] text-emerald-400/90 font-bold uppercase tracking-widest">
+                                                Host session verified & stored for {hostAuth.sessionEmail}
+                                            </p>
+                                        ) : !otpSentTo ? (
+                                            <button
+                                                type="button"
+                                                disabled={hostAuth.busy}
+                                                onClick={async () => {
+                                                    setStepError('');
+                                                    const r = await hostAuth.onRequestEmailCode(
+                                                        form.organizerEmail
+                                                    );
+                                                    if (!r.ok) {
+                                                        setStepError(r.error || 'Could not send code.');
+                                                        showToast(r.error || 'Could not send code.');
+                                                        return;
+                                                    }
+                                                    setOtpSentTo(form.organizerEmail.trim().toLowerCase());
+                                                    if (r.devCode) {
+                                                        setOtpDraft(r.devCode);
+                                                        showToast(`Dev code: ${r.devCode}`);
+                                                    } else {
+                                                        showToast(r.message || 'Code sent.');
+                                                    }
+                                                }}
+                                                className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
+                                            >
+                                                {hostAuth.busy ? 'Sending…' : 'Send verification code'}
+                                            </button>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
+                                                    6-digit code *
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    maxLength={6}
+                                                    value={otpDraft}
+                                                    onChange={(e) =>
+                                                        setOtpDraft(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                                    }
+                                                    placeholder="123456"
+                                                    className={inputCls}
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={hostAuth.busy || otpDraft.length !== 6}
+                                                    onClick={async () => {
+                                                        setStepError('');
+                                                        const r = await hostAuth.onVerifyEmailCode(
+                                                            form.organizerEmail,
+                                                            otpDraft
+                                                        );
+                                                        if (!r.ok) {
+                                                            setStepError(r.error || 'Invalid code.');
+                                                            showToast(r.error || 'Invalid code.');
+                                                        } else {
+                                                            showToast('Host email verified and saved.');
+                                                        }
+                                                    }}
+                                                    className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
+                                                >
+                                                    {hostAuth.busy ? 'Verifying…' : 'Verify & store session'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="text-[8px] uppercase tracking-widest text-white/40 hover:text-white"
+                                                    onClick={() => {
+                                                        setOtpSentTo(null);
+                                                        setOtpDraft('');
+                                                    }}
+                                                >
+                                                    Use a different email
+                                                </button>
+                                            </div>
+                                        )}
+                                        {!address && hostAuth.onConnectWallet && (
+                                            <button
+                                                type="button"
+                                                onClick={() => hostAuth.onConnectWallet?.()}
+                                                className="w-full py-2.5 border border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 hover:text-white hover:border-white/30"
+                                            >
+                                                Or connect wallet instead
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                                {hostVerified && (
+                                    <p className="text-[8px] text-white/35 uppercase tracking-widest">
+                                        You can continue to event details.
                                     </p>
                                 )}
                             </div>
