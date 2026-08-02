@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { mintAttendanceProof } from '@/lib/attendance-mint';
 import { updateAttendanceMint } from '@/lib/codes';
+import { sendAttendanceMintedEmail } from '@/lib/email';
+import { findEventByIdCaseInsensitive } from '@/lib/organizer-access';
+import { getRegistrationForEvent } from '@/lib/registrations';
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +41,10 @@ export async function POST(request: Request) {
         }
 
         const supabase = getSupabase();
-        let q = supabase.from('attendance').select('id, mint_status, mint_tx_hash, mint_token_id').eq('event_id', eventId);
+        let q = supabase
+            .from('attendance')
+            .select('id, email, mint_status, mint_tx_hash, mint_token_id')
+            .eq('event_id', eventId);
         if (email) q = q.ilike('email', email);
         else q = q.eq('wallet', wallet);
 
@@ -97,6 +103,30 @@ export async function POST(request: Request) {
                 },
                 { status: 400 }
             );
+        }
+
+        try {
+            let reg = null as Awaited<ReturnType<typeof getRegistrationForEvent>>;
+            if (email) reg = await getRegistrationForEvent(eventId, { email });
+            else if (wallet) reg = await getRegistrationForEvent(eventId, { wallet });
+            const toEmail =
+                reg?.email?.trim() ||
+                email ||
+                (typeof row.email === 'string' ? row.email.trim().toLowerCase() : '') ||
+                '';
+            const event = await findEventByIdCaseInsensitive(eventId);
+            if (toEmail && event) {
+                void sendAttendanceMintedEmail({
+                    to: toEmail,
+                    event,
+                    attendeeName: reg?.name ?? null,
+                    txHash: mintResult.txHash,
+                    tokenId: mintResult.tokenId,
+                    explorerUrl: mintResult.explorerUrl,
+                }).catch((e) => console.error('[attendance/mint] email failed:', e));
+            }
+        } catch (e) {
+            console.error('[attendance/mint] email lookup/send error:', e);
         }
 
         return NextResponse.json({

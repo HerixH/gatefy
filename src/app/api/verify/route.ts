@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { peekCode, updateAttendanceMint, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
 import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
-import { sendAttendanceVerifiedEmail } from '@/lib/email';
+import { sendAttendanceMintedEmail, sendAttendanceVerifiedEmail } from '@/lib/email';
 import { mintAttendanceProof } from '@/lib/attendance-mint';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { base } from 'viem/chains';
@@ -123,6 +123,8 @@ export async function POST(request: Request) {
             if (event && newCheckin) {
                 await incrementAttendee(event.id);
 
+                let toEmail = '';
+                let attendeeName: string | null = null;
                 try {
                     let reg = null as Awaited<ReturnType<typeof getRegistrationForEvent>>;
                     if (emailMode && email) {
@@ -133,12 +135,13 @@ export async function POST(request: Request) {
                             reg = await getRegistrationForEvent(event.id, { email });
                         }
                     }
-                    const toEmail = reg?.email?.trim() || (emailMode && email ? email : '');
+                    toEmail = reg?.email?.trim() || (emailMode && email ? email : '') || '';
+                    attendeeName = reg?.name ?? null;
                     if (toEmail) {
                         void sendAttendanceVerifiedEmail({
                             to: toEmail,
                             event,
-                            attendeeName: reg?.name ?? null,
+                            attendeeName,
                         }).catch((e) => console.error('[verify] check-in email failed:', e));
                     }
                 } catch (e) {
@@ -177,6 +180,17 @@ export async function POST(request: Request) {
                         mintTokenId: mintResult.ok ? mintResult.tokenId : null,
                         mintError: mintResult.ok ? null : mintResult.error,
                     });
+
+                    if (mintResult.ok && toEmail) {
+                        void sendAttendanceMintedEmail({
+                            to: toEmail,
+                            event,
+                            attendeeName,
+                            txHash: mintResult.txHash,
+                            tokenId: mintResult.tokenId,
+                            explorerUrl: mintResult.explorerUrl,
+                        }).catch((e) => console.error('[verify] mint email failed:', e));
+                    }
                 } catch (e) {
                     console.error('[verify] attendance mint error:', e);
                     mint = {

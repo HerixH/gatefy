@@ -448,6 +448,84 @@ ${bulletproofButtonHref(link, 'View event')}
     return { ok: true };
 }
 
+/** After a successful Soroban attendance proof mint. */
+export async function sendAttendanceMintedEmail(opts: {
+    to: string;
+    event: Event;
+    attendeeName?: string | null;
+    txHash?: string | null;
+    tokenId?: string | null;
+    explorerUrl?: string | null;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+    const key = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+    const { to, event, attendeeName, txHash, tokenId, explorerUrl } = opts;
+    const origin = appOrigin();
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+
+    const subject = `Attendance proof minted · ${event.name}`;
+    const text = [
+        `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
+        '',
+        `Your attendance proof was minted on Stellar (Soroban) for "${event.name}".`,
+        '',
+        `When: ${formatEventWhen(event)}`,
+        event.location ? `Where: ${event.location}` : '',
+        tokenId ? `Token: #${tokenId}` : '',
+        txHash ? `Transaction: ${txHash}` : '',
+        explorerUrl ? `Explorer: ${explorerUrl}` : '',
+        '',
+        `Event link: ${link}`,
+        '',
+        `— ${brandName()}`,
+    ]
+        .filter(Boolean)
+        .join('\n');
+
+    const greet = attendeeName ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,` : 'Hi there,';
+    const preheader = `On-chain attendance proof minted for ${event.name}`;
+    const inner = `
+<p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  ${greet}
+</p>
+<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  Your attendance proof was <strong style="color:${C.white};">minted on Stellar</strong> for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
+</p>
+${detailRow('When', formatEventWhen(event))}
+${event.location ? detailRow('Where', event.location) : ''}
+${tokenId ? detailRow('Token', `#${tokenId}`) : ''}
+${txHash ? detailRow('Tx', txHash.length > 20 ? `${txHash.slice(0, 12)}…${txHash.slice(-8)}` : txHash) : ''}
+${explorerUrl ? bulletproofButtonHref(explorerUrl, 'View on Stellar Expert') : ''}
+${bulletproofButtonHref(link, 'View event')}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+  Keep this email as your on-chain attendance receipt.
+</p>`;
+
+    const html = emailShell({ preheader, innerHtml: inner });
+
+    if (!key) {
+        console.warn('[email] RESEND_API_KEY not set; skipping mint email to', to);
+        return { ok: false, skipped: true };
+    }
+
+    const res = await fetch(RESEND_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from, to: [to], subject, html, text }),
+    });
+
+    const mintBody = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const err = typeof mintBody?.message === 'string' ? mintBody.message : JSON.stringify(mintBody);
+        console.error('[email] Resend error (mint):', res.status, err);
+        return { ok: false, error: err };
+    }
+    return { ok: true };
+}
+
 /** One-time code for organizer email sign-up / sign-in. */
 export async function sendOrganizerSignInCodeEmail(opts: {
     to: string;
