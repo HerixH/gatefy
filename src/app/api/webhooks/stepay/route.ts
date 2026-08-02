@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getEventById } from '@/lib/events';
 import {
+    applyStepayPaymentToRegistration,
     isPaymentTxHashUsed,
     isRegistered,
     isRegisteredByEmail,
@@ -98,6 +99,12 @@ export async function POST(request: Request) {
         if (emailMode || !wallet) {
             if (!(await isRegisteredByEmail(ev.id, email))) {
                 newlyRegistered = await registerForEventWithEmail(ev.id, email, name || undefined, payment);
+            } else {
+                // Already registered (e.g. race) — still attach verified Stepay payment.
+                await applyStepayPaymentToRegistration(ev.id, email, {
+                    txHash: paymentTx,
+                    stepayCheckoutId: checkoutId || undefined,
+                });
             }
         } else if (!(await isRegistered(ev.id, wallet)) && !(await isRegisteredByEmail(ev.id, email))) {
             newlyRegistered = await registerForEvent(
@@ -106,6 +113,11 @@ export async function POST(request: Request) {
                 { email, name: name || undefined },
                 payment
             );
+        } else {
+            await applyStepayPaymentToRegistration(ev.id, email, {
+                txHash: paymentTx,
+                stepayCheckoutId: checkoutId || undefined,
+            });
         }
 
         const mail = await sendRegistrationEmailsAfterSignup({

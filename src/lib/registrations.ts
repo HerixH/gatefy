@@ -171,6 +171,41 @@ export async function getRegistrationById(registrationId: number): Promise<Regis
 
 export type HostPaymentAction = 'confirm_mobile' | 'reject_mobile' | 'mark_paid_mobile' | 'mark_unpaid';
 
+/** Mark an existing registration paid after Stepay webhook (idempotent if already paid). */
+export async function applyStepayPaymentToRegistration(
+    eventId: string,
+    email: string,
+    payment: { txHash?: string; stepayCheckoutId?: string }
+): Promise<boolean> {
+    if (!isSupabaseConfigured) return false;
+    const existing = await getRegistrationForEvent(eventId, { email });
+    if (!existing?.id) return false;
+    const st = (existing.paymentStatus ?? 'none').toLowerCase();
+    if (st === 'paid_stellar' || st === 'paid_crypto' || st === 'paid_mobile') return true;
+
+    const pay = paymentInsertFields({
+        txHash: payment.txHash,
+        rail: 'stepay',
+        stepayCheckoutId: payment.stepayCheckoutId,
+    });
+    if (pay.payment_status === 'none') return false;
+
+    const { error } = await getSupabase()
+        .from('registrations')
+        .update({
+            payment_status: pay.payment_status,
+            payment_tx_hash: pay.payment_tx_hash,
+            payment_reference: pay.payment_reference,
+            paid_at: pay.paid_at,
+        })
+        .eq('id', existing.id);
+    if (error) {
+        if (isUniquePaymentError(error)) return true;
+        throw error;
+    }
+    return true;
+}
+
 export async function updateRegistrationPaymentByHost(
     registrationId: number,
     action: HostPaymentAction

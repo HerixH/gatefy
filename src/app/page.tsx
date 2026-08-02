@@ -30,9 +30,10 @@ import {
   eventAcceptsStepay,
   eventAcceptsUsdc,
   formatEventTicketSummary,
+  isPaidRegistration,
   validateEventPaymentConfig,
 } from '@/lib/event-payment';
-import { matchesRosterSearch } from '@/lib/organizer-stats';
+import { isUnpaidRegistration, matchesRosterSearch } from '@/lib/organizer-stats';
 
 // USDC on Base Mainnet
 const USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
@@ -114,7 +115,7 @@ interface Event {
   attendeeCount: number;
   maxAttendees?: number;
   registrationCount?: number; // number of people who registered (for remaining seats)
-  /** Paid-ticket events: registrants with payment_status paid_crypto | paid_mobile */
+  /** Paid-ticket events: registrants with payment_status paid_crypto | paid_stellar | paid_mobile */
   paidRegistrationCount?: number;
   /** Paid-ticket events: registered but payment_status still none */
   unpaidRegistrationCount?: number;
@@ -1552,16 +1553,26 @@ function HomeContent() {
       if (ticketP <= 0) return 'Free';
       if (verified) return '—';
       if (!r) return '—';
-      const st = r.paymentStatus ?? 'none';
+      const st = (r.paymentStatus ?? 'none').toLowerCase();
       if (st === 'paid_crypto') return 'USDC';
+      if (st === 'paid_stellar') {
+        return (r.paymentReference ?? '').startsWith('stepay:') ? 'Stepay' : 'Stellar';
+      }
       if (st === 'paid_mobile') return 'Mobile';
       return 'Unpaid';
     };
     const payDetailExport = (r: RegRow | null) => {
       if (!r) return '—';
       const st = (r.paymentStatus ?? '').toLowerCase();
-      if (st === 'paid_crypto' && r.paymentTxHash?.trim()) return r.paymentTxHash.trim();
-      if (st === 'paid_mobile' && r.paymentReference?.trim()) return r.paymentReference.trim();
+      if ((st === 'paid_crypto' || st === 'paid_stellar') && r.paymentTxHash?.trim()) {
+        return r.paymentTxHash.trim();
+      }
+      if (
+        (st === 'paid_mobile' || st === 'paid_stellar') &&
+        r.paymentReference?.trim()
+      ) {
+        return r.paymentReference.trim();
+      }
       return '—';
     };
     type Row = {
@@ -1618,24 +1629,30 @@ function HomeContent() {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return null;
     const ev = selectedEvent;
     const ticketSpot = ev.ticketPriceUsdc ?? 0;
-    const paidRegs = registrations.filter(
-      (r) => (r.paymentStatus ?? '').toLowerCase() === 'paid_crypto' || (r.paymentStatus ?? '').toLowerCase() === 'paid_mobile'
+    const paidRegs = registrations.filter((r) => isPaidRegistration(r.paymentStatus)).length;
+    const unpaidRegs = registrations.filter((r) =>
+      isUnpaidRegistration(r.paymentStatus, ticketSpot)
     ).length;
-    const unpaidRegs = registrations.filter((r) => {
-      const st = (r.paymentStatus ?? 'none').toLowerCase();
-      return st !== 'paid_crypto' && st !== 'paid_mobile';
-    }).length;
     const regPayLabel = (r: RegRow) => {
-      const st = r.paymentStatus ?? 'none';
+      const st = (r.paymentStatus ?? 'none').toLowerCase();
       if (ticketSpot <= 0) return '—';
       if (st === 'paid_crypto') {
         const tx = r.paymentTxHash?.trim();
         return tx && tx.length > 14 ? `Paid · USDC · ${tx.slice(0, 8)}…` : 'Paid · USDC';
       }
+      if (st === 'paid_stellar') {
+        const stepay = (r.paymentReference ?? '').startsWith('stepay:');
+        const tx = r.paymentTxHash?.trim();
+        const label = stepay ? 'Stepay' : 'Stellar';
+        return tx && tx.length > 14 && !tx.startsWith('stepay:')
+          ? `Paid · ${label} · ${tx.slice(0, 8)}…`
+          : `Paid · ${label}`;
+      }
       if (st === 'paid_mobile') {
         const ref = r.paymentReference?.trim();
         return ref ? `Paid · Mobile · ${ref.length > 18 ? `${ref.slice(0, 14)}…` : ref}` : 'Paid · Mobile';
       }
+      if (st === 'pending_mobile') return 'Awaiting host · Mobile';
       if (st === 'none') return 'Unpaid';
       return String(st);
     };

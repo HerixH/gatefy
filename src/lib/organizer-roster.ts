@@ -49,8 +49,12 @@ export function registrationPayLabel(r: OrganizerRegRow, ticketPriceUsdc: number
         return tx && tx.length > 14 ? `Paid · Base · ${tx.slice(0, 8)}…` : 'Paid · Base';
     }
     if (st === 'paid_stellar') {
+        const stepay = (r.paymentReference ?? '').startsWith('stepay:');
         const tx = r.paymentTxHash?.trim();
-        return tx && tx.length > 14 ? `Paid · Stellar · ${tx.slice(0, 8)}…` : 'Paid · Stellar';
+        const label = stepay ? 'Stepay' : 'Stellar';
+        return tx && tx.length > 14 && !tx.startsWith('stepay:')
+            ? `Paid · ${label} · ${tx.slice(0, 8)}…`
+            : `Paid · ${label}`;
     }
     if (st === 'paid_mobile') {
         const ref = r.paymentReference?.trim();
