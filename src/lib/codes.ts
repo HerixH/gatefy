@@ -17,6 +17,12 @@ export interface AttendanceRecord {
     code: string;
     checkedInAt: string;
     eventId?: string;
+    mintChain?: string | null;
+    mintStatus?: string | null;
+    mintTxHash?: string | null;
+    mintTokenId?: string | null;
+    mintError?: string | null;
+    mintedAt?: string | null;
 }
 
 // --- Codes (Supabase-backed for Vercel compatibility) ---
@@ -240,5 +246,11 @@ export async function getAttendance(): Promise<AttendanceRecord[]> {
         code: r.code,
         checkedInAt: r.checked_in_at,
         eventId: r.event_id ?? undefined,
+        mintChain: r.mint_chain ?? null,
+        mintStatus: r.mint_status ?? null,
+        mintTxHash: r.mint_tx_hash ?? null,
+        mintTokenId: r.mint_token_id ?? null,
+        mintError: r.mint_error ?? null,
+        mintedAt: r.minted_at ?? null,
     }));
 }

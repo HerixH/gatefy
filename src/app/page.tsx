@@ -163,6 +163,16 @@ function HomeContent() {
   // Registration
   const [isUserRegistered, setIsUserRegistered] = useState(false);
   const [isUserVerified, setIsUserVerified] = useState(false);
+  /** Persisted Soroban mint receipt for this user’s check-in (null = not verified / unknown). */
+  const [userMint, setUserMint] = useState<{
+    minted: boolean;
+    status?: string | null;
+    txHash?: string | null;
+    tokenId?: string | null;
+    explorerUrl?: string | null;
+    error?: string | null;
+  } | null>(null);
+  const [mintingProof, setMintingProof] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
@@ -224,6 +234,90 @@ function HomeContent() {
   const { writeContract, writeContractAsync, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
   const { isSuccess: isTxConfirmed, isLoading: isTxConfirming } = useWaitForTransactionReceipt({ hash: txHash });
   const wagmiConfig = useConfig();
+
+  const applyVerifiedResponse = (data: {
+    verified?: boolean;
+    minted?: boolean;
+    mint?: {
+      status?: string | null;
+      txHash?: string | null;
+      tokenId?: string | null;
+      explorerUrl?: string | null;
+      error?: string | null;
+      minted?: boolean;
+    } | null;
+  }) => {
+    const verified = !!data.verified;
+    setIsUserVerified(verified);
+    if (!verified || !data.mint) {
+      setUserMint(null);
+      return;
+    }
+    setUserMint({
+      minted: !!data.minted || !!data.mint.minted,
+      status: data.mint.status ?? null,
+      txHash: data.mint.txHash ?? null,
+      tokenId: data.mint.tokenId ?? null,
+      explorerUrl: data.mint.explorerUrl ?? null,
+      error: data.mint.error ?? null,
+    });
+  };
+
+  const mintProofForSelectedEvent = async () => {
+    if (!selectedEvent) return;
+    const stellar = readStellarAddress();
+    if (!stellar) {
+      showWalletToast('Connect Freighter first.');
+      return;
+    }
+    const email = eventRegProfile?.email || readRegCache(selectedEvent.id)?.email;
+    setMintingProof(true);
+    try {
+      const res = await fetch('/api/attendance/mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: selectedEvent.id,
+          email: email || undefined,
+          wallet: address || undefined,
+          stellarAddress: stellar,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setUserMint({
+          minted: true,
+          status: 'minted',
+          txHash: data.txHash ?? null,
+          tokenId: data.tokenId ?? null,
+          explorerUrl: data.explorerUrl ?? null,
+          error: null,
+        });
+        setMintReceipt({
+          ok: true,
+          chain: data.chain,
+          txHash: data.txHash,
+          tokenId: data.tokenId,
+          explorerUrl: data.explorerUrl,
+        });
+        showWalletToast(data.alreadyMinted ? 'Proof already minted.' : 'Minted on Stellar.');
+      } else {
+        setUserMint((prev) => ({
+          minted: false,
+          status: data.status ?? prev?.status ?? 'failed',
+          txHash: prev?.txHash ?? null,
+          tokenId: prev?.tokenId ?? null,
+          explorerUrl: prev?.explorerUrl ?? null,
+          error: data.error || 'Mint failed.',
+        }));
+        showWalletToast(data.error || 'Mint failed.');
+      }
+    } catch {
+      showWalletToast('Network error during mint.');
+    } finally {
+      setMintingProof(false);
+    }
+  };
 
   const applyRosterResponses = (attendeesData: unknown, regsData: unknown) => {
     const attendeeErr =
@@ -305,6 +399,7 @@ function HomeContent() {
     if (!selectedEvent) {
       setIsUserRegistered(false);
       setIsUserVerified(false);
+      setUserMint(null);
       setAttendees([]);
       setRegistrations([]);
       setRosterLoadError(null);
@@ -337,18 +432,24 @@ function HomeContent() {
 
         fetch(`/api/events/verified?eventId=${selectedEvent.id}&wallet=${address}`, { cache: 'no-store' })
           .then((r) => r.json())
-          .then((data) => setIsUserVerified(!!data.verified))
-          .catch(() => setIsUserVerified(false));
+          .then((data) => applyVerifiedResponse(data))
+          .catch(() => {
+            setIsUserVerified(false);
+            setUserMint(null);
+          });
       } else {
         // Email-mode event: registration comes from sessionStorage below, not wallet
         setIsUserVerified(false);
+        setUserMint(null);
       }
     } else if (selectedEvent.isBlockchain !== false) {
       setIsUserRegistered(false);
       setEventRegProfile(null);
       setIsUserVerified(false);
+      setUserMint(null);
     } else {
       setIsUserVerified(false);
+      setUserMint(null);
     }
 
     if (isOwner) {
@@ -398,9 +499,10 @@ function HomeContent() {
                     { cache: 'no-store' }
                   )
                     .then((r2) => r2.json())
-                    .then((v) => setIsUserVerified(!!v.verified));
+                    .then((v) => applyVerifiedResponse(v));
                 }
                 setIsUserVerified(false);
+                setUserMint(null);
               });
           }
         } catch {
@@ -695,6 +797,25 @@ function HomeContent() {
         setScannerStatus(null);
         if (regEmail && ev?.id) {
           writeRegCache(ev.id, { email: regEmail, name: eventRegProfile?.name ?? null });
+        }
+        if (result.mint?.ok) {
+          setUserMint({
+            minted: true,
+            status: 'minted',
+            txHash: result.mint.txHash ?? null,
+            tokenId: result.mint.tokenId ?? null,
+            explorerUrl: result.mint.explorerUrl ?? null,
+            error: null,
+          });
+        } else if (result.mint) {
+          setUserMint({
+            minted: false,
+            status: result.mint.status ?? 'skipped',
+            txHash: null,
+            tokenId: null,
+            explorerUrl: null,
+            error: result.mint.error ?? null,
+          });
         }
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
@@ -2741,12 +2862,49 @@ function HomeContent() {
                             <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                           </div>
                         ) : isUserVerified ? (
-                          <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                          <div className="p-4 border border-white/10 bg-white/[0.02] text-center space-y-3">
                             <div className="flex items-center justify-center gap-2">
                               <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
                               <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
                             </div>
-                            <p className="text-[9px] text-white/25 mt-1">You have checked in for this event.</p>
+                            <p className="text-[9px] text-white/25">You have checked in for this event.</p>
+                            {userMint?.minted ? (
+                              <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
+                                <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">Minted on Stellar</p>
+                                {userMint.tokenId ? (
+                                  <p className="text-[9px] font-mono text-white/40">Token #{userMint.tokenId}</p>
+                                ) : null}
+                                {userMint.explorerUrl ? (
+                                  <a
+                                    href={userMint.explorerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent"
+                                  >
+                                    View proof on Stellar Expert
+                                  </a>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <div className="space-y-2 pt-1 border-t border-white/[0.06]">
+                                <p className="text-[9px] text-amber-400/80">
+                                  {userMint?.error
+                                    ? `Checked in — mint pending: ${userMint.error}`
+                                    : 'Checked in — connect Freighter to mint your on-chain proof.'}
+                                </p>
+                                <ConnectStellarButton
+                                  onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                                />
+                                <button
+                                  type="button"
+                                  disabled={mintingProof}
+                                  onClick={() => void mintProofForSelectedEvent()}
+                                  className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
+                                >
+                                  {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <button
@@ -2900,12 +3058,49 @@ function HomeContent() {
                         <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                       </div>
                     ) : isUserVerified ? (
-                      <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
+                      <div className="p-4 border border-white/10 bg-white/[0.02] text-center space-y-3">
                         <div className="flex items-center justify-center gap-2">
                           <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
                           <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
                         </div>
-                        <p className="text-[9px] text-white/25 mt-1">You have already checked in for this event.</p>
+                        <p className="text-[9px] text-white/25">You have already checked in for this event.</p>
+                        {userMint?.minted ? (
+                          <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">Minted on Stellar</p>
+                            {userMint.tokenId ? (
+                              <p className="text-[9px] font-mono text-white/40">Token #{userMint.tokenId}</p>
+                            ) : null}
+                            {userMint.explorerUrl ? (
+                              <a
+                                href={userMint.explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent"
+                              >
+                                View proof on Stellar Expert
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <div className="space-y-2 pt-1 border-t border-white/[0.06]">
+                            <p className="text-[9px] text-amber-400/80">
+                              {userMint?.error
+                                ? `Checked in — mint pending: ${userMint.error}`
+                                : 'Checked in — connect Freighter to mint your on-chain proof.'}
+                            </p>
+                            <ConnectStellarButton
+                              onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                            />
+                            <button
+                              type="button"
+                              disabled={mintingProof}
+                              onClick={() => void mintProofForSelectedEvent()}
+                              className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
+                            >
+                              {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <button
