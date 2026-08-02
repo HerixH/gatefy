@@ -3527,11 +3527,12 @@ function HomeContent() {
         )}
       </AnimatePresence>
 
-      <footer className="relative z-10 border-t border-white/5 bg-[#050505]">
-        <div className="max-w-[1400px] mx-auto px-6 lg:px-12 py-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-
-          {/* Links — use Link for client-side nav to avoid wallet intercept in Mini App */}
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
+      <footer className="relative z-10 border-t border-white/5 bg-[#050505] w-full max-w-[100vw] overflow-x-clip">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-12 py-5 flex flex-col items-center gap-4">
+          <nav
+            aria-label="Footer"
+            className="w-full grid grid-cols-2 gap-x-3 gap-y-3 sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-x-0 sm:gap-y-2"
+          >
             {[
               { label: 'About', href: '/about' },
               { label: 'Leaderboard', href: '/leaderboard' },
@@ -3539,34 +3540,38 @@ function HomeContent() {
               { label: 'Terms', href: '/terms' },
               { label: 'Privacy', href: '/privacy' },
             ].map((link, i, arr) => (
-              <span key={link.label} className="flex items-center gap-6">
+              <span key={link.label} className="flex items-center justify-center sm:justify-start min-w-0">
                 <Link
                   href={link.href}
                   onClick={(e) => e.stopPropagation()}
-                  className="text-[9px] tracking-[0.3em] uppercase text-white/40 hover:text-white transition-colors font-bold"
+                  className="text-[8px] sm:text-[9px] tracking-[0.14em] sm:tracking-[0.3em] uppercase text-white/40 hover:text-white transition-colors font-bold text-center truncate max-w-full px-1"
                 >
                   {link.label}
                 </Link>
-                {i < arr.length - 1 && (
-                  <span className="text-white/10 text-[10px]">|</span>
-                )}
+                {i < arr.length - 1 ? (
+                  <span className="hidden sm:inline text-white/10 text-[10px] mx-4 select-none" aria-hidden>
+                    |
+                  </span>
+                ) : null}
               </span>
             ))}
-          </div>
+          </nav>
 
-          {/* Right: socials */}
-          <div className="flex items-center gap-4 shrink-0">
-            {/* X / Twitter */}
-            <a href="https://x.com/gatefyprotocol" target="_blank" rel="noopener noreferrer" className="w-7 h-7 border border-white/10 flex items-center justify-center hover:border-white/30 hover:bg-white/5 transition-all">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="text-white/40">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.262 5.637L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z" />
-              </svg>
-            </a>
-          </div>
-
+          <a
+            href="https://x.com/gatefyprotocol"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-7 h-7 border border-white/10 flex items-center justify-center hover:border-white/30 hover:bg-white/5 transition-all shrink-0"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="text-white/40">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.262 5.637L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117L17.083 19.77z" />
+            </svg>
+          </a>
         </div>
-        <div className="border-t border-white/[0.03] py-2 text-center">
-          <span className="text-[7px] font-mono tracking-[0.3em] text-white/15 uppercase">© 2026 GATE PROTOCOL — Built on Base</span>
+        <div className="border-t border-white/[0.03] px-4 py-3 text-center">
+          <span className="block text-[7px] font-mono tracking-[0.12em] sm:tracking-[0.3em] text-white/15 uppercase leading-relaxed">
+            © 2026 GATE PROTOCOL — Built on Base
+          </span>
         </div>
       </footer>
     </div>
