@@ -579,7 +579,7 @@ function HomeContent() {
     commitOrganizerEmailSession(organizerSignInDraft);
   };
 
-  const handleScan = async (data: string) => {
+  const handleScan = async (data: string, emailFromScanner?: string) => {
     if (verifyInFlightRef.current) return;
     const code = String(data || '').trim().toUpperCase();
     if (!code) {
@@ -593,24 +593,27 @@ function HomeContent() {
         ? selectedEvent
         : events.find((e) => e.verificationCode?.toUpperCase() === code) || selectedEvent;
 
-    let regEmail: string | undefined;
-    if (typeof window !== 'undefined' && ev?.id) {
+    let regEmail: string | undefined =
+      (emailFromScanner || '').trim().toLowerCase() ||
+      eventRegProfile?.email?.trim().toLowerCase() ||
+      undefined;
+    if (!regEmail && typeof window !== 'undefined' && ev?.id) {
       try {
         const raw = sessionStorage.getItem(`gatefy-reg-${ev.id}`);
-        if (raw) regEmail = JSON.parse(raw).email as string | undefined;
+        if (raw) regEmail = (JSON.parse(raw).email as string | undefined)?.trim().toLowerCase();
       } catch {
         /* ignore */
       }
     }
     const emailMode = ev?.isBlockchain === false;
     if (emailMode && !regEmail) {
-      const msg = 'Register with your email for this event first, then verify.';
+      const msg = 'Enter the same email you registered with, then authenticate.';
       setScannerStatus(msg);
       showWalletToast(msg);
       return;
     }
     if (!emailMode && !address && !regEmail) {
-      const msg = 'Connect your wallet (or register with email) to verify attendance.';
+      const msg = 'Connect your wallet (or enter your registration email) to verify attendance.';
       setScannerStatus(msg);
       showWalletToast(msg);
       return;
@@ -628,7 +631,7 @@ function HomeContent() {
     try {
       const body: Record<string, string> = { code };
       if (address) body.wallet = address;
-      if (regEmail) body.email = regEmail.trim().toLowerCase();
+      if (regEmail) body.email = regEmail;
       try {
         const stellar = sessionStorage.getItem('gatefy-stellar-address');
         if (stellar && /^G[A-Z0-9]{55}$/.test(stellar)) body.stellarAddress = stellar;
@@ -644,6 +647,16 @@ function HomeContent() {
       if (result.success) {
         setIsUserVerified(true);
         setScannerStatus(null);
+        if (regEmail && ev?.id && typeof window !== 'undefined') {
+          try {
+            sessionStorage.setItem(
+              `gatefy-reg-${ev.id}`,
+              JSON.stringify({ email: regEmail, name: eventRegProfile?.name ?? undefined })
+            );
+          } catch {
+            /* ignore */
+          }
+        }
         if (result.alreadyVerified) {
           showWalletToast(result.message || 'You have already verified attendance for this event.');
         } else {
@@ -1695,6 +1708,17 @@ function HomeContent() {
         if (updated) setSelectedEvent(updated);
       } else if (data.error === 'Already registered') {
         setIsUserRegistered(true);
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            `gatefy-reg-${selectedEvent.id}`,
+            JSON.stringify({ email, name: nameTrim })
+          );
+        }
+        setEventRegProfile({
+          email,
+          name: nameTrim,
+          wallet: null,
+        });
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
       }
@@ -2137,6 +2161,8 @@ function HomeContent() {
             }}
             busy={scanning}
             status={scannerStatus}
+            needEmail={!address || selectedEvent?.isBlockchain === false}
+            initialEmail={eventRegProfile?.email ?? ''}
           />
         )}
       </AnimatePresence>

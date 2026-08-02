@@ -4,19 +4,35 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/library';
 
 interface ScannerProps {
-    onScan: (data: string) => void | Promise<void>;
+    onScan: (data: string, email?: string) => void | Promise<void>;
     onClose: () => void;
     /** Parent is calling /api/verify */
     busy?: boolean;
     /** Inline status / error shown above the actions */
     status?: string | null;
+    /** Email-only events: collect the registration email at the door */
+    needEmail?: boolean;
+    /** Prefill from session / profile */
+    initialEmail?: string;
 }
 
-export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false, status = null }) => {
+export const Scanner: React.FC<ScannerProps> = ({
+    onScan,
+    onClose,
+    busy = false,
+    status = null,
+    needEmail = false,
+    initialEmail = '',
+}) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [manualMode, setManualMode] = useState(true);
     const [manualCode, setManualCode] = useState('');
+    const [email, setEmail] = useState(initialEmail);
     const submittingRef = useRef(false);
+
+    useEffect(() => {
+        setEmail(initialEmail);
+    }, [initialEmail]);
 
     useEffect(() => {
         if (manualMode || busy) return;
@@ -25,8 +41,14 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
         if (videoRef.current) {
             codeReader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
                 if (result && !submittingRef.current) {
+                    if (needEmail && !email.trim()) {
+                        setManualMode(true);
+                        return;
+                    }
                     submittingRef.current = true;
-                    void Promise.resolve(onScan(result.getText().trim().toUpperCase())).finally(() => {
+                    void Promise.resolve(
+                        onScan(result.getText().trim().toUpperCase(), email.trim() || undefined)
+                    ).finally(() => {
                         submittingRef.current = false;
                     });
                     codeReader.reset();
@@ -40,15 +62,16 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
         return () => {
             codeReader.reset();
         };
-    }, [onScan, manualMode, busy]);
+    }, [onScan, manualMode, busy, needEmail, email]);
 
     const handleManualSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (busy || submittingRef.current) return;
         const code = manualCode.trim().toUpperCase();
         if (!code) return;
+        if (needEmail && !email.trim()) return;
         submittingRef.current = true;
-        void Promise.resolve(onScan(code)).finally(() => {
+        void Promise.resolve(onScan(code, email.trim() || undefined)).finally(() => {
             submittingRef.current = false;
         });
     };
@@ -67,7 +90,7 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
                     </div>
                 </div>
 
-                <div className="relative aspect-video bg-neutral-950 overflow-hidden flex items-center justify-center">
+                <div className="relative min-h-[220px] aspect-video bg-neutral-950 overflow-hidden flex items-center justify-center">
                     {!manualMode ? (
                         <>
                             <video ref={videoRef} className="w-full h-full object-cover opacity-60 grayscale" />
@@ -81,7 +104,7 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
                             </div>
                         </>
                     ) : (
-                        <form onSubmit={handleManualSubmit} className="w-full px-6 lg:px-12 space-y-6">
+                        <form onSubmit={handleManualSubmit} className="w-full px-6 lg:px-12 space-y-5 py-4">
                             <div className="space-y-3">
                                 <label className="text-[10px] uppercase tracking-[0.4em] text-white/50 font-bold block text-center">
                                     Enter Verification Code
@@ -96,9 +119,25 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
                                     className="w-full bg-white/[0.03] border border-white/10 px-6 py-4 text-center text-xl lg:text-2xl font-mono text-white placeholder:text-white/10 focus:outline-none focus:border-white/30 transition-all tracking-[0.3em] uppercase disabled:opacity-50"
                                 />
                             </div>
+                            {needEmail ? (
+                                <div className="space-y-3">
+                                    <label className="text-[10px] uppercase tracking-[0.4em] text-white/50 font-bold block text-center">
+                                        Registration email
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        disabled={busy}
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        placeholder="you@example.com"
+                                        autoComplete="email"
+                                        className="w-full bg-white/[0.03] border border-white/10 px-4 py-3 text-center text-sm font-mono text-white placeholder:text-white/10 focus:outline-none focus:border-white/30 transition-all disabled:opacity-50"
+                                    />
+                                </div>
+                            ) : null}
                             <button
                                 type="submit"
-                                disabled={busy || !manualCode.trim()}
+                                disabled={busy || !manualCode.trim() || (needEmail && !email.trim())}
                                 className="w-full py-4 border border-white/20 hover:bg-white hover:text-black transition-all text-[10px] font-bold tracking-[0.3em] uppercase disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-inherit"
                             >
                                 {busy ? 'Verifying attendance…' : 'Authenticate Manual Input'}
@@ -120,7 +159,7 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
                     {status ? (
                         <p
                             className={`text-[10px] uppercase tracking-[0.14em] font-semibold text-center leading-relaxed px-2 ${
-                                /fail|denied|invalid|register|connect|closed|error|network/i.test(status)
+                                /fail|denied|invalid|register|connect|closed|error|network|email/i.test(status)
                                     ? 'text-amber-300/90'
                                     : 'text-white/70'
                             }`}
@@ -131,9 +170,11 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose, busy = false,
                         <p className="text-secondary text-[10px] uppercase tracking-[0.2em] font-light text-center opacity-80">
                             {busy
                                 ? 'Hang tight — check-in can take a few seconds (mint may follow).'
-                                : manualMode
-                                  ? 'Verification codes are 8-character alphanumeric strings issued by event organizers.'
-                                  : 'Position the verification code within the optical focus frame to authenticate.'}
+                                : needEmail
+                                  ? 'Use the same email you registered with for this event.'
+                                  : manualMode
+                                    ? 'Verification codes are 8-character alphanumeric strings issued by event organizers.'
+                                    : 'Position the verification code within the optical focus frame to authenticate.'}
                         </p>
                     )}
 
