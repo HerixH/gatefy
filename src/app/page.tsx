@@ -10,9 +10,11 @@ import { waitForTransactionReceipt } from '@wagmi/core';
 import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Scanner } from '@/components/Scanner';
+import { ConnectStellarButton } from '@/components/ConnectStellarButton';
 import { CreateEventWizard } from '@/components/CreateEventWizard';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
 import { EventLocationField } from '@/components/EventLocationField';
+import { readStellarAddress } from '@/lib/stellar-session';
 import {
   isEventOrganizer,
   formatOrganizerShort,
@@ -666,12 +668,8 @@ function HomeContent() {
       const body: Record<string, string> = { code };
       if (address) body.wallet = address;
       if (regEmail) body.email = regEmail;
-      try {
-        const stellar = sessionStorage.getItem('gatefy-stellar-address');
-        if (stellar && /^G[A-Z0-9]{55}$/.test(stellar)) body.stellarAddress = stellar;
-      } catch {
-        /* ignore */
-      }
+      const stellar = readStellarAddress();
+      if (stellar) body.stellarAddress = stellar;
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1801,7 +1799,8 @@ function HomeContent() {
           </Link>
         </nav>
 
-        <div className="pointer-events-auto shrink-0 scale-[0.72] sm:scale-90 lg:scale-100 origin-right">
+        <div className="pointer-events-auto shrink-0 flex items-center gap-2 scale-[0.72] sm:scale-90 lg:scale-100 origin-right">
+          <ConnectStellarButton compact />
           <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
         </div>
       </header>
@@ -2169,18 +2168,27 @@ function HomeContent() {
       {/* Scanner */}
       <AnimatePresence>
         {showScanner && (
-          <Scanner
-            onScan={handleScan}
-            onClose={() => {
-              if (scanning) return;
-              setScannerStatus(null);
-              setShowScanner(false);
-            }}
-            busy={scanning}
-            status={scannerStatus}
-            needEmail={!address || selectedEvent?.isBlockchain === false}
-            initialEmail={eventRegProfile?.email ?? ''}
-          />
+          <div className="fixed inset-0 z-[300]">
+            <div className="absolute top-4 right-4 z-[310] w-[min(16rem,calc(100vw-2rem))] pointer-events-auto">
+              <ConnectStellarButton
+                onConnected={() =>
+                  setScannerStatus('Freighter connected — authenticate to mint on Soroban.')
+                }
+              />
+            </div>
+            <Scanner
+              onScan={handleScan}
+              onClose={() => {
+                if (scanning) return;
+                setScannerStatus(null);
+                setShowScanner(false);
+              }}
+              busy={scanning}
+              status={scannerStatus}
+              needEmail={!address || selectedEvent?.isBlockchain === false}
+              initialEmail={eventRegProfile?.email ?? ''}
+            />
+          </div>
         )}
       </AnimatePresence>
 
@@ -3041,13 +3049,63 @@ function HomeContent() {
                   ? 'Your attendance proof was minted on Soroban. Base minting comes later.'
                   : mintReceipt?.error
                     ? `Checked in. Mint: ${mintReceipt.error}`
-                    : 'Your presence is recorded. Connect a Stellar wallet before verify to mint on Soroban.'}
+                    : 'Your presence is recorded. Connect Freighter to mint on Soroban.'}
               </p>
               {mintReceipt?.ok && mintReceipt.tokenId ? (
                 <p className="text-[10px] font-mono text-white/40 mb-8">
                   Token #{mintReceipt.tokenId}
                   {mintReceipt.txHash ? ` · ${mintReceipt.txHash.slice(0, 10)}…` : ''}
                 </p>
+              ) : null}
+              {!mintReceipt?.ok && selectedEvent ? (
+                <div className="w-full max-w-xs mx-auto mb-8 space-y-3">
+                  <ConnectStellarButton
+                    onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                  />
+                  <button
+                    type="button"
+                    className="w-full py-3 border border-white/20 hover:bg-white hover:text-black transition-colors text-[10px] font-bold tracking-[0.2em] uppercase"
+                    onClick={async () => {
+                      const stellar = readStellarAddress();
+                      if (!stellar) {
+                        showWalletToast('Connect Freighter first.');
+                        return;
+                      }
+                      const email = eventRegProfile?.email || readRegCache(selectedEvent.id)?.email;
+                      try {
+                        const res = await fetch('/api/attendance/mint', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            eventId: selectedEvent.id,
+                            email: email || undefined,
+                            wallet: address || undefined,
+                            stellarAddress: stellar,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.ok) {
+                          setMintReceipt({
+                            ok: true,
+                            chain: data.chain,
+                            txHash: data.txHash,
+                            tokenId: data.tokenId,
+                            explorerUrl: data.explorerUrl,
+                          });
+                          showWalletToast(
+                            data.alreadyMinted ? 'Proof already minted.' : 'Minted on Stellar.'
+                          );
+                        } else {
+                          showWalletToast(data.error || 'Mint failed.');
+                        }
+                      } catch {
+                        showWalletToast('Network error during mint.');
+                      }
+                    }}
+                  >
+                    Mint proof on Stellar
+                  </button>
+                </div>
               ) : null}
               <div className="flex flex-col gap-6 items-center">
                 <button
