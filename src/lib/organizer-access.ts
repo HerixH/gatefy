@@ -49,6 +49,39 @@ export async function requireOrganizerSessionForEvent(
     return { ok: true, session };
 }
 
+/**
+ * Read-only host roster access.
+ * 1) Verified cookie session (preferred)
+ * 2) Claimed organizer email/wallet that matches the event (homepage host session)
+ */
+export async function requireOrganizerListAccess(
+    eventOrganizer: string,
+    claimed?: { organizerWallet?: string | null; organizerEmail?: string | null }
+): Promise<
+    | { ok: true; session: OrganizerSession | null }
+    | { ok: false; status: number; error: string }
+> {
+    const session = await getOrganizerSessionFromCookies();
+    if (session && verifiedSessionOwnsEvent(session, eventOrganizer, claimed)) {
+        return { ok: true, session };
+    }
+    if (serverOrganizerMatchesEvent(eventOrganizer, claimed || {})) {
+        return { ok: true, session };
+    }
+    if (!session) {
+        return {
+            ok: false,
+            status: 401,
+            error: 'Sign in as host first (same email/wallet used to create this event).',
+        };
+    }
+    return {
+        ok: false,
+        status: 403,
+        error: 'Only the event organizer can view this roster.',
+    };
+}
+
 export async function getVerifiedOrganizerSession(): Promise<OrganizerSession | null> {
     return getOrganizerSessionFromCookies();
 }

@@ -5,7 +5,11 @@ import {
     updateRegistrationPaymentByHost,
     type HostPaymentAction,
 } from '@/lib/registrations';
-import { findEventByIdCaseInsensitive, requireOrganizerSessionForEvent } from '@/lib/organizer-access';
+import {
+    findEventByIdCaseInsensitive,
+    requireOrganizerListAccess,
+    requireOrganizerSessionForEvent,
+} from '@/lib/organizer-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +29,7 @@ export async function GET(request: Request) {
             return NextResponse.json({ error: 'Event not found' }, { status: 404 });
         }
 
-        const auth = await requireOrganizerSessionForEvent(event.organizer, {
+        const auth = await requireOrganizerListAccess(event.organizer, {
             organizerWallet,
             organizerEmail,
         });

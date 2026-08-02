@@ -19,6 +19,8 @@ import {
   isEventOrganizer,
   formatOrganizerShort,
   isEmailOrganizerId,
+  organizerListAuthSuffixForEvent,
+  organizerManagedQueryString,
 } from '@/lib/event-organizer';
 import {
   eventAcceptsMobileMoney,
@@ -183,6 +185,7 @@ function HomeContent() {
   };
   const [registrations, setRegistrations] = useState<RegRow[]>([]);
   const [loadingAttendees, setLoadingAttendees] = useState(false);
+  const [rosterLoadError, setRosterLoadError] = useState<string | null>(null);
   const [rosterSearch, setRosterSearch] = useState('');
   type RosterDetail =
     | {
@@ -209,39 +212,49 @@ function HomeContent() {
     [address, organizerSessionEmail]
   );
 
-  /** Required on `/api/events/registrations` and `/api/events/attendees` (organizer-only). */
+  /** Required on `/api/events/registrations` and `/api/events/attendees` (must match this event’s organizer). */
   const organizerListAuthSuffix = useMemo(() => {
-    if (address) return `&organizerWallet=${encodeURIComponent(address)}`;
-    if (organizerSessionEmail) return `&organizerEmail=${encodeURIComponent(organizerSessionEmail)}`;
-    return '';
-  }, [address, organizerSessionEmail]);
+    if (!selectedEvent) return '';
+    return organizerListAuthSuffixForEvent(selectedEvent.organizer, orgCtx);
+  }, [selectedEvent, orgCtx]);
 
-  /** Query string for GET /api/events/managed (no leading `?`). */
-  const managedEventsQuerySuffix = useMemo(() => {
-    if (address) return `organizerWallet=${encodeURIComponent(address)}`;
-    if (organizerSessionEmail) return `organizerEmail=${encodeURIComponent(organizerSessionEmail)}`;
-    return '';
-  }, [address, organizerSessionEmail]);
+  /** Query string for GET `/api/events/managed` (no leading `?`). */
+  const managedEventsQuerySuffix = useMemo(() => organizerManagedQueryString(orgCtx), [orgCtx]);
 
   const { writeContract, writeContractAsync, data: txHash, isPending: isTxPending, error: txError } = useWriteContract();
   const { isSuccess: isTxConfirmed, isLoading: isTxConfirming } = useWaitForTransactionReceipt({ hash: txHash });
   const wagmiConfig = useConfig();
 
+  const applyRosterResponses = (attendeesData: unknown, regsData: unknown) => {
+    const attendeeErr =
+      attendeesData && typeof attendeesData === 'object' && !Array.isArray(attendeesData)
+        ? String((attendeesData as { error?: string }).error || '')
+        : '';
+    const regErr =
+      regsData && typeof regsData === 'object' && !Array.isArray(regsData)
+        ? String((regsData as { error?: string }).error || '')
+        : '';
+    const err = attendeeErr || regErr;
+    setRosterLoadError(err || null);
+    setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
+    setRegistrations(Array.isArray(regsData) ? regsData : []);
+    if (err) showWalletToast(err);
+  };
+
   const refetchOrganizerLists = () => {
     if (!selectedEvent || !isEventOrganizer(selectedEvent.organizer, orgCtx)) return;
     if (!organizerListAuthSuffix) {
+      setRosterLoadError('Sign in with the same wallet or browser session you used to create this event.');
       showWalletToast('Sign in with the same wallet or browser session you used to create this event.');
       return;
     }
     setLoadingAttendees(true);
+    setRosterLoadError(null);
     Promise.all([
       fetch(`/api/events/attendees?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then(r => r.json()),
       fetch(`/api/events/registrations?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then(r => r.json()),
     ])
-      .then(([attendeesData, regsData]) => {
-        setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
-        setRegistrations(Array.isArray(regsData) ? regsData : []);
-      })
+      .then(([attendeesData, regsData]) => applyRosterResponses(attendeesData, regsData))
       .finally(() => setLoadingAttendees(false));
   };
 
@@ -294,6 +307,7 @@ function HomeContent() {
       setIsUserVerified(false);
       setAttendees([]);
       setRegistrations([]);
+      setRosterLoadError(null);
       setEventRegProfile(null);
       return;
     }
@@ -341,21 +355,21 @@ function HomeContent() {
       if (!organizerListAuthSuffix) {
         setAttendees([]);
         setRegistrations([]);
+        setRosterLoadError('Sign in with the same wallet or browser session you used to create this event.');
         return;
       }
       setLoadingAttendees(true);
+      setRosterLoadError(null);
       Promise.all([
         fetch(`/api/events/attendees?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then((r) => r.json()),
         fetch(`/api/events/registrations?eventId=${selectedEvent.id}${organizerListAuthSuffix}`, { cache: 'no-store' }).then((r) => r.json()),
       ])
-        .then(([attendeesData, regsData]) => {
-          setAttendees(Array.isArray(attendeesData) ? attendeesData : []);
-          setRegistrations(Array.isArray(regsData) ? regsData : []);
-        })
+        .then(([attendeesData, regsData]) => applyRosterResponses(attendeesData, regsData))
         .finally(() => setLoadingAttendees(false));
     } else {
       setAttendees([]);
       setRegistrations([]);
+      setRosterLoadError(null);
     }
 
     // For non-blockchain events: restore local email hint, then confirm against Supabase
@@ -1279,6 +1293,9 @@ function HomeContent() {
                 {registrations.length} registered · {attendees.length} verified
                 {!organizerListAuthSuffix ? ' — connect the organizer wallet or use the same browser after email signup' : ''}
               </p>
+              {rosterLoadError ? (
+                <p className="text-[9px] text-amber-400/90 mt-1 font-mono">{rosterLoadError}</p>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
