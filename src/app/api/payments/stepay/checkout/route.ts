@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getEventById } from '@/lib/events';
 import { eventAcceptsStepay } from '@/lib/event-payment';
-import { isRegistered, isRegisteredByEmail } from '@/lib/registrations';
+import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
 import { appPublicUrl, createStepayCheckout, stepayConfigured } from '@/lib/stepay';
 
 export const dynamic = 'force-dynamic';
@@ -63,13 +63,33 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'This event is free — register without Stepay.' }, { status: 400 });
     }
 
-    if (wallet) {
-        if (await isRegistered(ev.id, wallet)) {
-            return NextResponse.json({ error: 'Already registered' }, { status: 400 });
-        }
+    if (wallet && (await isRegistered(ev.id, wallet))) {
+        const row = await getRegistrationForEvent(ev.id, { wallet });
+        return NextResponse.json(
+            {
+                error: 'Already registered',
+                alreadyRegistered: true,
+                registered: true,
+                email: row?.email ?? email,
+                name: row?.name ?? name,
+                wallet: row?.wallet ?? wallet,
+            },
+            { status: 409 }
+        );
     }
     if (await isRegisteredByEmail(ev.id, email)) {
-        return NextResponse.json({ error: 'Already registered' }, { status: 400 });
+        const row = await getRegistrationForEvent(ev.id, { email });
+        return NextResponse.json(
+            {
+                error: 'Already registered',
+                alreadyRegistered: true,
+                registered: true,
+                email: row?.email ?? email,
+                name: row?.name ?? name,
+                wallet: row?.wallet ?? wallet ?? null,
+            },
+            { status: 409 }
+        );
     }
 
     const base = appPublicUrl();

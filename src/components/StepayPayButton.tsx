@@ -9,12 +9,25 @@ type Props = {
     wallet?: string | null;
     amountUsdc: number;
     disabled?: boolean;
+    onAlreadyRegistered?: (info: {
+        email?: string | null;
+        name?: string | null;
+        wallet?: string | null;
+    }) => void;
 };
 
 /**
  * Starts a Stepay checkout (mobile money → USDC). Docs: https://stepay.pro/developers
  */
-export function StepayPayButton({ eventId, email, name, wallet, amountUsdc, disabled }: Props) {
+export function StepayPayButton({
+    eventId,
+    email,
+    name,
+    wallet,
+    amountUsdc,
+    disabled,
+    onAlreadyRegistered,
+}: Props) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
 
@@ -34,6 +47,17 @@ export function StepayPayButton({ eventId, email, name, wallet, amountUsdc, disa
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) {
+                if (
+                    data.alreadyRegistered === true ||
+                    data.error === 'Already registered'
+                ) {
+                    onAlreadyRegistered?.({
+                        email: data.email ?? email.trim().toLowerCase(),
+                        name: data.name ?? name.trim(),
+                        wallet: data.wallet ?? wallet ?? null,
+                    });
+                    return;
+                }
                 setError(typeof data.error === 'string' ? data.error : 'Could not start Stepay checkout.');
                 return;
             }

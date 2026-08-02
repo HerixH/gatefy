@@ -37,6 +37,25 @@ function ticketPrice(ev: { ticketPriceUsdc?: number } | null | undefined): numbe
     return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+async function alreadyRegisteredResponse(
+    eventId: string,
+    lookup: { email?: string; wallet?: string }
+) {
+    const row = await getRegistrationForEvent(eventId, lookup);
+    return NextResponse.json(
+        {
+            error: 'Already registered',
+            alreadyRegistered: true,
+            registered: true,
+            email: row?.email ?? lookup.email?.trim().toLowerCase() ?? null,
+            name: row?.name ?? null,
+            wallet: row?.wallet ?? lookup.wallet?.trim() ?? null,
+            paymentStatus: row?.paymentStatus ?? null,
+        },
+        { status: 409 }
+    );
+}
+
 function paymentExplorerForRail(
     rail: 'base' | 'stellar' | 'stepay' | undefined,
     txHash: string | undefined
@@ -208,19 +227,11 @@ export async function POST(request: Request) {
             }
             const cleanWallet = String(wallet).trim();
             if (await isRegistered(eventId, cleanWallet)) {
-                return NextResponse.json({ error: 'Already registered' }, { status: 400 });
+                return alreadyRegisteredResponse(eventId, { wallet: cleanWallet });
             }
             if (await isRegisteredByEmail(eventId, emailStr)) {
-                const existing = await getRegistrationForEvent(eventId, { email: emailStr });
-                const ew = existing?.wallet?.toLowerCase();
-                const cw = cleanWallet.toLowerCase();
-                if (ew === cw) {
-                    return NextResponse.json({ error: 'Already registered' }, { status: 400 });
-                }
-                return NextResponse.json(
-                    { error: 'This email is already registered for this event' },
-                    { status: 400 }
-                );
+                // Same person or same email — open their existing ticket instead of blocking.
+                return alreadyRegisteredResponse(eventId, { email: emailStr });
             }
 
             const paid = await resolvePaidTicketOpts(ev ?? paymentDefaults, price, body);
@@ -310,7 +321,7 @@ export async function POST(request: Request) {
                 return NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 });
             }
             if (await isRegisteredByEmail(eventId, emailStr)) {
-                return NextResponse.json({ error: 'Already registered' }, { status: 400 });
+                return alreadyRegisteredResponse(eventId, { email: emailStr });
             }
 
             const paid = await resolvePaidTicketOpts(ev ?? paymentDefaults, price, body);

@@ -287,6 +287,80 @@ function HomeContent() {
     });
   };
 
+  /** When signup hits an existing registration, open their ticket details instead of an error. */
+  const resumeExistingRegistration = async (opts: {
+    eventId: string;
+    email?: string | null;
+    name?: string | null;
+    wallet?: string | null;
+  }) => {
+    let email = (opts.email || '').trim().toLowerCase();
+    let name = (opts.name || '').trim() || null;
+    let wallet = (opts.wallet || '').trim() || null;
+
+    try {
+      const q = email
+        ? `email=${encodeURIComponent(email)}`
+        : wallet
+          ? `wallet=${encodeURIComponent(wallet)}`
+          : '';
+      if (q) {
+        const res = await fetch(`/api/register?eventId=${encodeURIComponent(opts.eventId)}&${q}`, {
+          cache: 'no-store',
+        });
+        const data = await res.json();
+        if (data.registered) {
+          if (data.email) email = String(data.email).trim().toLowerCase();
+          if (data.name) name = String(data.name).trim();
+          if (data.wallet) wallet = String(data.wallet).trim();
+        }
+      }
+    } catch {
+      /* use provided identity */
+    }
+
+    if (email) {
+      writeRegCache(opts.eventId, { email, name });
+      setNormalSignupEmail(email);
+      if (name) setNormalSignupName(name);
+    }
+
+    setIsUserRegistered(true);
+    setEventRegProfile({
+      email: email || null,
+      name,
+      wallet,
+    });
+
+    try {
+      if (email) {
+        const vRes = await fetch(
+          `/api/events/verified?eventId=${encodeURIComponent(opts.eventId)}&email=${encodeURIComponent(email)}`,
+          { cache: 'no-store' }
+        );
+        applyVerifiedResponse(await vRes.json());
+      } else if (wallet) {
+        const vRes = await fetch(
+          `/api/events/verified?eventId=${encodeURIComponent(opts.eventId)}&wallet=${encodeURIComponent(wallet)}`,
+          { cache: 'no-store' }
+        );
+        applyVerifiedResponse(await vRes.json());
+      }
+    } catch {
+      /* ignore */
+    }
+
+    showWalletToast("You're already registered — here's your ticket.");
+  };
+
+  const isAlreadyRegisteredResponse = (data: {
+    alreadyRegistered?: boolean;
+    error?: string;
+  }) =>
+    data.alreadyRegistered === true ||
+    data.error === 'Already registered' ||
+    data.error === 'This email is already registered for this event';
+
   const mintChainLabel = (chain?: string | null) => {
     const c = (chain || '').toLowerCase();
     if (c === 'base') return 'Base';
@@ -2043,8 +2117,13 @@ function HomeContent() {
         const list = await fetchEvents();
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
-      } else if (data.error === 'Already registered') {
-        setIsUserRegistered(true);
+      } else if (isAlreadyRegisteredResponse(data)) {
+        await resumeExistingRegistration({
+          eventId: selectedEvent.id,
+          email: data.email ?? emailTrim,
+          name: data.name ?? nameTrim,
+          wallet: data.wallet ?? address,
+        });
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
       }
@@ -2122,13 +2201,12 @@ function HomeContent() {
         const list = await fetchEvents();
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
-      } else if (data.error === 'Already registered') {
-        setIsUserRegistered(true);
-        writeRegCache(selectedEvent.id, { email, name: nameTrim });
-        setEventRegProfile({
-          email,
-          name: nameTrim,
-          wallet: null,
+      } else if (isAlreadyRegisteredResponse(data)) {
+        await resumeExistingRegistration({
+          eventId: selectedEvent.id,
+          email: data.email ?? email,
+          name: data.name ?? nameTrim,
+          wallet: data.wallet ?? null,
         });
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
@@ -3193,6 +3271,14 @@ function HomeContent() {
                               name={normalSignupName}
                               amountUsdc={selectedEvent.ticketPriceUsdc!}
                               disabled={registering}
+                              onAlreadyRegistered={(info) => {
+                                void resumeExistingRegistration({
+                                  eventId: selectedEvent.id,
+                                  email: info.email ?? normalSignupEmail,
+                                  name: info.name ?? normalSignupName,
+                                  wallet: info.wallet ?? null,
+                                });
+                              }}
                             />
                           ) : null}
                           {(selectedEvent.ticketPriceUsdc ?? 0) <= 0 ||
