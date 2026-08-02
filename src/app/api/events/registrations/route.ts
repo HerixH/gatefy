@@ -112,6 +112,28 @@ export async function PATCH(request: Request) {
             return NextResponse.json({ error: 'Registration not found' }, { status: 404 });
         }
 
+        // When host verifies mobile payment → send receipt + registration confirmation.
+        if (
+            (action === 'confirm_mobile' || action === 'mark_paid_mobile') &&
+            updated.email &&
+            (updated.paymentStatus || '').toLowerCase() === 'paid_mobile'
+        ) {
+            const price = Number(event.ticketPriceUsdc);
+            void import('@/lib/email')
+                .then(({ sendRegistrationEmailsAfterSignup }) =>
+                    sendRegistrationEmailsAfterSignup({
+                        to: updated.email!,
+                        event,
+                        attendeeName: updated.name,
+                        ticketPriceUsdc: Number.isFinite(price) && price > 0 ? price : undefined,
+                        paymentLabel: 'mobile money (host verified)',
+                        paymentReference: updated.paymentReference,
+                        paymentVerified: true,
+                    })
+                )
+                .catch((e) => console.error('[registrations] paid emails failed:', e));
+        }
+
         return NextResponse.json(updated, {
             headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' },
         });

@@ -7,7 +7,7 @@ import {
     registerForEvent,
     registerForEventWithEmail,
 } from '@/lib/registrations';
-import { sendRegistrationConfirmationEmail } from '@/lib/email';
+import { sendRegistrationEmailsAfterSignup } from '@/lib/email';
 import { stellarExplorerTxUrl } from '@/lib/attendance-mint';
 import {
     stepayConfigured,
@@ -24,10 +24,10 @@ function paymentExplorerUrl(txHash: string): string | null {
 }
 
 /**
- * Stepay checkout.paid webhook.
- * Registers the attendee, emails a payment receipt (Stepay tx is the on-chain receipt).
- * Attendance POAP still mints at check-in / mint CTA.
- * Docs: https://stepay.pro/developers
+ * Stepay checkout.paid:
+ * 1) Verify payment (Stepay webhook + Stellar tx)
+ * 2) Create registration
+ * 3) Email payment receipt + registration confirmation
  */
 export async function POST(request: Request) {
     if (!stepayConfigured()) {
@@ -108,8 +108,7 @@ export async function POST(request: Request) {
             );
         }
 
-        // Payment receipt email (Stepay USDC tx = on-chain payment receipt).
-        const mailed = await sendRegistrationConfirmationEmail({
+        const mail = await sendRegistrationEmailsAfterSignup({
             to: email,
             event: ev,
             attendeeName: name || null,
@@ -117,17 +116,17 @@ export async function POST(request: Request) {
             paymentLabel: 'Stepay (USDC on Stellar)',
             paymentTxHash: paymentTx.startsWith('stepay:') ? null : paymentTx,
             paymentExplorerUrl: explorer,
+            paymentVerified: true,
         });
-
-        if (!mailed.ok && !mailed.skipped) {
-            console.error('[stepay webhook] receipt email failed:', mailed.error);
-        }
 
         return NextResponse.json({
             ok: true,
             registered: true,
             newlyRegistered,
-            receiptEmailed: mailed.ok || !!mailed.skipped,
+            paymentVerified: true,
+            emailSent: mail.emailSent,
+            receiptSent: mail.receiptSent,
+            confirmationSent: mail.confirmationSent,
             paymentTx: paymentTx.startsWith('stepay:') ? null : paymentTx,
             paymentExplorerUrl: explorer,
         });

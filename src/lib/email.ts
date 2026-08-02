@@ -195,43 +195,145 @@ function verificationCodeBlock(code: string, qrImgSrc: string | null): string {
 }
 
 /** Sends via Resend when RESEND_API_KEY is set; otherwise logs and no-ops. */
+type MailResult = { ok: boolean; skipped?: boolean; error?: string };
+
+/** Payment receipt only (paid tickets after payment is verified). */
+export async function sendPaymentReceiptEmail(opts: {
+    to: string;
+    event: Event;
+    attendeeName?: string | null;
+    ticketPriceUsdc: number;
+    paymentLabel?: string;
+    paymentTxHash?: string | null;
+    paymentExplorerUrl?: string | null;
+    paymentReference?: string | null;
+}): Promise<MailResult> {
+    const key = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+    const {
+        to,
+        event,
+        attendeeName,
+        ticketPriceUsdc,
+        paymentLabel,
+        paymentTxHash,
+        paymentExplorerUrl,
+        paymentReference,
+    } = opts;
+    const origin = appOrigin();
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const subject = `Payment receipt · ${event.name}`;
+    const text = [
+        `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
+        '',
+        `This is your payment receipt for "${event.name}".`,
+        `Amount: ${ticketPriceUsdc} USDC${paymentLabel ? ` (${paymentLabel})` : ''}`,
+        paymentTxHash ? `Payment tx: ${paymentTxHash}` : '',
+        paymentReference ? `Reference: ${paymentReference}` : '',
+        paymentExplorerUrl ? `Explorer: ${paymentExplorerUrl}` : '',
+        '',
+        `When: ${formatEventWhen(event)}`,
+        event.location ? `Where: ${event.location}` : '',
+        '',
+        `Event: ${link}`,
+        '',
+        `— ${brandName()}`,
+    ]
+        .filter(Boolean)
+        .join('\n');
+
+    const greet = attendeeName
+        ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,`
+        : 'Hi there,';
+    const explorerLabel = paymentExplorerUrl?.includes('basescan')
+        ? 'View payment on Basescan'
+        : 'View payment on explorer';
+    const inner = `
+<p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  ${greet}
+</p>
+<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  Payment verified for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>. Keep this email as your receipt.
+</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;">
+  <tr>
+    <td style="padding:14px 18px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:${C.text};">
+      <strong style="color:${C.accent};">Receipt</strong> · ${escapeHtml(String(ticketPriceUsdc))} USDC${
+          paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''
+      }${
+          paymentTxHash
+              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Tx ${escapeHtml(
+                    paymentTxHash.length > 24
+                        ? `${paymentTxHash.slice(0, 10)}…${paymentTxHash.slice(-8)}`
+                        : paymentTxHash
+                )}</span>`
+              : ''
+      }${
+          paymentReference
+              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Ref ${escapeHtml(paymentReference)}</span>`
+              : ''
+      }
+    </td>
+  </tr>
+</table>
+${detailRow('When', formatEventWhen(event))}
+${event.location ? detailRow('Where', event.location) : ''}
+${paymentExplorerUrl ? bulletproofButtonHref(paymentExplorerUrl, explorerLabel) : ''}
+${bulletproofButtonHref(link, 'Open event')}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+  A separate email confirms your registration and includes your check-in QR.
+</p>`;
+
+    const html = emailShell({ preheader: `Receipt · ${ticketPriceUsdc} USDC · ${event.name}`, innerHtml: inner });
+
+    if (!key) {
+        console.warn('[email] RESEND_API_KEY not set; skipping payment receipt to', to);
+        return { ok: false, skipped: true };
+    }
+
+    const res = await fetch(RESEND_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from, to: [to], subject, html, text }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const err = typeof body?.message === 'string' ? body.message : JSON.stringify(body);
+        console.error('[email] Resend error (receipt):', res.status, err);
+        return { ok: false, error: err };
+    }
+    return { ok: true };
+}
+
+/** Registration confirmed — check-in QR / code (always sent after successful signup). */
 export async function sendRegistrationConfirmationEmail(opts: {
     to: string;
     event: Event;
     attendeeName?: string | null;
-    /** If set, email mentions paid ticket */
     ticketPriceUsdc?: number;
     paymentLabel?: string;
-    /** On-chain / Stepay payment proof */
     paymentTxHash?: string | null;
     paymentExplorerUrl?: string | null;
-}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+}): Promise<MailResult> {
     const key = process.env.RESEND_API_KEY?.trim();
     const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
 
-    const { to, event, attendeeName, ticketPriceUsdc, paymentLabel, paymentTxHash, paymentExplorerUrl } = opts;
+    const { to, event, attendeeName, ticketPriceUsdc, paymentLabel } = opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
     const qrBase64 = await qrPngBase64ForEmail(event.verificationCode);
     const qrImgSrc = qrBase64 ? `cid:${CHECKIN_QR_CONTENT_ID}` : null;
     const paid = ticketPriceUsdc != null && ticketPriceUsdc > 0;
 
-    const subject = paid
-        ? `Payment receipt · ${event.name}`
-        : `You're registered · ${event.name}`;
-    const ticketLine =
-        paid
-            ? `Ticket: ${ticketPriceUsdc}${paymentLabel ? ` (${paymentLabel})` : ''}.`
-            : '';
+    const subject = `Registration confirmed · ${event.name}`;
     const text = [
         `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
         '',
-        paid
-            ? `Payment received — you're registered for "${event.name}".`
-            : `You're registered for "${event.name}".`,
-        ticketLine,
-        paymentTxHash ? `Payment tx: ${paymentTxHash}` : '',
-        paymentExplorerUrl ? `Explorer: ${paymentExplorerUrl}` : '',
+        `Your registration for "${event.name}" is confirmed.`,
+        paid ? `Ticket paid: ${ticketPriceUsdc}${paymentLabel ? ` (${paymentLabel})` : ''}.` : '',
         '',
         `When: ${formatEventWhen(event)}`,
         event.location ? `Where: ${event.location}` : '',
@@ -246,53 +348,36 @@ export async function sendRegistrationConfirmationEmail(opts: {
         .filter(Boolean)
         .join('\n');
 
-    const greet = attendeeName ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,` : 'Hi there,';
-    const preheader = paid
-        ? `Receipt · ${ticketPriceUsdc} paid · ${event.name}`
-        : `Your check-in code is ${event.verificationCode} · ${event.name}`;
+    const greet = attendeeName
+        ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,`
+        : 'Hi there,';
     const inner = `
 <p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
   ${greet}
 </p>
 <p style="margin:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
-  ${
-      paid
-          ? `Payment received — you’re registered for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>. Keep this email as your receipt.`
-          : `You’re registered for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.`
-  }
+  Your registration for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong> is <strong style="color:${C.accent};">confirmed</strong>.
 </p>
 ${
     paid
-        ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;background-color:${C.codeBg};border:1px solid ${C.cardBorder};border-radius:12px;">
-  <tr>
-    <td style="padding:14px 18px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:${C.text};">
-      <strong style="color:${C.accent};">Receipt</strong> · ${escapeHtml(String(ticketPriceUsdc))} USDC${
-            paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''
-        }${
-            paymentTxHash
-                ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Tx ${escapeHtml(
-                      paymentTxHash.length > 24
-                          ? `${paymentTxHash.slice(0, 10)}…${paymentTxHash.slice(-8)}`
-                          : paymentTxHash
-                  )}</span>`
-                : ''
-        }
-    </td>
-  </tr>
-</table>`
+        ? `<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:${C.muted};">
+  Ticket ${escapeHtml(String(ticketPriceUsdc))} USDC${paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''} — payment verified.
+</p>`
         : ''
 }
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
 ${verificationCodeBlock(event.verificationCode, qrImgSrc)}
-${paymentExplorerUrl ? bulletproofButtonHref(paymentExplorerUrl, 'View payment on Stellar') : ''}
 ${bulletproofButtonHref(link, 'View event details')}
 <p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Prefer a plain link?
   <a href="${escapeHtml(link)}" style="color:${C.accent};text-decoration:underline;text-underline-offset:2px;">Open in browser</a>
 </p>`;
 
-    const html = emailShell({ preheader, innerHtml: inner });
+    const html = emailShell({
+        preheader: `Registration confirmed · check-in code ${event.verificationCode}`,
+        innerHtml: inner,
+    });
 
     if (!key) {
         console.warn('[email] RESEND_API_KEY not set; skipping registration email to', to);
@@ -322,6 +407,73 @@ ${bulletproofButtonHref(link, 'View event details')}
         return { ok: false, error: err };
     }
     return { ok: true };
+}
+
+/**
+ * After signup succeeds:
+ * - free → registration confirmation only
+ * - paid (verified payment) → payment receipt + registration confirmation
+ */
+export async function sendRegistrationEmailsAfterSignup(opts: {
+    to: string;
+    event: Event;
+    attendeeName?: string | null;
+    ticketPriceUsdc?: number;
+    paymentLabel?: string;
+    paymentTxHash?: string | null;
+    paymentExplorerUrl?: string | null;
+    paymentReference?: string | null;
+    /** true when crypto/Stepay paid; false for pending mobile */
+    paymentVerified?: boolean;
+}): Promise<{
+    emailSent: boolean;
+    emailSkipped: boolean;
+    receiptSent?: boolean;
+    confirmationSent?: boolean;
+}> {
+    const price =
+        opts.ticketPriceUsdc != null && Number.isFinite(opts.ticketPriceUsdc) && opts.ticketPriceUsdc > 0
+            ? opts.ticketPriceUsdc
+            : 0;
+    const paidVerified = price > 0 && opts.paymentVerified === true;
+
+    let receiptSent = false;
+    let confirmationSent = false;
+    let emailSkipped = false;
+
+    if (paidVerified) {
+        const receipt = await sendPaymentReceiptEmail({
+            to: opts.to,
+            event: opts.event,
+            attendeeName: opts.attendeeName,
+            ticketPriceUsdc: price,
+            paymentLabel: opts.paymentLabel,
+            paymentTxHash: opts.paymentTxHash,
+            paymentExplorerUrl: opts.paymentExplorerUrl,
+            paymentReference: opts.paymentReference,
+        });
+        receiptSent = receipt.ok;
+        if (receipt.skipped) emailSkipped = true;
+    }
+
+    const conf = await sendRegistrationConfirmationEmail({
+        to: opts.to,
+        event: opts.event,
+        attendeeName: opts.attendeeName,
+        ticketPriceUsdc: price > 0 ? price : undefined,
+        paymentLabel: opts.paymentLabel,
+        paymentTxHash: opts.paymentTxHash,
+        paymentExplorerUrl: opts.paymentExplorerUrl,
+    });
+    confirmationSent = conf.ok;
+    if (conf.skipped) emailSkipped = true;
+
+    return {
+        emailSent: confirmationSent || receiptSent,
+        emailSkipped,
+        receiptSent: paidVerified ? receiptSent : undefined,
+        confirmationSent,
+    };
 }
 
 export async function sendOrganizerEventCreatedEmail(opts: {

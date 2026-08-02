@@ -12,17 +12,19 @@ import {
 import { getEventById } from '@/lib/events';
 import {
     eventAcceptsMobileMoney,
+    eventAcceptsStepay,
     eventAcceptsStellar,
     eventAcceptsUsdc,
     type TicketPaymentFields,
 } from '@/lib/event-payment';
-import { sendRegistrationConfirmationEmail } from '@/lib/email';
+import { sendRegistrationEmailsAfterSignup } from '@/lib/email';
 import { verifyUsdcTicketPayment } from '@/lib/usdc-payment';
 import {
     looksLikeBaseTxHash,
     looksLikeStellarTxHash,
     verifyStellarUsdcPayment,
 } from '@/lib/stellar-payment';
+import { stellarExplorerTxUrl } from '@/lib/attendance-mint';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,15 +37,34 @@ function ticketPrice(ev: { ticketPriceUsdc?: number } | null | undefined): numbe
     return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+function paymentExplorerForRail(
+    rail: 'base' | 'stellar' | 'stepay' | undefined,
+    txHash: string | undefined
+): string | null {
+    if (!txHash || txHash.startsWith('0xDEV') || txHash.startsWith('stepay:')) return null;
+    if (rail === 'base' || txHash.startsWith('0x')) {
+        const mainnet =
+            (process.env.NEXT_PUBLIC_BASE_CHAIN || process.env.BASE_CHAIN || 'baseSepolia')
+                .trim()
+                .toLowerCase() === 'base';
+        return mainnet ? `https://basescan.org/tx/${txHash}` : `https://sepolia.basescan.org/tx/${txHash}`;
+    }
+    return stellarExplorerTxUrl(txHash);
+}
+
 async function resolvePaidTicketOpts(
-    ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney' | 'ticketAcceptStellar'>,
+    ev: Pick<
+        TicketPaymentFields,
+        'ticketAcceptUsdc' | 'ticketAcceptMobileMoney' | 'ticketAcceptStellar' | 'ticketAcceptStepay'
+    >,
     price: number,
     body: { paymentTxHash?: string; mobileMoneyReference?: string; paymentRail?: string }
 ): Promise<
     | {
           ok: true;
-          payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' };
+          payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' | 'stepay' };
           paymentLabel?: string;
+          paymentVerified?: boolean;
       }
     | { ok: false; error: string; status: number }
 > {
@@ -56,6 +77,7 @@ async function resolvePaidTicketOpts(
     if (eventAcceptsUsdc(ev)) allowed.push('crypto on Base (0x… tx after wallet pay)');
     if (eventAcceptsStellar(ev))
         allowed.push('crypto on Stellar (wallet pay or 64-char tx hash)');
+    if (eventAcceptsStepay(ev)) allowed.push('Pay with Stepay');
     if (eventAcceptsMobileMoney(ev))
         allowed.push('mobile money (follow organizer instructions, then enter your payment reference)');
 
@@ -82,6 +104,7 @@ async function resolvePaidTicketOpts(
                 ok: true,
                 payment: { txHash, rail: 'stellar' },
                 paymentLabel: 'crypto on Stellar',
+                paymentVerified: true,
             };
         }
 
@@ -94,7 +117,12 @@ async function resolvePaidTicketOpts(
         }
         const v = await verifyUsdcTicketPayment(txHash, price, TREASURY);
         if (!v.ok) return { ok: false, error: v.error || 'Payment verification failed', status: 400 };
-        return { ok: true, payment: { txHash, rail: 'base' }, paymentLabel: 'crypto on Base' };
+        return {
+            ok: true,
+            payment: { txHash, rail: 'base' },
+            paymentLabel: 'crypto on Base',
+            paymentVerified: true,
+        };
     }
     if (mobileRef.length >= 4) {
         if (!eventAcceptsMobileMoney(ev)) {
@@ -108,6 +136,7 @@ async function resolvePaidTicketOpts(
             ok: true,
             payment: { mobileRef },
             paymentLabel: 'mobile money (awaiting host confirmation)',
+            paymentVerified: false,
         };
     }
     return {
@@ -221,22 +250,41 @@ export async function POST(request: Request) {
             if (success) {
                 let emailSent = false;
                 let emailSkipped = false;
+                let receiptSent: boolean | undefined;
+                let confirmationSent: boolean | undefined;
                 try {
                     if (ev) {
-                        const r = await sendRegistrationConfirmationEmail({
+                        const mail = await sendRegistrationEmailsAfterSignup({
                             to: emailStr.toLowerCase(),
                             event: ev,
                             attendeeName: nameStr,
                             ticketPriceUsdc: price > 0 ? price : undefined,
                             paymentLabel: paid.paymentLabel,
+                            paymentTxHash: paid.payment?.txHash,
+                            paymentExplorerUrl: paymentExplorerForRail(
+                                paid.payment?.rail,
+                                paid.payment?.txHash
+                            ),
+                            paymentReference: paid.payment?.mobileRef,
+                            paymentVerified: paid.paymentVerified === true,
                         });
-                        emailSent = r.ok;
-                        emailSkipped = !!r.skipped;
+                        emailSent = mail.emailSent;
+                        emailSkipped = mail.emailSkipped;
+                        receiptSent = mail.receiptSent;
+                        confirmationSent = mail.confirmationSent;
                     }
                 } catch (mailErr) {
-                    console.error('Registration confirmation email failed:', mailErr);
+                    console.error('Registration emails failed:', mailErr);
                 }
-                return NextResponse.json({ success: true, emailSent, emailSkipped });
+                return NextResponse.json({
+                    success: true,
+                    registered: true,
+                    paymentVerified: paid.paymentVerified === true,
+                    emailSent,
+                    emailSkipped,
+                    receiptSent,
+                    confirmationSent,
+                });
             }
             return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
         }
@@ -284,22 +332,41 @@ export async function POST(request: Request) {
             if (success) {
                 let emailSent = false;
                 let emailSkipped = false;
+                let receiptSent: boolean | undefined;
+                let confirmationSent: boolean | undefined;
                 try {
                     if (ev) {
-                        const r = await sendRegistrationConfirmationEmail({
+                        const mail = await sendRegistrationEmailsAfterSignup({
                             to: emailStr.toLowerCase(),
                             event: ev,
                             attendeeName: nameStr,
                             ticketPriceUsdc: price > 0 ? price : undefined,
                             paymentLabel: paid.paymentLabel,
+                            paymentTxHash: paid.payment?.txHash,
+                            paymentExplorerUrl: paymentExplorerForRail(
+                                paid.payment?.rail,
+                                paid.payment?.txHash
+                            ),
+                            paymentReference: paid.payment?.mobileRef,
+                            paymentVerified: paid.paymentVerified === true,
                         });
-                        emailSent = r.ok;
-                        emailSkipped = !!r.skipped;
+                        emailSent = mail.emailSent;
+                        emailSkipped = mail.emailSkipped;
+                        receiptSent = mail.receiptSent;
+                        confirmationSent = mail.confirmationSent;
                     }
                 } catch (mailErr) {
-                    console.error('Registration confirmation email failed:', mailErr);
+                    console.error('Registration emails failed:', mailErr);
                 }
-                return NextResponse.json({ success: true, emailSent, emailSkipped });
+                return NextResponse.json({
+                    success: true,
+                    registered: true,
+                    paymentVerified: paid.paymentVerified === true,
+                    emailSent,
+                    emailSkipped,
+                    receiptSent,
+                    confirmationSent,
+                });
             }
             return NextResponse.json({ error: 'Registration failed' }, { status: 500 });
         }
@@ -332,6 +399,9 @@ export async function GET(request: Request) {
                 email: row?.email ?? null,
                 name: row?.name ?? null,
                 wallet: row?.wallet ?? null,
+                paymentStatus: row?.paymentStatus ?? null,
+                paymentTxHash: row?.paymentTxHash ?? null,
+                paymentReference: row?.paymentReference ?? null,
             },
             { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
         );
@@ -347,6 +417,9 @@ export async function GET(request: Request) {
             registered: !!row,
             email: row?.email ?? null,
             name: row?.name ?? null,
+            paymentStatus: row?.paymentStatus ?? null,
+            paymentTxHash: row?.paymentTxHash ?? null,
+            paymentReference: row?.paymentReference ?? null,
             wallet: row?.wallet ?? null,
         },
         { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }

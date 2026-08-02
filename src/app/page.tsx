@@ -1350,7 +1350,9 @@ function HomeContent() {
             } catch {
               /* ignore */
             }
-            showWalletToast('You’re registered — check your email for the payment receipt.');
+            showWalletToast(
+              'You’re registered — check email for your payment receipt and registration confirmation.'
+            );
             void fetchEvents();
             clearStepayParams();
             return;
@@ -1964,11 +1966,13 @@ function HomeContent() {
       const data = await res.json();
       if (res.ok) {
         if (data.emailSkipped) {
-          showWalletToast(
-            'Registered. Add RESEND_API_KEY to send confirmation emails.'
-          );
+          showWalletToast('Registered. Add RESEND_API_KEY to send emails.');
+        } else if (data.receiptSent && data.confirmationSent) {
+          showWalletToast('Paid & registered — check email for receipt and confirmation.');
         } else if (data.emailSent) {
           showWalletToast('Registered — check your email for confirmation.');
+        } else {
+          showWalletToast('Registered successfully.');
         }
         setIsUserRegistered(true);
         setEventRegProfile({
@@ -2040,9 +2044,13 @@ function HomeContent() {
       const data = await res.json();
       if (res.ok) {
         if (data.emailSkipped) {
-          showWalletToast('Registered. Add RESEND_API_KEY to send confirmation emails.');
+          showWalletToast('Registered. Add RESEND_API_KEY to send emails.');
+        } else if (data.receiptSent && data.confirmationSent) {
+          showWalletToast('Paid & registered — check email for receipt and confirmation.');
         } else if (data.emailSent) {
           showWalletToast('Registered — check your email for confirmation.');
+        } else {
+          showWalletToast('Registered successfully.');
         }
         setIsUserRegistered(true);
         writeRegCache(selectedEvent.id, { email, name: nameTrim });
