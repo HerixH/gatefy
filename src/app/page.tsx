@@ -1,6 +1,6 @@
 'use client';
 
-import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
@@ -11,6 +11,7 @@ import { parseUnits } from 'viem';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Scanner } from '@/components/Scanner';
 import { ConnectStellarButton } from '@/components/ConnectStellarButton';
+import { ConnectWalletButton } from '@/components/ConnectWalletButton';
 import { CreateEventWizard } from '@/components/CreateEventWizard';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
 import { EventLocationField } from '@/components/EventLocationField';
@@ -1938,9 +1939,8 @@ function HomeContent() {
           </Link>
         </nav>
 
-        <div className="pointer-events-auto shrink-0 flex items-center gap-1.5 sm:gap-2 max-w-[48%] sm:max-w-none justify-end scale-[0.68] sm:scale-90 lg:scale-100 origin-right">
-          <ConnectStellarButton compact />
-          <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
+        <div className="pointer-events-auto shrink-0 flex items-center justify-end max-w-[48%] sm:max-w-none scale-[0.85] sm:scale-90 lg:scale-100 origin-right">
+          <ConnectWalletButton compact />
         </div>
       </header>
 
