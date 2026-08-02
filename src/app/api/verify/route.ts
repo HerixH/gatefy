@@ -115,6 +115,8 @@ export async function POST(request: Request) {
                       txHash?: string;
                       tokenId?: string;
                       explorerUrl?: string;
+                      baseTxHash?: string;
+                      baseExplorerUrl?: string;
                       status?: string;
                       error?: string;
                   }
