@@ -14,6 +14,7 @@ import { Scanner } from '@/components/Scanner';
 import { ConnectStellarButton } from '@/components/ConnectStellarButton';
 import { ConnectWalletButton } from '@/components/ConnectWalletButton';
 import { CreateEventWizard } from '@/components/CreateEventWizard';
+import { StepayPayButton } from '@/components/StepayPayButton';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
 import { EventLocationField } from '@/components/EventLocationField';
 import { EventsNearMe } from '@/components/EventsNearMe';
@@ -26,6 +27,7 @@ import {
 } from '@/lib/event-organizer';
 import {
   eventAcceptsMobileMoney,
+  eventAcceptsStepay,
   eventAcceptsUsdc,
   formatEventTicketSummary,
   validateEventPaymentConfig,
@@ -127,6 +129,10 @@ interface Event {
   ticketAcceptUsdc?: boolean;
   /** Paid flow: accept mobile-money reference (default on). */
   ticketAcceptMobileMoney?: boolean;
+  /** Paid flow: accept Stellar USDC (opt-in). */
+  ticketAcceptStellar?: boolean;
+  /** Paid flow: accept Pay with Stepay (opt-in). */
+  ticketAcceptStepay?: boolean;
 }
 
 function HomeContent() {
@@ -194,6 +200,7 @@ function HomeContent() {
   const [mintingProof, setMintingProof] = useState(false);
   /** Which attendance mint chains the server has enabled. */
   const [mintConfig, setMintConfig] = useState({ soroban: true, base: false });
+  const [stepayEnabled, setStepayEnabled] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
@@ -410,6 +417,7 @@ function HomeContent() {
           soroban: d.mintSoroban !== false,
           base: !!d.mintBase,
         });
+        setStepayEnabled(!!d.stepayEnabled);
       })
       .catch(() => setDatabaseConfigured(false));
   }, []);
@@ -637,6 +645,7 @@ function HomeContent() {
     ticketAcceptUsdc: true,
     ticketAcceptMobileMoney: true,
     ticketAcceptStellar: false,
+    ticketAcceptStepay: false,
   });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -974,6 +983,7 @@ function HomeContent() {
         ticketAcceptUsdc: form.ticketAcceptUsdc,
         ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
         ticketAcceptStellar: form.ticketAcceptStellar === true,
+        ticketAcceptStepay: form.ticketAcceptStepay === true,
       });
       if (!pv.ok) {
         setCreateError(pv.error);
@@ -983,6 +993,7 @@ function HomeContent() {
       payload.ticketAcceptUsdc = form.ticketAcceptUsdc;
       payload.ticketAcceptMobileMoney = form.ticketAcceptMobileMoney;
       payload.ticketAcceptStellar = form.ticketAcceptStellar === true;
+      payload.ticketAcceptStepay = form.ticketAcceptStepay === true;
       if (address) {
         payload.organizer = address;
       } else {
@@ -1016,6 +1027,7 @@ function HomeContent() {
           ticketAcceptUsdc: true,
           ticketAcceptMobileMoney: true,
           ticketAcceptStellar: false,
+          ticketAcceptStepay: false,
         });
         await refreshSession();
         setShowCreateEvent(false);
@@ -1262,6 +1274,23 @@ function HomeContent() {
       next.delete('create');
       const q = next.toString();
       router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
+    }
+  }, [searchParams, pathname, router]);
+
+  useEffect(() => {
+    const stepay = searchParams.get('stepay');
+    if (stepay === 'paid') {
+      showWalletToast('Stepay payment received — your registration should appear shortly.');
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('stepay');
+      const q = next.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    } else if (stepay === 'cancel') {
+      showWalletToast('Stepay checkout cancelled.');
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('stepay');
+      const q = next.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
     }
   }, [searchParams, pathname, router]);
 
@@ -1902,13 +1931,17 @@ function HomeContent() {
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
     if (price > 0) {
-      if (!eventAcceptsMobileMoney(selectedEvent)) {
-        showWalletToast('This event is not accepting mobile-money references for tickets.');
+      if (eventAcceptsMobileMoney(selectedEvent)) {
+        const ref = normalPayRef.trim();
+        if (ref.length < 4) {
+          showWalletToast('Enter your mobile-money payment reference after paying (see instructions above).');
+          return;
+        }
+      } else if (eventAcceptsStepay(selectedEvent) && stepayEnabled) {
+        showWalletToast('Use Pay with Stepay below to complete payment in-app.');
         return;
-      }
-      const ref = normalPayRef.trim();
-      if (ref.length < 4) {
-        showWalletToast('Enter your mobile-money payment reference after paying (see instructions above).');
+      } else {
+        showWalletToast('This event has no email payment rail enabled. Ask the host to turn on Stepay or mobile money.');
         return;
       }
     }
@@ -2922,14 +2955,21 @@ function HomeContent() {
                           <span className="text-blue-300/90 font-bold">Crypto</span>: USDC on Base (wallet registration).
                         </li>
                       )}
+                      {eventAcceptsStepay(selectedEvent) && (
+                        <li>
+                          <span className="text-emerald-300/90 font-bold">Stepay</span>: pay in-app (mobile money → USDC) via stepay.pro.
+                        </li>
+                      )}
                       {eventAcceptsMobileMoney(selectedEvent) && (
                         <li>
                           <span className="text-emerald-400/90 font-bold">Mobile money</span>: follow the organizer’s steps and enter your reference when you register with email.
                         </li>
                       )}
-                      {!eventAcceptsMobileMoney(selectedEvent) && selectedEvent.isBlockchain === false ? (
+                      {!eventAcceptsMobileMoney(selectedEvent) &&
+                      !eventAcceptsStepay(selectedEvent) &&
+                      selectedEvent.isBlockchain === false ? (
                         <li className="text-amber-400/80">
-                          Check with the host — mobile-money payment is not listed for this ticket.
+                          Check with the host — no email payment rail is listed for this ticket.
                         </li>
                       ) : null}
                     </ul>
@@ -2998,13 +3038,27 @@ function HomeContent() {
                               />
                             </div>
                           ) : null}
-                          <button
-                            type="submit"
-                            disabled={registering}
-                            className="w-full py-3 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
-                          >
-                            {registering ? 'Processing...' : 'Register for Event'}
-                          </button>
+                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
+                          eventAcceptsStepay(selectedEvent) &&
+                          stepayEnabled ? (
+                            <StepayPayButton
+                              eventId={selectedEvent.id}
+                              email={normalSignupEmail}
+                              name={normalSignupName}
+                              amountUsdc={selectedEvent.ticketPriceUsdc!}
+                              disabled={registering}
+                            />
+                          ) : null}
+                          {(selectedEvent.ticketPriceUsdc ?? 0) <= 0 ||
+                          eventAcceptsMobileMoney(selectedEvent) ? (
+                            <button
+                              type="submit"
+                              disabled={registering}
+                              className="w-full py-3 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
+                            >
+                              {registering ? 'Processing...' : 'Register for Event'}
+                            </button>
+                          ) : null}
                         </form>
                       )
                     ) : (

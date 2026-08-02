@@ -31,6 +31,7 @@ export type CreateEventFormState = {
     ticketAcceptUsdc: boolean;
     ticketAcceptMobileMoney: boolean;
     ticketAcceptStellar: boolean;
+    ticketAcceptStepay: boolean;
 };
 
 type StepId = 'host' | 'basics' | 'place' | 'tickets' | 'finish';
@@ -82,6 +83,7 @@ type Props = {
     uploadingBanner: boolean;
     setUploadingBanner: (v: boolean) => void;
     minStartDatetimeLocal: string;
+    /** Only called when the user clicks Register on the final step (never on Enter/Continue). */
     onSubmit: (e: FormEvent) => void;
     onCancel: () => void;
     showToast: (msg: string) => void;
@@ -185,6 +187,7 @@ export function CreateEventWizard({
                       ticketAcceptUsdc: form.ticketAcceptUsdc,
                       ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
                       ticketAcceptStellar: form.ticketAcceptStellar === true,
+                      ticketAcceptStepay: form.ticketAcceptStepay === true,
                   })
                 : 'No payment',
             capacity: form.maxAttendees.trim() ? `${form.maxAttendees} max` : 'Unlimited',
@@ -233,7 +236,8 @@ export function CreateEventWizard({
                 form.isBlockchain &&
                 !form.ticketAcceptUsdc &&
                 !form.ticketAcceptMobileMoney &&
-                form.ticketAcceptStellar !== true
+                form.ticketAcceptStellar !== true &&
+                form.ticketAcceptStepay !== true
             ) {
                 return 'Enable at least one payment rail for a paid ticket.';
             }
@@ -241,9 +245,10 @@ export function CreateEventWizard({
                 paidTicket > 0 &&
                 !form.isBlockchain &&
                 !form.ticketAcceptMobileMoney &&
-                form.ticketAcceptStellar !== true
+                form.ticketAcceptStellar !== true &&
+                form.ticketAcceptStepay !== true
             ) {
-                return 'Enable mobile money (and/or Stellar) for email signup paid tickets.';
+                return 'Enable mobile money, Stellar, and/or Stepay for email signup paid tickets.';
             }
             return null;
         }
@@ -268,15 +273,23 @@ export function CreateEventWizard({
         setStepIndex((i) => Math.max(0, i - 1));
     };
 
+    const publish = () => {
+        const err = validateStep('finish');
+        if (err) {
+            setStepError(err);
+            return;
+        }
+        setStepError('');
+        // Synthetic event — real creates must come from the Register button, not Enter key.
+        onSubmit({ preventDefault() {}, stopPropagation() {} } as FormEvent);
+    };
+
     return (
         <form
             onSubmit={(e) => {
-                if (!isLast) {
-                    e.preventDefault();
-                    goNext();
-                    return;
-                }
-                onSubmit(e);
+                // Never create from implicit submit (Enter in an input). Continue only.
+                e.preventDefault();
+                if (!isLast) goNext();
             }}
             className="flex flex-col min-h-0 flex-1 overflow-hidden"
         >
@@ -700,6 +713,23 @@ export function CreateEventWizard({
                                         <label className="flex items-start gap-3 cursor-pointer">
                                             <input
                                                 type="checkbox"
+                                                checked={form.ticketAcceptStepay === true}
+                                                onChange={(e) =>
+                                                    setForm((f) => ({
+                                                        ...f,
+                                                        ticketAcceptStepay: e.target.checked,
+                                                    }))
+                                                }
+                                                className="mt-1 accent-emerald-400"
+                                            />
+                                            <span className="text-[10px] text-white/70">
+                                                <span className="text-emerald-300 font-bold">Stepay</span> — in-app
+                                                pay (mobile money → USDC)
+                                            </span>
+                                        </label>
+                                        <label className="flex items-start gap-3 cursor-pointer">
+                                            <input
+                                                type="checkbox"
                                                 checked={form.ticketAcceptMobileMoney}
                                                 onChange={(e) =>
                                                     setForm((f) => ({
@@ -910,7 +940,12 @@ export function CreateEventWizard({
                     </button>
                 ) : null}
                 {isLast ? (
-                    <button type="submit" disabled={creating} className="btn-premium flex-1 py-4 disabled:opacity-50">
+                    <button
+                        type="button"
+                        disabled={creating}
+                        onClick={publish}
+                        className="btn-premium flex-1 py-4 disabled:opacity-50"
+                    >
                         <span className="tracking-[0.2em] uppercase text-sm font-bold">
                             {creating ? 'Registering…' : 'Register event'}
                         </span>

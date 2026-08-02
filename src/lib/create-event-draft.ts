@@ -23,6 +23,7 @@ export type CreateEventDraft = {
     ticketAcceptUsdc: boolean;
     ticketAcceptMobileMoney: boolean;
     ticketAcceptStellar: boolean;
+    ticketAcceptStepay: boolean;
     savedAt?: string;
 };
 
@@ -106,6 +107,7 @@ export function validateCreateEventForm(
             ticketAcceptUsdc: form.ticketAcceptUsdc,
             ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
             ticketAcceptStellar: form.ticketAcceptStellar,
+            ticketAcceptStepay: form.ticketAcceptStepay,
         });
         if (!pv.ok) return { ok: false, error: pv.error };
         if (form.ticketAcceptMobileMoney && !form.mobileMoneyInstructions.trim()) {

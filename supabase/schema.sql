@@ -24,6 +24,7 @@ create table if not exists public.events (
   ticket_accept_usdc boolean default true,
   ticket_accept_mobile_money boolean default true,
   ticket_accept_stellar boolean default false,
+  ticket_accept_stepay boolean default false,
   cancelled_at timestamptz,
   cancelled_by_admin boolean default false,
   cancel_reason text

@@ -40,7 +40,12 @@ function mapRegistrationRow(r: {
     };
 }
 
-function paymentInsertFields(payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' }) {
+function paymentInsertFields(payment?: {
+    txHash?: string;
+    mobileRef?: string;
+    rail?: 'base' | 'stellar' | 'stepay';
+    stepayCheckoutId?: string;
+}) {
     const paidAt = new Date().toISOString();
     let payment_status = 'none';
     let payment_tx_hash: string | null = null;
@@ -48,9 +53,14 @@ function paymentInsertFields(payment?: { txHash?: string; mobileRef?: string; ra
     let paid_at: string | null = null;
 
     if (payment?.txHash?.trim()) {
-        payment_status = payment.rail === 'stellar' ? 'paid_stellar' : 'paid_crypto';
+        // Stepay settles USDC on Stellar — store as paid_stellar with stepay reference.
+        payment_status =
+            payment.rail === 'stellar' || payment.rail === 'stepay' ? 'paid_stellar' : 'paid_crypto';
         payment_tx_hash = payment.txHash.trim();
         paid_at = paidAt;
+        if (payment.rail === 'stepay' && payment.stepayCheckoutId?.trim()) {
+            payment_reference = `stepay:${payment.stepayCheckoutId.trim()}`;
+        }
     } else if (payment?.mobileRef?.trim()) {
         // Host must confirm mobile-money references before they count as paid.
         payment_status = 'pending_mobile';
@@ -211,7 +221,12 @@ export async function registerForEvent(
     eventId: string,
     wallet: string,
     details?: { email?: string; name?: string },
-    payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' }
+    payment?: {
+        txHash?: string;
+        mobileRef?: string;
+        rail?: 'base' | 'stellar' | 'stepay';
+        stepayCheckoutId?: string;
+    }
 ): Promise<boolean> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     const cleanEventId = eventId.trim().toLowerCase();
@@ -249,7 +264,12 @@ export async function registerForEventWithEmail(
     eventId: string,
     email: string,
     name?: string,
-    payment?: { txHash?: string; mobileRef?: string; rail?: 'base' | 'stellar' }
+    payment?: {
+        txHash?: string;
+        mobileRef?: string;
+        rail?: 'base' | 'stellar' | 'stepay';
+        stepayCheckoutId?: string;
+    }
 ): Promise<boolean> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured. Add NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
     const cleanEventId = eventId.trim().toLowerCase();

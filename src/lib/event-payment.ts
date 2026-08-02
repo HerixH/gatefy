@@ -9,6 +9,8 @@ export type TicketPaymentFields = {
     ticketAcceptMobileMoney?: boolean;
     /** USDC on Stellar (Horizon-verified). Opt-in; default off for existing events. */
     ticketAcceptStellar?: boolean;
+    /** Pay with Stepay checkout (mobile money → USDC). Opt-in. */
+    ticketAcceptStepay?: boolean;
 };
 
 export function eventAcceptsUsdc(ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc'>): boolean {
@@ -23,6 +25,10 @@ export function eventAcceptsStellar(ev: Pick<TicketPaymentFields, 'ticketAcceptS
     return ev.ticketAcceptStellar === true;
 }
 
+export function eventAcceptsStepay(ev: Pick<TicketPaymentFields, 'ticketAcceptStepay'>): boolean {
+    return ev.ticketAcceptStepay === true;
+}
+
 export function validateEventPaymentConfig(
     event: Partial<TicketPaymentFields> & Pick<TicketPaymentFields, 'isBlockchain'>
 ):
@@ -34,25 +40,26 @@ export function validateEventPaymentConfig(
     const usdcOk = event.ticketAcceptUsdc !== false;
     const mobOk = event.ticketAcceptMobileMoney !== false;
     const stellarOk = event.ticketAcceptStellar === true;
-    if (!usdcOk && !mobOk && !stellarOk) {
+    const stepayOk = event.ticketAcceptStepay === true;
+    if (!usdcOk && !mobOk && !stellarOk && !stepayOk) {
         return {
             ok: false,
-            error: 'Paid events must accept at least one payment method (crypto on Base, crypto on Stellar, or mobile money).',
+            error: 'Paid events must accept at least one payment method (Base, Stellar, Stepay, or mobile money).',
         };
     }
     const bc = event.isBlockchain !== false;
-    if (bc && !usdcOk && !stellarOk) {
+    if (bc && !usdcOk && !stellarOk && !stepayOk) {
         return {
             ok: false,
             error:
-                'Wallet-based paid tickets need crypto on Base and/or Stellar. Enable one of those rails or set the ticket free.',
+                'Wallet-based paid tickets need crypto on Base, Stellar, and/or Stepay. Enable a rail or set the ticket free.',
         };
     }
-    if (!bc && !mobOk && !stellarOk) {
+    if (!bc && !mobOk && !stellarOk && !stepayOk) {
         return {
             ok: false,
             error:
-                'Email-only paid tickets need mobile money and/or Stellar crypto. Enable a payment rail or choose a free ticket.',
+                'Email-only paid tickets need mobile money, Stellar, and/or Stepay. Enable a payment rail or choose a free ticket.',
         };
     }
     return { ok: true };
@@ -62,7 +69,12 @@ export function validateEventPaymentConfig(
 export function formatEventTicketSummary(
     ev: Pick<
         TicketPaymentFields,
-        'ticketPriceUsdc' | 'isBlockchain' | 'ticketAcceptUsdc' | 'ticketAcceptMobileMoney' | 'ticketAcceptStellar'
+        | 'ticketPriceUsdc'
+        | 'isBlockchain'
+        | 'ticketAcceptUsdc'
+        | 'ticketAcceptMobileMoney'
+        | 'ticketAcceptStellar'
+        | 'ticketAcceptStepay'
     >
 ): string {
     const price = ev.ticketPriceUsdc ?? 0;
@@ -70,6 +82,7 @@ export function formatEventTicketSummary(
     const rails: string[] = [];
     if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('Base');
     if (eventAcceptsStellar(ev)) rails.push('Stellar');
+    if (eventAcceptsStepay(ev)) rails.push('Stepay');
     if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
     return rails.length ? `Ticket ${price} · ${rails.join(' · ')}` : `Ticket ${price}`;
 }
@@ -86,7 +99,7 @@ export function isPendingMobileRegistration(status?: string | null): boolean {
 export function registrationPaymentLabel(status?: string | null): string {
     const st = (status ?? '').trim().toLowerCase();
     if (st === 'paid_crypto') return 'Crypto (Base)';
-    if (st === 'paid_stellar') return 'Crypto (Stellar)';
+    if (st === 'paid_stellar') return 'Crypto (Stellar / Stepay)';
     if (st === 'paid_mobile') return 'Mobile money';
     if (st === 'pending_mobile') return 'Mobile money (awaiting host)';
     if (st === 'rejected_mobile') return 'Mobile money rejected';

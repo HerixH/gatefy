@@ -16,5 +16,6 @@ Apply these SQL files **in numeric order** when upgrading an existing database. 
 | 09 | `09_attendance_mint.sql` | Soroban / Base mint receipt columns on `attendance` |
 | 10 | `10_attendance_mint_base.sql` | Optional Base tx/token columns for `ATTENDANCE_MINT_CHAIN=both` |
 | 11 | `11_organizer_sessions.sql` | Host OTP + wallet challenges + durable `organizer_sessions` (not browser cache alone) |
+| 12 | `12_ticket_accept_stepay.sql` | Opt-in `ticket_accept_stepay` — Pay with Stepay checkout for tickets |
 
 After altering tables exposed to PostgREST, patches that end with `notify pgrst, 'reload schema';` refresh the API schema cache.

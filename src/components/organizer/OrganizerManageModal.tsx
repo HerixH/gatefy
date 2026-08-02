@@ -21,6 +21,7 @@ export type ManageFormState = {
     ticketAcceptUsdc: boolean;
     ticketAcceptMobileMoney: boolean;
     ticketAcceptStellar: boolean;
+    ticketAcceptStepay: boolean;
     bannerUrl: string;
 };
 
@@ -73,6 +74,7 @@ export function OrganizerManageModal({
             ticketAcceptUsdc: ev.ticketAcceptUsdc !== false,
             ticketAcceptMobileMoney: ev.ticketAcceptMobileMoney !== false,
             ticketAcceptStellar: ev.ticketAcceptStellar === true,
+            ticketAcceptStepay: ev.ticketAcceptStepay === true,
             bannerUrl: ev.bannerUrl || '',
         };
     }
@@ -117,6 +119,7 @@ export function OrganizerManageModal({
                 ticketAcceptUsdc: form.ticketAcceptUsdc,
                 ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
                 ticketAcceptStellar: form.ticketAcceptStellar,
+                ticketAcceptStepay: form.ticketAcceptStepay,
             });
             if (!payCheck.ok) {
                 setError(payCheck.error);
@@ -141,6 +144,7 @@ export function OrganizerManageModal({
                     ticketAcceptUsdc: form.ticketAcceptUsdc,
                     ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
                     ticketAcceptStellar: form.ticketAcceptStellar,
+                    ticketAcceptStepay: form.ticketAcceptStepay,
                     bannerUrl: form.bannerUrl.trim() || null,
                 }),
             });
@@ -353,6 +357,20 @@ export function OrganizerManageModal({
                                                     className="accent-violet-400"
                                                 />
                                                 Stellar — crypto
+                                            </label>
+                                            <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={form.ticketAcceptStepay}
+                                                    onChange={(e) =>
+                                                        setForm((f) => ({
+                                                            ...f,
+                                                            ticketAcceptStepay: e.target.checked,
+                                                        }))
+                                                    }
+                                                    className="accent-emerald-400"
+                                                />
+                                                Stepay — in-app (mobile money → USDC)
                                             </label>
                                             <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
                                                 <input

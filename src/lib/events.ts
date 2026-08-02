@@ -36,6 +36,8 @@ export interface Event {
     ticketAcceptMobileMoney?: boolean;
     /** Paid events: accept USDC on Stellar (default false — opt-in). */
     ticketAcceptStellar?: boolean;
+    /** Paid events: accept Pay with Stepay checkout (default false — opt-in). */
+    ticketAcceptStepay?: boolean;
     /** Soft-cancel timestamp; when set, event is offline for public signup. */
     cancelledAt?: string;
     /** True when platform admin cancelled (misconduct); hosts cannot restore. */
@@ -67,6 +69,7 @@ type EventRow = {
     ticket_accept_usdc?: boolean | null;
     ticket_accept_mobile_money?: boolean | null;
     ticket_accept_stellar?: boolean | null;
+    ticket_accept_stepay?: boolean | null;
     cancelled_at?: string | null;
     cancelled_by_admin?: boolean | null;
     cancel_reason?: string | null;
@@ -144,6 +147,7 @@ function rowToEvent(r: EventRow): Event {
         ticketAcceptUsdc: acceptFlagFromDb(r.ticket_accept_usdc),
         ticketAcceptMobileMoney: acceptFlagFromDb(r.ticket_accept_mobile_money),
         ticketAcceptStellar: acceptFlagOptInFromDb(r.ticket_accept_stellar),
+        ticketAcceptStepay: acceptFlagOptInFromDb(r.ticket_accept_stepay),
         cancelledAt: r.cancelled_at ?? undefined,
         cancelledByAdmin: r.cancelled_by_admin === true,
         cancelReason: r.cancel_reason?.trim() || undefined,
@@ -184,6 +188,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         ticketAcceptUsdc: data.ticketAcceptUsdc !== false,
         ticketAcceptMobileMoney: data.ticketAcceptMobileMoney !== false,
         ticketAcceptStellar: data.ticketAcceptStellar === true,
+        ticketAcceptStepay: data.ticketAcceptStepay === true,
     };
 
     if (isSupabaseConfigured) {
@@ -196,6 +201,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         ticketCols.ticket_accept_usdc = event.ticketAcceptUsdc !== false;
         ticketCols.ticket_accept_mobile_money = event.ticketAcceptMobileMoney !== false;
         ticketCols.ticket_accept_stellar = event.ticketAcceptStellar === true;
+        ticketCols.ticket_accept_stepay = event.ticketAcceptStepay === true;
 
         const { error } = await supabase.from('events').insert({
             id: event.id,
@@ -304,6 +310,7 @@ export type OrganizerMutableEventPatch = Partial<{
     ticketAcceptUsdc?: boolean;
     ticketAcceptMobileMoney?: boolean;
     ticketAcceptStellar?: boolean;
+    ticketAcceptStepay?: boolean;
     /** ISO string to cancel; null to clear (uncancel). */
     cancelledAt?: string | null;
     cancelledByAdmin?: boolean | null;
@@ -337,6 +344,7 @@ function patchToSupabaseRow(patch: OrganizerMutableEventPatch): Record<string, s
     if (patch.ticketAcceptUsdc !== undefined) row.ticket_accept_usdc = !!patch.ticketAcceptUsdc;
     if (patch.ticketAcceptMobileMoney !== undefined) row.ticket_accept_mobile_money = !!patch.ticketAcceptMobileMoney;
     if (patch.ticketAcceptStellar !== undefined) row.ticket_accept_stellar = !!patch.ticketAcceptStellar;
+    if (patch.ticketAcceptStepay !== undefined) row.ticket_accept_stepay = !!patch.ticketAcceptStepay;
     if (patch.cancelledAt !== undefined) {
         row.cancelled_at = patch.cancelledAt === null || patch.cancelledAt === '' ? null : patch.cancelledAt;
     }
@@ -403,6 +411,7 @@ export async function updateEventById(
     if (patch.ticketAcceptUsdc !== undefined) next.ticketAcceptUsdc = patch.ticketAcceptUsdc;
     if (patch.ticketAcceptMobileMoney !== undefined) next.ticketAcceptMobileMoney = patch.ticketAcceptMobileMoney;
     if (patch.ticketAcceptStellar !== undefined) next.ticketAcceptStellar = patch.ticketAcceptStellar;
+    if (patch.ticketAcceptStepay !== undefined) next.ticketAcceptStepay = patch.ticketAcceptStepay;
     if (patch.cancelledAt !== undefined) {
         next.cancelledAt = patch.cancelledAt === null || patch.cancelledAt === '' ? undefined : patch.cancelledAt;
     }

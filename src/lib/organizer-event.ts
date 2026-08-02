@@ -22,6 +22,7 @@ export type OrganizerEvent = {
     ticketAcceptUsdc?: boolean;
     ticketAcceptMobileMoney?: boolean;
     ticketAcceptStellar?: boolean;
+    ticketAcceptStepay?: boolean;
     cancelledAt?: string;
     cancelledByAdmin?: boolean;
     cancelReason?: string;

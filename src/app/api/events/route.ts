@@ -63,6 +63,7 @@ export async function POST(request: Request) {
             ticketAcceptUsdc,
             ticketAcceptMobileMoney,
             ticketAcceptStellar,
+            ticketAcceptStepay,
         } = body;
 
         let ticketPrice: number | undefined;
@@ -73,6 +74,7 @@ export async function POST(request: Request) {
         const acceptUsdc = ticketAcceptUsdc !== false;
         const acceptMobile = ticketAcceptMobileMoney !== false;
         const acceptStellar = ticketAcceptStellar === true;
+        const acceptStepay = ticketAcceptStepay === true;
         const mmInstr =
             typeof mobileMoneyInstructions === 'string' && mobileMoneyInstructions.trim()
                 ? mobileMoneyInstructions.trim()
@@ -144,6 +146,7 @@ export async function POST(request: Request) {
             ticketAcceptUsdc: acceptUsdc,
             ticketAcceptMobileMoney: acceptMobile,
             ticketAcceptStellar: acceptStellar,
+            ticketAcceptStepay: acceptStepay,
         });
         if (!paymentCheck.ok) {
             return NextResponse.json({ error: paymentCheck.error }, { status: 400 });
@@ -168,6 +171,7 @@ export async function POST(request: Request) {
             ticketAcceptUsdc: acceptUsdc,
             ticketAcceptMobileMoney: acceptMobile,
             ticketAcceptStellar: acceptStellar,
+            ticketAcceptStepay: acceptStepay,
         });
 
         if (!wallet && emailRaw) {
@@ -295,6 +299,9 @@ export async function PATCH(request: Request) {
         if ('ticketAcceptStellar' in body && typeof body.ticketAcceptStellar === 'boolean') {
             patch.ticketAcceptStellar = body.ticketAcceptStellar;
         }
+        if ('ticketAcceptStepay' in body && typeof body.ticketAcceptStepay === 'boolean') {
+            patch.ticketAcceptStepay = body.ticketAcceptStepay;
+        }
 
         // Soft-cancel / restore (upcoming only). Admin takedowns cannot be restored by hosts.
         if ('cancelled' in body && typeof body.cancelled === 'boolean') {
@@ -354,6 +361,10 @@ export async function PATCH(request: Request) {
             patch.ticketAcceptStellar !== undefined
                 ? patch.ticketAcceptStellar
                 : event.ticketAcceptStellar === true;
+        const mergedStepay =
+            patch.ticketAcceptStepay !== undefined
+                ? patch.ticketAcceptStepay
+                : event.ticketAcceptStepay === true;
 
         if (!onlyCancelToggle) {
             const paymentMerged = validateEventPaymentConfig({
@@ -362,6 +373,7 @@ export async function PATCH(request: Request) {
                 ticketAcceptUsdc: mergedUsdc,
                 ticketAcceptMobileMoney: mergedMob,
                 ticketAcceptStellar: mergedStellar,
+                ticketAcceptStepay: mergedStepay,
             });
             if (!paymentMerged.ok) {
                 return NextResponse.json({ error: paymentMerged.error }, { status: 400 });
