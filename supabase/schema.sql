@@ -113,6 +113,8 @@ create table if not exists public.attendance (
   mint_status text,
   mint_tx_hash text,
   mint_token_id text,
+  mint_base_tx_hash text,
+  mint_base_token_id text,
   mint_error text,
   minted_at timestamptz,
   constraint attendance_wallet_or_email_check check (wallet is not null or email is not null)

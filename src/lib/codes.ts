@@ -21,6 +21,8 @@ export interface AttendanceRecord {
     mintStatus?: string | null;
     mintTxHash?: string | null;
     mintTokenId?: string | null;
+    mintBaseTxHash?: string | null;
+    mintBaseTokenId?: string | null;
     mintError?: string | null;
     mintedAt?: string | null;
 }
@@ -195,7 +197,7 @@ export async function verifyCode(
     return { success: true, newCheckin };
 }
 
-/** Persist Soroban (or later Base) mint receipt on the attendance row. */
+/** Persist Soroban and/or Base mint receipt on the attendance row. */
 export async function updateAttendanceMint(params: {
     eventId: string;
     wallet?: string | null;
@@ -204,12 +206,14 @@ export async function updateAttendanceMint(params: {
     mintStatus: string;
     mintTxHash?: string | null;
     mintTokenId?: string | null;
+    mintBaseTxHash?: string | null;
+    mintBaseTokenId?: string | null;
     mintError?: string | null;
 }): Promise<void> {
     if (!isSupabaseConfigured) return;
     const supabase = getSupabase();
     const eventId = params.eventId.trim().toLowerCase();
-    const patch = {
+    const patch: Record<string, string | null> = {
         mint_chain: params.mintChain,
         mint_status: params.mintStatus,
         mint_tx_hash: params.mintTxHash ?? null,
@@ -217,6 +221,12 @@ export async function updateAttendanceMint(params: {
         mint_error: params.mintError ?? null,
         minted_at: params.mintStatus === 'minted' ? new Date().toISOString() : null,
     };
+    if (params.mintBaseTxHash !== undefined) {
+        patch.mint_base_tx_hash = params.mintBaseTxHash;
+    }
+    if (params.mintBaseTokenId !== undefined) {
+        patch.mint_base_token_id = params.mintBaseTokenId;
+    }
 
     if (params.wallet) {
         await supabase
@@ -250,7 +260,51 @@ export async function getAttendance(): Promise<AttendanceRecord[]> {
         mintStatus: r.mint_status ?? null,
         mintTxHash: r.mint_tx_hash ?? null,
         mintTokenId: r.mint_token_id ?? null,
+        mintBaseTxHash: r.mint_base_tx_hash ?? null,
+        mintBaseTokenId: r.mint_base_token_id ?? null,
         mintError: r.mint_error ?? null,
         mintedAt: r.minted_at ?? null,
     }));
+}
+
+/** Build DB patch fields from a MintResult. */
+export function mintResultToDbFields(mintResult: {
+    ok: boolean;
+    chain?: string;
+    txHash?: string;
+    tokenId?: string;
+    error?: string;
+    status?: string;
+    also?: { chain: string; txHash: string; tokenId: string };
+}): {
+    mintChain: string;
+    mintStatus: string;
+    mintTxHash: string | null;
+    mintTokenId: string | null;
+    mintBaseTxHash: string | null;
+    mintBaseTokenId: string | null;
+    mintError: string | null;
+} {
+    if (!mintResult.ok) {
+        return {
+            mintChain: mintResult.chain || 'off',
+            mintStatus: mintResult.status || 'failed',
+            mintTxHash: null,
+            mintTokenId: null,
+            mintBaseTxHash: null,
+            mintBaseTokenId: null,
+            mintError: mintResult.error || 'Mint failed',
+        };
+    }
+    const alsoBase = mintResult.also?.chain === 'base' ? mintResult.also : null;
+    const primaryIsBase = mintResult.chain === 'base';
+    return {
+        mintChain: mintResult.chain || 'soroban',
+        mintStatus: 'minted',
+        mintTxHash: mintResult.txHash || null,
+        mintTokenId: mintResult.tokenId || null,
+        mintBaseTxHash: primaryIsBase ? mintResult.txHash || null : alsoBase?.txHash || null,
+        mintBaseTokenId: primaryIsBase ? mintResult.tokenId || null : alsoBase?.tokenId || null,
+        mintError: null,
+    };
 }

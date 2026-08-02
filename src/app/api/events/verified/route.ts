@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server';
+import { explorerUrlForMint } from '@/lib/attendance-mint';
 import { getAttendance } from '@/lib/codes';
 
 export const dynamic = 'force-dynamic';
-
-function explorerTxUrl(txHash: string): string {
-    const net = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet').toLowerCase();
-    const path = net === 'public' || net === 'mainnet' ? 'public' : 'testnet';
-    return `https://stellar.expert/explorer/${path}/tx/${txHash}`;
-}
 
 export async function GET(request: Request) {
     try {
@@ -32,17 +27,26 @@ export async function GET(request: Request) {
         });
 
         const verified = !!row;
-        const minted = verified && (row?.mintStatus ?? '').toLowerCase() === 'minted' && !!row?.mintTxHash;
+        const minted =
+            verified &&
+            (row?.mintStatus ?? '').toLowerCase() === 'minted' &&
+            !!(row?.mintTxHash || row?.mintBaseTxHash);
+        const primaryHash = row?.mintTxHash || row?.mintBaseTxHash || null;
         const mint =
             verified && row
                 ? {
                       status: row.mintStatus ?? null,
                       chain: row.mintChain ?? null,
-                      txHash: row.mintTxHash ?? null,
-                      tokenId: row.mintTokenId ?? null,
+                      txHash: primaryHash,
+                      tokenId: row.mintTokenId ?? row.mintBaseTokenId ?? null,
                       error: row.mintError ?? null,
                       mintedAt: row.mintedAt ?? null,
-                      explorerUrl: row.mintTxHash ? explorerTxUrl(row.mintTxHash) : null,
+                      explorerUrl: explorerUrlForMint(row.mintChain, primaryHash),
+                      baseTxHash: row.mintBaseTxHash ?? null,
+                      baseTokenId: row.mintBaseTokenId ?? null,
+                      baseExplorerUrl: row.mintBaseTxHash
+                          ? explorerUrlForMint('base', row.mintBaseTxHash)
+                          : null,
                       minted,
                   }
                 : null;

@@ -20,6 +20,11 @@
 # production
 /build
 
+# hardhat
+/artifacts
+/cache
+/dist
+
 # misc
 .DS_Store
 *.pem

@@ -1,66 +1,60 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// NOTE: Attendance minting ships on Soroban first (see contracts/soroban/).
-// This Base ERC-721 stub is reserved for a later adapter — do not wire as primary.
+/**
+ * Gate Protocol attendance proof on Base (ERC-721).
+ * Server minter calls mintAttendance(to, eventId) after door verify — same role as Soroban mint.
+ */
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract GatefyPOAP is ERC721, ERC721URIStorage, Ownable {
-    uint256 private _nextTokenId;
-    
-    mapping(address => bool) public hasClaimed;
-    
-    string public eventName;
-    uint256 public eventDate;
-    string public baseTokenURI;
-    
-    bool public mintingEnabled = true;
+contract GatefyPOAP is ERC721, Ownable {
+    uint256 private _nextTokenId = 1;
+    address public minter;
+    string private _baseTokenURI;
 
-    constructor(
-        string memory _name,
-        string memory _symbol,
-        string memory _eventName,
-        string memory _baseURI
-    ) ERC721(_name, _symbol) Ownable(msg.sender) {
-        eventName = _eventName;
-        eventDate = block.timestamp;
-        baseTokenURI = _baseURI;
-    }
+    /// @dev attendee => keccak256(eventId) => minted
+    mapping(address => mapping(bytes32 => bool)) public mintedForEvent;
 
-    function setMintingEnabled(bool _enabled) public onlyOwner {
-        mintingEnabled = _enabled;
-    }
+    event AttendanceMinted(address indexed to, uint256 indexed tokenId, string eventId);
 
-    function mintPOAP() public {
-        require(mintingEnabled, "Minting is currently disabled");
-        require(!hasClaimed[msg.sender], "You have already claimed your POAP");
-        
-        uint256 tokenId = _nextTokenId++;
-        hasClaimed[msg.sender] = true;
-        
-        _safeMint(msg.sender, tokenId);
-        _setTokenURI(tokenId, baseTokenURI);
-    }
-
-    // Required overrides
-    function tokenURI(uint256 tokenId)
-        public
-        view
-        override(ERC721, ERC721URIStorage)
-        returns (string memory)
+    constructor(string memory name_, string memory symbol_, string memory baseURI_)
+        ERC721(name_, symbol_)
+        Ownable(msg.sender)
     {
-        return super.tokenURI(tokenId);
+        minter = msg.sender;
+        _baseTokenURI = baseURI_;
     }
 
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721, ERC721URIStorage)
-        returns (bool)
-    {
-        return super.supportsInterface(interfaceId);
+    function setMinter(address minter_) external onlyOwner {
+        require(minter_ != address(0), "zero minter");
+        minter = minter_;
+    }
+
+    function setBaseURI(string calldata baseURI_) external onlyOwner {
+        _baseTokenURI = baseURI_;
+    }
+
+    function mintAttendance(address to, string calldata eventId) external returns (uint256 tokenId) {
+        require(msg.sender == minter || msg.sender == owner(), "not minter");
+        require(to != address(0), "zero to");
+        require(bytes(eventId).length > 0, "empty event");
+
+        bytes32 key = keccak256(bytes(eventId));
+        require(!mintedForEvent[to][key], "already minted for event");
+
+        tokenId = _nextTokenId++;
+        mintedForEvent[to][key] = true;
+        _safeMint(to, tokenId);
+        emit AttendanceMinted(to, tokenId, eventId);
+    }
+
+    function hasMinted(address attendee, string calldata eventId) external view returns (bool) {
+        return mintedForEvent[attendee][keccak256(bytes(eventId))];
+    }
+
+    function _baseURI() internal view override returns (string memory) {
+        return _baseTokenURI;
     }
 }

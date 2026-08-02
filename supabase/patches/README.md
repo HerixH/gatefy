@@ -13,6 +13,7 @@ Apply these SQL files **in numeric order** when upgrading an existing database. 
 | 06 | `06_ticket_accept_stellar.sql` | Opt-in `ticket_accept_stellar` — USDC on Stellar for paid tickets |
 | 07 | `07_hosting_ops.sql` | Soft-cancel (`cancelled_at`), unique payment tx/ref indexes, MoMo pending statuses |
 | 08 | `08_admin_cancel.sql` | Admin misconduct cancel (`cancelled_by_admin`, `cancel_reason`) — hosts cannot restore |
-| 09 | `09_attendance_mint.sql` | Soroban (then Base) mint receipt columns on `attendance` |
+| 09 | `09_attendance_mint.sql` | Soroban / Base mint receipt columns on `attendance` |
+| 10 | `10_attendance_mint_base.sql` | Optional Base tx/token columns for `ATTENDANCE_MINT_CHAIN=both` |
 
 After altering tables exposed to PostgREST, patches that end with `notify pgrst, 'reload schema';` refresh the API schema cache.

@@ -448,32 +448,47 @@ ${bulletproofButtonHref(link, 'View event')}
     return { ok: true };
 }
 
-/** After a successful Soroban attendance proof mint. */
+/** After a successful attendance proof mint (Stellar and/or Base). */
 export async function sendAttendanceMintedEmail(opts: {
     to: string;
     event: Event;
     attendeeName?: string | null;
+    chain?: string | null;
     txHash?: string | null;
     tokenId?: string | null;
     explorerUrl?: string | null;
+    baseTxHash?: string | null;
+    baseExplorerUrl?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
     const key = process.env.RESEND_API_KEY?.trim();
     const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
-    const { to, event, attendeeName, txHash, tokenId, explorerUrl } = opts;
+    const { to, event, attendeeName, chain, txHash, tokenId, explorerUrl, baseTxHash, baseExplorerUrl } =
+        opts;
     const origin = appOrigin();
     const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const c = (chain || 'soroban').toLowerCase();
+    const chainLabel =
+        c === 'both'
+            ? 'Stellar and Base'
+            : c === 'base'
+              ? 'Base'
+              : 'Stellar (Soroban)';
+    const explorerLabel =
+        c === 'base' ? 'View on Basescan' : c === 'both' ? 'View on Stellar Expert' : 'View on Stellar Expert';
 
     const subject = `Attendance proof minted · ${event.name}`;
     const text = [
         `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
         '',
-        `Your attendance proof was minted on Stellar (Soroban) for "${event.name}".`,
+        `Your attendance proof was minted on ${chainLabel} for "${event.name}".`,
         '',
         `When: ${formatEventWhen(event)}`,
         event.location ? `Where: ${event.location}` : '',
         tokenId ? `Token: #${tokenId}` : '',
         txHash ? `Transaction: ${txHash}` : '',
         explorerUrl ? `Explorer: ${explorerUrl}` : '',
+        baseTxHash && baseTxHash !== txHash ? `Base tx: ${baseTxHash}` : '',
+        baseExplorerUrl && baseExplorerUrl !== explorerUrl ? `Base explorer: ${baseExplorerUrl}` : '',
         '',
         `Event link: ${link}`,
         '',
@@ -489,13 +504,14 @@ export async function sendAttendanceMintedEmail(opts: {
   ${greet}
 </p>
 <p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
-  Your attendance proof was <strong style="color:${C.white};">minted on Stellar</strong> for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
+  Your attendance proof was <strong style="color:${C.white};">minted on ${escapeHtml(chainLabel)}</strong> for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
 </p>
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
 ${tokenId ? detailRow('Token', `#${tokenId}`) : ''}
 ${txHash ? detailRow('Tx', txHash.length > 20 ? `${txHash.slice(0, 12)}…${txHash.slice(-8)}` : txHash) : ''}
-${explorerUrl ? bulletproofButtonHref(explorerUrl, 'View on Stellar Expert') : ''}
+${explorerUrl ? bulletproofButtonHref(explorerUrl, explorerLabel) : ''}
+${baseExplorerUrl && baseExplorerUrl !== explorerUrl ? bulletproofButtonHref(baseExplorerUrl, 'View on Basescan') : ''}
 ${bulletproofButtonHref(link, 'View event')}
 <p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
   Keep this email as your on-chain attendance receipt.

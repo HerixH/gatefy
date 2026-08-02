@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { peekCode, updateAttendanceMint, verifyCode } from '@/lib/codes';
+import { mintResultToDbFields, peekCode, updateAttendanceMint, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
 import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
 import { sendAttendanceMintedEmail, sendAttendanceVerifiedEmail } from '@/lib/email';
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
                     console.error('[verify] check-in email lookup/send error:', e);
                 }
 
-                // Soroban mint first (Base later) — after successful new check-in only
+                // Soroban and/or Base mint — after successful new check-in only
                 try {
                     const mintResult = await mintAttendanceProof({
                         eventId: event.id,
@@ -162,6 +162,8 @@ export async function POST(request: Request) {
                               txHash: mintResult.txHash,
                               tokenId: mintResult.tokenId,
                               explorerUrl: mintResult.explorerUrl,
+                              baseTxHash: mintResult.also?.txHash,
+                              baseExplorerUrl: mintResult.also?.explorerUrl,
                           }
                         : {
                               ok: false,
@@ -170,15 +172,12 @@ export async function POST(request: Request) {
                               error: mintResult.error,
                           };
 
+                    const fields = mintResultToDbFields(mintResult);
                     await updateAttendanceMint({
                         eventId: event.id,
                         wallet: emailMode ? null : wallet && wallet !== '0xDEV' ? wallet : null,
                         email: emailMode ? email : null,
-                        mintChain: mintResult.ok ? mintResult.chain : mintResult.chain,
-                        mintStatus: mintResult.ok ? 'minted' : mintResult.status,
-                        mintTxHash: mintResult.ok ? mintResult.txHash : null,
-                        mintTokenId: mintResult.ok ? mintResult.tokenId : null,
-                        mintError: mintResult.ok ? null : mintResult.error,
+                        ...fields,
                     });
 
                     if (mintResult.ok && toEmail) {
@@ -186,16 +185,23 @@ export async function POST(request: Request) {
                             to: toEmail,
                             event,
                             attendeeName,
+                            chain: mintResult.chain,
                             txHash: mintResult.txHash,
                             tokenId: mintResult.tokenId,
                             explorerUrl: mintResult.explorerUrl,
+                            baseTxHash:
+                                mintResult.also?.txHash ??
+                                (mintResult.chain === 'base' ? mintResult.txHash : null),
+                            baseExplorerUrl:
+                                mintResult.also?.explorerUrl ??
+                                (mintResult.chain === 'base' ? mintResult.explorerUrl : null),
                         }).catch((e) => console.error('[verify] mint email failed:', e));
                     }
                 } catch (e) {
                     console.error('[verify] attendance mint error:', e);
                     mint = {
                         ok: false,
-                        chain: 'soroban',
+                        chain: 'both',
                         status: 'failed',
                         error: e instanceof Error ? e.message : 'Mint failed',
                     };
@@ -215,7 +221,13 @@ export async function POST(request: Request) {
                 success: true,
                 alreadyVerified: false,
                 message: mint?.ok
-                    ? 'Attendance verified and minted on Stellar (Soroban).'
+                    ? `Attendance verified and minted on ${
+                          mint.chain === 'base'
+                              ? 'Base'
+                              : mint.chain === 'both'
+                                ? 'Stellar and Base'
+                                : 'Stellar (Soroban)'
+                      }.`
                     : 'Attendance recorded.',
                 mint,
             });

@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
-import { mintAttendanceProof } from '@/lib/attendance-mint';
-import { updateAttendanceMint } from '@/lib/codes';
+import {
+    attendanceMintChain,
+    explorerUrlForMint,
+    mintAttendanceProof,
+    mintWantsBase,
+    mintWantsSoroban,
+} from '@/lib/attendance-mint';
+import { mintResultToDbFields, updateAttendanceMint } from '@/lib/codes';
 import { sendAttendanceMintedEmail } from '@/lib/email';
 import { findEventByIdCaseInsensitive } from '@/lib/organizer-access';
 import { getRegistrationForEvent } from '@/lib/registrations';
@@ -9,8 +15,8 @@ import { getSupabase, isSupabaseConfigured } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 /**
- * Mint Soroban attendance proof for an existing check-in
- * (e.g. user connected Freighter after verify).
+ * Mint attendance proof for an existing check-in
+ * (Freighter for Soroban and/or Base wallet for GatefyPOAP).
  */
 export async function POST(request: Request) {
     try {
@@ -33,9 +39,25 @@ export async function POST(request: Request) {
         if (!email && !wallet) {
             return NextResponse.json({ error: 'email or wallet is required' }, { status: 400 });
         }
-        if (!stellarAddress) {
+
+        const chain = attendanceMintChain();
+        const needsStellar = mintWantsSoroban(chain);
+        const needsBase = mintWantsBase(chain);
+        if (needsStellar && !needsBase && !stellarAddress) {
             return NextResponse.json(
                 { error: 'Connect Freighter and pass stellarAddress (G…)' },
+                { status: 400 }
+            );
+        }
+        if (needsBase && !needsStellar && !wallet) {
+            return NextResponse.json(
+                { error: 'Connect a Base wallet and pass wallet (0x…)' },
+                { status: 400 }
+            );
+        }
+        if (needsStellar && needsBase && !stellarAddress && !wallet) {
+            return NextResponse.json(
+                { error: 'Connect Freighter and/or a Base wallet to mint.' },
                 { status: 400 }
             );
         }
@@ -43,7 +65,7 @@ export async function POST(request: Request) {
         const supabase = getSupabase();
         let q = supabase
             .from('attendance')
-            .select('id, email, mint_status, mint_tx_hash, mint_token_id')
+            .select('id, email, mint_status, mint_chain, mint_tx_hash, mint_token_id, mint_base_tx_hash, mint_base_token_id')
             .eq('event_id', eventId);
         if (email) q = q.ilike('email', email);
         else q = q.eq('wallet', wallet);
@@ -60,37 +82,36 @@ export async function POST(request: Request) {
             );
         }
 
-        if (row.mint_status === 'minted' && row.mint_tx_hash) {
-            const net = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet').toLowerCase();
-            const explorer =
-                net === 'public' || net === 'mainnet'
-                    ? `https://stellar.expert/explorer/public/tx/${row.mint_tx_hash}`
-                    : `https://stellar.expert/explorer/testnet/tx/${row.mint_tx_hash}`;
+        if (row.mint_status === 'minted' && (row.mint_tx_hash || row.mint_base_tx_hash)) {
+            const primaryHash = row.mint_tx_hash || row.mint_base_tx_hash;
+            const explorer = explorerUrlForMint(row.mint_chain, primaryHash);
             return NextResponse.json({
                 ok: true,
                 alreadyMinted: true,
-                chain: 'soroban',
-                txHash: row.mint_tx_hash,
-                tokenId: row.mint_token_id ?? undefined,
+                chain: row.mint_chain || 'soroban',
+                txHash: primaryHash,
+                tokenId: row.mint_token_id ?? row.mint_base_token_id ?? undefined,
                 explorerUrl: explorer,
+                baseTxHash: row.mint_base_tx_hash ?? undefined,
+                baseTokenId: row.mint_base_token_id ?? undefined,
+                baseExplorerUrl: row.mint_base_tx_hash
+                    ? explorerUrlForMint('base', row.mint_base_tx_hash)
+                    : undefined,
             });
         }
 
         const mintResult = await mintAttendanceProof({
             eventId,
-            stellarAddress,
+            stellarAddress: stellarAddress || null,
             evmWallet: wallet || null,
         });
 
+        const fields = mintResultToDbFields(mintResult);
         await updateAttendanceMint({
             eventId,
             wallet: email ? null : wallet || null,
             email: email || null,
-            mintChain: mintResult.ok ? mintResult.chain : mintResult.chain,
-            mintStatus: mintResult.ok ? 'minted' : mintResult.status,
-            mintTxHash: mintResult.ok ? mintResult.txHash : null,
-            mintTokenId: mintResult.ok ? mintResult.tokenId : null,
-            mintError: mintResult.ok ? null : mintResult.error,
+            ...fields,
         });
 
         if (!mintResult.ok) {
@@ -120,9 +141,14 @@ export async function POST(request: Request) {
                     to: toEmail,
                     event,
                     attendeeName: reg?.name ?? null,
+                    chain: mintResult.chain,
                     txHash: mintResult.txHash,
                     tokenId: mintResult.tokenId,
                     explorerUrl: mintResult.explorerUrl,
+                    baseTxHash: mintResult.also?.txHash ?? (mintResult.chain === 'base' ? mintResult.txHash : null),
+                    baseExplorerUrl:
+                        mintResult.also?.explorerUrl ??
+                        (mintResult.chain === 'base' ? mintResult.explorerUrl : null),
                 }).catch((e) => console.error('[attendance/mint] email failed:', e));
             }
         } catch (e) {
@@ -136,6 +162,9 @@ export async function POST(request: Request) {
             txHash: mintResult.txHash,
             tokenId: mintResult.tokenId,
             explorerUrl: mintResult.explorerUrl,
+            baseTxHash: mintResult.also?.txHash,
+            baseTokenId: mintResult.also?.tokenId,
+            baseExplorerUrl: mintResult.also?.explorerUrl,
         });
     } catch (e) {
         console.error('[attendance/mint]', e);

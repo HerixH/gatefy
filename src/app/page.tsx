@@ -142,6 +142,7 @@ function HomeContent() {
     txHash?: string;
     tokenId?: string;
     explorerUrl?: string;
+    baseExplorerUrl?: string;
     status?: string;
     error?: string;
   } | null>(null);
@@ -169,12 +170,16 @@ function HomeContent() {
   const [userMint, setUserMint] = useState<{
     minted: boolean;
     status?: string | null;
+    chain?: string | null;
     txHash?: string | null;
     tokenId?: string | null;
     explorerUrl?: string | null;
+    baseExplorerUrl?: string | null;
     error?: string | null;
   } | null>(null);
   const [mintingProof, setMintingProof] = useState(false);
+  /** Which attendance mint chains the server has enabled. */
+  const [mintConfig, setMintConfig] = useState({ soroban: true, base: false });
   const [registering, setRegistering] = useState(false);
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
@@ -242,9 +247,11 @@ function HomeContent() {
     minted?: boolean;
     mint?: {
       status?: string | null;
+      chain?: string | null;
       txHash?: string | null;
       tokenId?: string | null;
       explorerUrl?: string | null;
+      baseExplorerUrl?: string | null;
       error?: string | null;
       minted?: boolean;
     } | null;
@@ -258,18 +265,36 @@ function HomeContent() {
     setUserMint({
       minted: !!data.minted || !!data.mint.minted,
       status: data.mint.status ?? null,
+      chain: data.mint.chain ?? null,
       txHash: data.mint.txHash ?? null,
       tokenId: data.mint.tokenId ?? null,
       explorerUrl: data.mint.explorerUrl ?? null,
+      baseExplorerUrl: data.mint.baseExplorerUrl ?? null,
       error: data.mint.error ?? null,
     });
+  };
+
+  const mintChainLabel = (chain?: string | null) => {
+    const c = (chain || '').toLowerCase();
+    if (c === 'base') return 'Base';
+    if (c === 'both') return 'Stellar & Base';
+    return 'Stellar';
   };
 
   const mintProofForSelectedEvent = async () => {
     if (!selectedEvent) return;
     const stellar = readStellarAddress();
-    if (!stellar) {
+    if (mintConfig.soroban && !mintConfig.base && !stellar) {
       showWalletToast('Connect Freighter first.');
+      return;
+    }
+    if (mintConfig.base && !mintConfig.soroban && !address) {
+      showWalletToast('Connect Base wallet first.');
+      openConnectModal?.();
+      return;
+    }
+    if (mintConfig.soroban && mintConfig.base && !stellar && !address) {
+      showWalletToast('Connect Freighter and/or Base wallet first.');
       return;
     }
     const email = eventRegProfile?.email || readRegCache(selectedEvent.id)?.email;
@@ -282,7 +307,7 @@ function HomeContent() {
           eventId: selectedEvent.id,
           email: email || undefined,
           wallet: address || undefined,
-          stellarAddress: stellar,
+          stellarAddress: stellar || undefined,
         }),
       });
       const data = await res.json();
@@ -290,9 +315,11 @@ function HomeContent() {
         setUserMint({
           minted: true,
           status: 'minted',
+          chain: data.chain ?? null,
           txHash: data.txHash ?? null,
           tokenId: data.tokenId ?? null,
           explorerUrl: data.explorerUrl ?? null,
+          baseExplorerUrl: data.baseExplorerUrl ?? null,
           error: null,
         });
         setMintReceipt({
@@ -301,15 +328,22 @@ function HomeContent() {
           txHash: data.txHash,
           tokenId: data.tokenId,
           explorerUrl: data.explorerUrl,
+          baseExplorerUrl: data.baseExplorerUrl,
         });
-        showWalletToast(data.alreadyMinted ? 'Proof already minted.' : 'Minted on Stellar.');
+        showWalletToast(
+          data.alreadyMinted
+            ? 'Proof already minted.'
+            : `Minted on ${mintChainLabel(data.chain)}.`
+        );
       } else {
         setUserMint((prev) => ({
           minted: false,
           status: data.status ?? prev?.status ?? 'failed',
+          chain: data.chain ?? prev?.chain ?? null,
           txHash: prev?.txHash ?? null,
           tokenId: prev?.tokenId ?? null,
           explorerUrl: prev?.explorerUrl ?? null,
+          baseExplorerUrl: prev?.baseExplorerUrl ?? null,
           error: data.error || 'Mint failed.',
         }));
         showWalletToast(data.error || 'Mint failed.');
@@ -364,7 +398,13 @@ function HomeContent() {
   useEffect(() => {
     fetch('/api/app-config', { cache: 'no-store' })
       .then((r) => r.json())
-      .then((d) => setDatabaseConfigured(!!d.databaseConfigured))
+      .then((d) => {
+        setDatabaseConfigured(!!d.databaseConfigured);
+        setMintConfig({
+          soroban: d.mintSoroban !== false,
+          base: !!d.mintBase,
+        });
+      })
       .catch(() => setDatabaseConfigured(false));
   }, []);
 
@@ -1991,7 +2031,7 @@ function HomeContent() {
 
             <div className="w-full max-w-xl space-y-6 sm:space-y-8 lg:space-y-12 mx-0 sm:mx-auto lg:mx-0">
               <p className="text-base sm:text-lg lg:text-2xl text-secondary/80 font-light leading-relaxed">
-                A digital imprint of your physical journey. Immutable, elegant, and verified on the Base architecture.
+                A digital imprint of your physical journey. Immutable, elegant, and verified on the Blockchain architecture.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 lg:gap-6 w-full">
@@ -2888,7 +2928,9 @@ function HomeContent() {
                             <p className="text-[9px] text-white/25">You have checked in for this event.</p>
                             {userMint?.minted ? (
                               <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">Minted on Stellar</p>
+                                <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">
+                                  Minted on {mintChainLabel(userMint.chain)}
+                                </p>
                                 {userMint.tokenId ? (
                                   <p className="text-[9px] font-mono text-white/40">Token #{userMint.tokenId}</p>
                                 ) : null}
@@ -2899,7 +2941,19 @@ function HomeContent() {
                                     rel="noreferrer"
                                     className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent"
                                   >
-                                    View proof on Stellar Expert
+                                    {(userMint.chain || '').toLowerCase() === 'base'
+                                      ? 'View on Basescan'
+                                      : 'View on Stellar Expert'}
+                                  </a>
+                                ) : null}
+                                {userMint.baseExplorerUrl && userMint.baseExplorerUrl !== userMint.explorerUrl ? (
+                                  <a
+                                    href={userMint.baseExplorerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent ml-2"
+                                  >
+                                    View on Basescan
                                   </a>
                                 ) : null}
                               </div>
@@ -2908,18 +2962,39 @@ function HomeContent() {
                                 <p className="text-[9px] text-amber-400/80">
                                   {userMint?.error
                                     ? `Checked in — mint pending: ${userMint.error}`
-                                    : 'Checked in — connect Freighter to mint your on-chain proof.'}
+                                    : mintConfig.soroban && mintConfig.base
+                                      ? 'Checked in — connect Freighter and/or Base wallet to mint.'
+                                      : mintConfig.base
+                                        ? 'Checked in — connect Base wallet to mint your proof.'
+                                        : 'Checked in — connect Freighter to mint your proof.'}
                                 </p>
-                                <ConnectStellarButton
-                                  onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                                />
+                                {mintConfig.soroban ? (
+                                  <ConnectStellarButton
+                                    onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                                  />
+                                ) : null}
+                                {mintConfig.base && !address ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openConnectModal?.()}
+                                    className="w-full py-2.5 border border-white/20 hover:bg-white/5 text-[9px] font-bold tracking-[0.2em] uppercase"
+                                  >
+                                    Connect Base
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   disabled={mintingProof}
                                   onClick={() => void mintProofForSelectedEvent()}
                                   className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
                                 >
-                                  {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
+                                  {mintingProof
+                                    ? 'Minting…'
+                                    : mintConfig.soroban && mintConfig.base
+                                      ? 'Mint proof'
+                                      : mintConfig.base
+                                        ? 'Mint proof on Base'
+                                        : 'Mint proof on Stellar'}
                                 </button>
                               </div>
                             )}
@@ -3084,7 +3159,9 @@ function HomeContent() {
                         <p className="text-[9px] text-white/25">You have already checked in for this event.</p>
                         {userMint?.minted ? (
                           <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
-                            <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">Minted on Stellar</p>
+                            <p className="text-[10px] uppercase tracking-[0.2em] text-cyan-400/90 font-bold">
+                              Minted on {mintChainLabel(userMint.chain)}
+                            </p>
                             {userMint.tokenId ? (
                               <p className="text-[9px] font-mono text-white/40">Token #{userMint.tokenId}</p>
                             ) : null}
@@ -3095,7 +3172,19 @@ function HomeContent() {
                                 rel="noreferrer"
                                 className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent"
                               >
-                                View proof on Stellar Expert
+                                {(userMint.chain || '').toLowerCase() === 'base'
+                                  ? 'View on Basescan'
+                                  : 'View on Stellar Expert'}
+                              </a>
+                            ) : null}
+                            {userMint.baseExplorerUrl && userMint.baseExplorerUrl !== userMint.explorerUrl ? (
+                              <a
+                                href={userMint.baseExplorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-block text-[9px] tracking-[0.2em] uppercase text-accent/80 hover:text-accent ml-2"
+                              >
+                                View on Basescan
                               </a>
                             ) : null}
                           </div>
@@ -3104,18 +3193,39 @@ function HomeContent() {
                             <p className="text-[9px] text-amber-400/80">
                               {userMint?.error
                                 ? `Checked in — mint pending: ${userMint.error}`
-                                : 'Checked in — connect Freighter to mint your on-chain proof.'}
+                                : mintConfig.soroban && mintConfig.base
+                                  ? 'Checked in — connect Freighter and/or Base wallet to mint.'
+                                  : mintConfig.base
+                                    ? 'Checked in — connect Base wallet to mint your proof.'
+                                    : 'Checked in — connect Freighter to mint your proof.'}
                             </p>
-                            <ConnectStellarButton
-                              onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                            />
+                            {mintConfig.soroban ? (
+                              <ConnectStellarButton
+                                onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                              />
+                            ) : null}
+                            {mintConfig.base && !address ? (
+                              <button
+                                type="button"
+                                onClick={() => openConnectModal?.()}
+                                className="w-full py-2.5 border border-white/20 hover:bg-white/5 text-[9px] font-bold tracking-[0.2em] uppercase"
+                              >
+                                Connect Base
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               disabled={mintingProof}
                               onClick={() => void mintProofForSelectedEvent()}
                               className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
                             >
-                              {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
+                              {mintingProof
+                                ? 'Minting…'
+                                : mintConfig.soroban && mintConfig.base
+                                  ? 'Mint proof'
+                                  : mintConfig.base
+                                    ? 'Mint proof on Base'
+                                    : 'Mint proof on Stellar'}
                             </button>
                           </div>
                         )}
@@ -3276,16 +3386,20 @@ function HomeContent() {
             >
               <div className="mb-12">
                 <span className="text-[10px] font-bold tracking-[0.5em] uppercase text-accent">
-                  {mintReceipt?.ok ? 'Minted on Stellar' : 'Attendance verified'}
+                  {mintReceipt?.ok ? `Minted on ${mintChainLabel(mintReceipt.chain)}` : 'Attendance verified'}
                 </span>
               </div>
               <h2 className="text-5xl md:text-8xl font-medium tracking-tighter mb-8 italic">VERIFIED.</h2>
               <p className="text-lg md:text-xl text-secondary font-light mb-8 max-w-sm mx-auto">
                 {mintReceipt?.ok
-                  ? 'Your attendance proof was minted on Soroban. Base minting comes later.'
+                  ? `Your attendance proof was minted on ${mintChainLabel(mintReceipt.chain)}.`
                   : mintReceipt?.error
                     ? `Checked in. Mint: ${mintReceipt.error}`
-                    : 'Your presence is recorded. Connect Freighter to mint on Soroban.'}
+                    : mintConfig.soroban && mintConfig.base
+                      ? 'Your presence is recorded. Connect Freighter and/or Base to mint.'
+                      : mintConfig.base
+                        ? 'Your presence is recorded. Connect Base wallet to mint.'
+                        : 'Your presence is recorded. Connect Freighter to mint on Soroban.'}
               </p>
               {mintReceipt?.ok && mintReceipt.tokenId ? (
                 <p className="text-[10px] font-mono text-white/40 mb-8">
@@ -3295,51 +3409,30 @@ function HomeContent() {
               ) : null}
               {!mintReceipt?.ok && selectedEvent ? (
                 <div className="w-full max-w-xs mx-auto mb-8 space-y-3">
-                  <ConnectStellarButton
-                    onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                  />
+                  {mintConfig.soroban ? (
+                    <ConnectStellarButton
+                      onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
+                    />
+                  ) : null}
+                  {mintConfig.base && !address ? (
+                    <button
+                      type="button"
+                      onClick={() => openConnectModal?.()}
+                      className="w-full py-3 border border-white/20 hover:bg-white/5 text-[10px] font-bold tracking-[0.2em] uppercase"
+                    >
+                      Connect Base
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="w-full py-3 border border-white/20 hover:bg-white hover:text-black transition-colors text-[10px] font-bold tracking-[0.2em] uppercase"
-                    onClick={async () => {
-                      const stellar = readStellarAddress();
-                      if (!stellar) {
-                        showWalletToast('Connect Freighter first.');
-                        return;
-                      }
-                      const email = eventRegProfile?.email || readRegCache(selectedEvent.id)?.email;
-                      try {
-                        const res = await fetch('/api/attendance/mint', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            eventId: selectedEvent.id,
-                            email: email || undefined,
-                            wallet: address || undefined,
-                            stellarAddress: stellar,
-                          }),
-                        });
-                        const data = await res.json();
-                        if (data.ok) {
-                          setMintReceipt({
-                            ok: true,
-                            chain: data.chain,
-                            txHash: data.txHash,
-                            tokenId: data.tokenId,
-                            explorerUrl: data.explorerUrl,
-                          });
-                          showWalletToast(
-                            data.alreadyMinted ? 'Proof already minted.' : 'Minted on Stellar.'
-                          );
-                        } else {
-                          showWalletToast(data.error || 'Mint failed.');
-                        }
-                      } catch {
-                        showWalletToast('Network error during mint.');
-                      }
-                    }}
+                    onClick={() => void mintProofForSelectedEvent()}
                   >
-                    Mint proof on Stellar
+                    {mintConfig.soroban && mintConfig.base
+                      ? 'Mint proof'
+                      : mintConfig.base
+                        ? 'Mint proof on Base'
+                        : 'Mint proof on Stellar'}
                   </button>
                 </div>
               ) : null}
@@ -3361,7 +3454,21 @@ function HomeContent() {
                     rel="noreferrer"
                     className="text-[10px] tracking-[0.3em] hover:opacity-100 opacity-40 uppercase transition-opacity"
                   >
-                    View on Stellar Expert
+                    {(mintReceipt.chain || '').toLowerCase() === 'base'
+                      ? 'View on Basescan'
+                      : 'View on Stellar Expert'}
+                  </a>
+                ) : null}
+                {mintReceipt?.ok &&
+                mintReceipt.baseExplorerUrl &&
+                mintReceipt.baseExplorerUrl !== mintReceipt.explorerUrl ? (
+                  <a
+                    href={mintReceipt.baseExplorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] tracking-[0.3em] hover:opacity-100 opacity-40 uppercase transition-opacity"
+                  >
+                    View on Basescan
                   </a>
                 ) : null}
               </div>

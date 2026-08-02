@@ -1,6 +1,6 @@
 /**
  * Mint attendance proof after successful door verify.
- * Primary chain: Soroban (Stellar). Base ERC-721 reserved for later.
+ * Chains: Soroban (Stellar) and/or Base ERC-721 (GatefyPOAP).
  */
 
 import {
@@ -14,22 +14,35 @@ import {
     xdr,
 } from '@stellar/stellar-sdk';
 import { Api, Server as SorobanServer } from '@stellar/stellar-sdk/rpc';
+import { createPublicClient, createWalletClient, http, type Hex, type Chain } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { base, baseSepolia } from 'viem/chains';
 import { clientStellarNetwork } from '@/lib/stellar-client-config';
+import { GATEFY_POAP_ABI } from '@/lib/gatefy-poap-abi';
 
-export type MintChain = 'soroban' | 'base' | 'off';
+export type MintChain = 'soroban' | 'base' | 'both' | 'off';
+
+export type MintOk = {
+    ok: true;
+    chain: 'soroban' | 'base' | 'both';
+    txHash: string;
+    tokenId: string;
+    explorerUrl: string;
+    /** When chain=both and the other leg also succeeded. */
+    also?: {
+        chain: 'soroban' | 'base';
+        txHash: string;
+        tokenId: string;
+        explorerUrl: string;
+    };
+};
 
 export type MintResult =
-    | {
-          ok: true;
-          chain: 'soroban';
-          txHash: string;
-          tokenId: string;
-          explorerUrl: string;
-      }
+    | MintOk
     | {
           ok: false;
           chain: MintChain;
-          status: 'skipped' | 'failed' | 'not_configured' | 'base_later';
+          status: 'skipped' | 'failed' | 'not_configured';
           error: string;
       };
 
@@ -37,7 +50,16 @@ export function attendanceMintChain(): MintChain {
     const raw = (process.env.ATTENDANCE_MINT_CHAIN || 'soroban').trim().toLowerCase();
     if (raw === 'off' || raw === 'false' || raw === '0') return 'off';
     if (raw === 'base') return 'base';
+    if (raw === 'both' || raw === 'all') return 'both';
     return 'soroban';
+}
+
+export function mintWantsSoroban(chain = attendanceMintChain()): boolean {
+    return chain === 'soroban' || chain === 'both';
+}
+
+export function mintWantsBase(chain = attendanceMintChain()): boolean {
+    return chain === 'base' || chain === 'both';
 }
 
 function sorobanRpcUrl(): string {
@@ -51,13 +73,36 @@ function networkPassphrase(): string {
     return clientStellarNetwork() === 'testnet' ? Networks.TESTNET : Networks.PUBLIC;
 }
 
-function explorerTxUrl(txHash: string): string {
+function stellarExplorerTxUrl(txHash: string): string {
     const net = clientStellarNetwork() === 'testnet' ? 'testnet' : 'public';
     return `https://stellar.expert/explorer/${net}/tx/${txHash}`;
 }
 
+function baseChain(): Chain {
+    const raw = (process.env.NEXT_PUBLIC_BASE_CHAIN || process.env.BASE_CHAIN || 'baseSepolia')
+        .trim()
+        .toLowerCase();
+    if (raw === 'base' || raw === 'mainnet') return base;
+    return baseSepolia;
+}
+
+function baseExplorerTxUrl(txHash: string): string {
+    const c = baseChain();
+    if (c.id === base.id) return `https://basescan.org/tx/${txHash}`;
+    return `https://sepolia.basescan.org/tx/${txHash}`;
+}
+
+function baseRpcUrl(): string {
+    if (process.env.BASE_RPC_URL?.trim()) return process.env.BASE_RPC_URL.trim();
+    return baseChain().id === base.id ? 'https://mainnet.base.org' : 'https://sepolia.base.org';
+}
+
 function isStellarAddress(addr: string): boolean {
     return /^G[A-Z0-9]{55}$/.test(addr.trim());
+}
+
+function isEvmAddress(addr: string): boolean {
+    return /^0x[a-fA-F0-9]{40}$/.test(addr.trim());
 }
 
 async function waitForTx(server: SorobanServer, hash: string, attempts = 30): Promise<string> {
@@ -102,11 +147,10 @@ async function mintOnSoroban(params: {
             ok: false,
             chain: 'soroban',
             status: 'skipped',
-            error: 'Connect a Stellar wallet (Freighter) before verify so we can mint your proof.',
+            error: 'Connect Freighter before mint so we can mint your Stellar proof.',
         };
     }
 
-    // Local/demo: simulate mint when contract env is missing or secret is DEV
     if (
         process.env.NEXT_PUBLIC_DEV_MODE === 'true' &&
         (!contractId || !secret || secret === 'DEV')
@@ -117,7 +161,7 @@ async function mintOnSoroban(params: {
             chain: 'soroban',
             txHash: fake,
             tokenId: String(Date.now() % 1_000_000),
-            explorerUrl: explorerTxUrl(fake),
+            explorerUrl: stellarExplorerTxUrl(fake),
         };
     }
 
@@ -127,7 +171,7 @@ async function mintOnSoroban(params: {
             chain: 'soroban',
             status: 'not_configured',
             error:
-                'Set SOROBAN_CONTRACT_ID and STELLAR_MINTER_SECRET to mint on verify. See contracts/soroban/README.md',
+                'Set SOROBAN_CONTRACT_ID and STELLAR_MINTER_SECRET to mint on Stellar. See contracts/soroban/README.md',
         };
     }
 
@@ -177,7 +221,7 @@ async function mintOnSoroban(params: {
             chain: 'soroban',
             txHash: hash,
             tokenId,
-            explorerUrl: explorerTxUrl(hash),
+            explorerUrl: stellarExplorerTxUrl(hash),
         };
     } catch (e) {
         return {
@@ -189,17 +233,130 @@ async function mintOnSoroban(params: {
     }
 }
 
+async function mintOnBase(params: {
+    eventId: string;
+    evmWallet: string;
+}): Promise<MintResult> {
+    const contractId = (
+        process.env.BASE_POAP_CONTRACT_ID ||
+        process.env.NEXT_PUBLIC_BASE_POAP_CONTRACT_ID ||
+        ''
+    ).trim() as Hex | '';
+    const secret = (
+        process.env.BASE_MINTER_PRIVATE_KEY ||
+        process.env.PRIVATE_KEY ||
+        ''
+    ).trim();
+
+    if (!isEvmAddress(params.evmWallet)) {
+        return {
+            ok: false,
+            chain: 'base',
+            status: 'skipped',
+            error: 'Connect a Base wallet before mint so we can mint your Base proof.',
+        };
+    }
+
+    if (
+        process.env.NEXT_PUBLIC_DEV_MODE === 'true' &&
+        (!contractId || !secret || secret === 'DEV')
+    ) {
+        const fake = `0xbase${Date.now().toString(16).padStart(56, '0')}`;
+        return {
+            ok: true,
+            chain: 'base',
+            txHash: fake,
+            tokenId: String(Date.now() % 1_000_000),
+            explorerUrl: baseExplorerTxUrl(fake),
+        };
+    }
+
+    if (!contractId || !/^0x[a-fA-F0-9]{40}$/.test(contractId)) {
+        return {
+            ok: false,
+            chain: 'base',
+            status: 'not_configured',
+            error:
+                'Set BASE_POAP_CONTRACT_ID (deploy contracts/GatefyPOAP.sol) to mint on Base.',
+        };
+    }
+    if (!secret || secret === 'DEV') {
+        return {
+            ok: false,
+            chain: 'base',
+            status: 'not_configured',
+            error: 'Set BASE_MINTER_PRIVATE_KEY for the contract minter / owner.',
+        };
+    }
+
+    try {
+        const pk = (secret.startsWith('0x') ? secret : `0x${secret}`) as Hex;
+        const account = privateKeyToAccount(pk);
+        const chain = baseChain();
+        const transport = http(baseRpcUrl());
+        const wallet = createWalletClient({ account, chain, transport });
+        const publicClient = createPublicClient({ chain, transport });
+
+        const hash = await wallet.writeContract({
+            address: contractId as Hex,
+            abi: GATEFY_POAP_ABI,
+            functionName: 'mintAttendance',
+            args: [params.evmWallet.trim() as Hex, params.eventId.slice(0, 128)],
+        });
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+        if (receipt.status !== 'success') {
+            return {
+                ok: false,
+                chain: 'base',
+                status: 'failed',
+                error: 'Base mint transaction reverted',
+            };
+        }
+
+        let tokenId = '1';
+        for (const log of receipt.logs) {
+            try {
+                // AttendanceMinted(to indexed, tokenId indexed, eventId)
+                if (log.topics[2]) {
+                    tokenId = BigInt(log.topics[2]).toString();
+                    break;
+                }
+            } catch {
+                /* ignore */
+            }
+        }
+
+        return {
+            ok: true,
+            chain: 'base',
+            txHash: hash,
+            tokenId,
+            explorerUrl: baseExplorerTxUrl(hash),
+        };
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Base mint failed';
+        return {
+            ok: false,
+            chain: 'base',
+            status: 'failed',
+            error: msg.length > 240 ? `${msg.slice(0, 240)}…` : msg,
+        };
+    }
+}
+
 /**
- * After a new check-in, mint the attendance proof.
- * Base path is intentionally stubbed — Soroban first.
+ * After a new check-in (or retry), mint attendance proof on configured chain(s).
  */
 export async function mintAttendanceProof(params: {
     eventId: string;
     stellarAddress?: string | null;
-    /** EVM wallet — ignored until Base adapter ships */
     evmWallet?: string | null;
 }): Promise<MintResult> {
     const chain = attendanceMintChain();
+    const eventId = params.eventId.trim().toLowerCase();
+    const stellarAddress = (params.stellarAddress || '').trim();
+    const evmWallet = (params.evmWallet || '').trim();
 
     if (chain === 'off') {
         return {
@@ -210,17 +367,61 @@ export async function mintAttendanceProof(params: {
         };
     }
 
-    if (chain === 'base') {
-        return {
-            ok: false,
-            chain: 'base',
-            status: 'base_later',
-            error: 'Base mint is not wired yet. Use ATTENDANCE_MINT_CHAIN=soroban.',
-        };
+    if (chain === 'soroban') {
+        return mintOnSoroban({ eventId, stellarAddress });
     }
 
-    return mintOnSoroban({
-        eventId: params.eventId,
-        stellarAddress: (params.stellarAddress || '').trim(),
-    });
+    if (chain === 'base') {
+        return mintOnBase({ eventId, evmWallet });
+    }
+
+    // both — try available wallets; succeed if either mints
+    const soroban = await mintOnSoroban({ eventId, stellarAddress });
+    const baseMint = await mintOnBase({ eventId, evmWallet });
+
+    if (soroban.ok && baseMint.ok) {
+        return {
+            ok: true,
+            chain: 'both',
+            txHash: soroban.txHash,
+            tokenId: soroban.tokenId,
+            explorerUrl: soroban.explorerUrl,
+            also: {
+                chain: 'base',
+                txHash: baseMint.txHash,
+                tokenId: baseMint.tokenId,
+                explorerUrl: baseMint.explorerUrl,
+            },
+        };
+    }
+    if (soroban.ok) return soroban;
+    if (baseMint.ok) return baseMint;
+
+    // Prefer a useful error (wallet missing vs failed)
+    const err =
+        (!isStellarAddress(stellarAddress) && !isEvmAddress(evmWallet)
+            ? 'Connect Freighter and/or a Base wallet to mint your proof.'
+            : null) ||
+        (soroban.ok === false ? soroban.error : null) ||
+        (baseMint.ok === false ? baseMint.error : null) ||
+        'Mint failed on Stellar and Base.';
+
+    return {
+        ok: false,
+        chain: 'both',
+        status: 'failed',
+        error: err,
+    };
+}
+
+/** Explorer URL helper for persisted rows (client/API). */
+export function explorerUrlForMint(chain: string | null | undefined, txHash: string | null | undefined): string | null {
+    if (!txHash) return null;
+    const c = (chain || '').toLowerCase();
+    if (c === 'base') return baseExplorerTxUrl(txHash);
+    if (c === 'both' || c === 'soroban' || !c) {
+        if (txHash.startsWith('0x')) return baseExplorerTxUrl(txHash);
+        return stellarExplorerTxUrl(txHash);
+    }
+    return stellarExplorerTxUrl(txHash);
 }
