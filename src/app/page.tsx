@@ -206,6 +206,18 @@ function HomeContent() {
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
   const [normalPayRef, setNormalPayRef] = useState('');
+  /** Already registered — verify email OTP before opening ticket. */
+  const [ticketClaim, setTicketClaim] = useState<{
+    eventId: string;
+    email: string;
+    name?: string | null;
+    sending?: boolean;
+    verifying?: boolean;
+    emailSent?: boolean;
+    devCode?: string;
+    error?: string;
+  } | null>(null);
+  const [ticketClaimCode, setTicketClaimCode] = useState('');
   /** Wallet (blockchain) registration: email + first name or org name */
   const [blockchainSignupEmail, setBlockchainSignupEmail] = useState('');
   const [blockchainSignupName, setBlockchainSignupName] = useState('');
@@ -288,12 +300,13 @@ function HomeContent() {
     });
   };
 
-  /** When signup hits an existing registration, open their ticket details instead of an error. */
+  /** After email OTP (or wallet identity), open the attendee ticket view. */
   const resumeExistingRegistration = async (opts: {
     eventId: string;
     email?: string | null;
     name?: string | null;
     wallet?: string | null;
+    toast?: string;
   }) => {
     let email = (opts.email || '').trim().toLowerCase();
     let name = (opts.name || '').trim() || null;
@@ -326,6 +339,8 @@ function HomeContent() {
       if (name) setNormalSignupName(name);
     }
 
+    setTicketClaim(null);
+    setTicketClaimCode('');
     setIsUserRegistered(true);
     setEventRegProfile({
       email: email || null,
@@ -351,7 +366,107 @@ function HomeContent() {
       /* ignore */
     }
 
-    showWalletToast("You're already registered — here's your ticket.");
+    showWalletToast(opts.toast || "You're registered — here's your ticket.");
+  };
+
+  /** Already registered with email — send OTP so they prove inbox ownership. */
+  const startTicketClaim = async (opts: {
+    eventId: string;
+    email: string;
+    name?: string | null;
+  }) => {
+    const email = opts.email.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showWalletToast('Enter the email you registered with.');
+      return;
+    }
+    setNormalSignupEmail(email);
+    if (opts.name) setNormalSignupName(opts.name);
+    setTicketClaimCode('');
+    setTicketClaim({
+      eventId: opts.eventId,
+      email,
+      name: opts.name ?? null,
+      sending: true,
+      error: '',
+    });
+    try {
+      const res = await fetch('/api/register/claim/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: opts.eventId, email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTicketClaim(null);
+        showWalletToast(
+          typeof data.error === 'string' ? data.error : 'Could not send verification code.'
+        );
+        return;
+      }
+      setTicketClaim({
+        eventId: opts.eventId,
+        email,
+        name: opts.name ?? null,
+        sending: false,
+        emailSent: !!data.emailSent,
+        devCode: typeof data.devCode === 'string' ? data.devCode : undefined,
+        error: '',
+      });
+      showWalletToast(
+        typeof data.message === 'string'
+          ? data.message
+          : 'Check your email for a 6-digit code.'
+      );
+    } catch {
+      setTicketClaim(null);
+      showWalletToast('Network error sending verification code.');
+    }
+  };
+
+  const verifyTicketClaim = async () => {
+    if (!ticketClaim) return;
+    const code = ticketClaimCode.trim();
+    if (!/^\d{6}$/.test(code)) {
+      setTicketClaim((prev) => (prev ? { ...prev, error: 'Enter the 6-digit code from your email.' } : prev));
+      return;
+    }
+    setTicketClaim((prev) => (prev ? { ...prev, verifying: true, error: '' } : prev));
+    try {
+      const res = await fetch('/api/register/claim/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: ticketClaim.eventId,
+          email: ticketClaim.email,
+          code,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTicketClaim((prev) =>
+          prev
+            ? {
+                ...prev,
+                verifying: false,
+                error: typeof data.error === 'string' ? data.error : 'Invalid code.',
+              }
+            : prev
+        );
+        return;
+      }
+      await resumeExistingRegistration({
+        eventId: ticketClaim.eventId,
+        email: data.email ?? ticketClaim.email,
+        name: data.name ?? ticketClaim.name,
+        wallet: data.wallet ?? null,
+        toast: 'Email verified — here is your ticket.',
+      });
+    } catch {
+      setTicketClaim((prev) =>
+        prev ? { ...prev, verifying: false, error: 'Network error verifying code.' } : prev
+      );
+    }
   };
 
   const isAlreadyRegisteredResponse = (data: {
@@ -1449,17 +1564,15 @@ function HomeContent() {
     };
   }, [searchParams, pathname, router, selectedEvent?.id]);
 
-  // Email deep links (?event=&email=) from receipt / confirmation — restore registration on mobile.
+  // Email deep links (?event=&email=) — ask for OTP before opening ticket (not Stepay return).
   useEffect(() => {
-    if (searchParams.get('stepay')) return; // handled above
+    if (searchParams.get('stepay')) return;
     const eventId = (searchParams.get('event') || '').trim();
     const email = (searchParams.get('email') || '').trim().toLowerCase();
     if (!eventId || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
 
-    writeRegCache(eventId, { email });
     setNormalSignupEmail(email);
 
-    let cancelled = false;
     const clearEmailParam = () => {
       const next = new URLSearchParams(searchParams.toString());
       next.delete('email');
@@ -1467,46 +1580,9 @@ function HomeContent() {
       router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
     };
 
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/register?eventId=${encodeURIComponent(eventId)}&email=${encodeURIComponent(email)}`,
-          { cache: 'no-store' }
-        );
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.registered) {
-          setIsUserRegistered(true);
-          setEventRegProfile({
-            email: data.email ?? email,
-            name: data.name ?? null,
-            wallet: data.wallet ?? null,
-          });
-          writeRegCache(eventId, {
-            email: data.email ?? email,
-            name: data.name ?? null,
-          });
-          try {
-            const vRes = await fetch(
-              `/api/events/verified?eventId=${encodeURIComponent(eventId)}&email=${encodeURIComponent(email)}`,
-              { cache: 'no-store' }
-            );
-            const v = await vRes.json();
-            if (!cancelled) applyVerifiedResponse(v);
-          } catch {
-            /* ignore */
-          }
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        if (!cancelled) clearEmailParam();
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    clearEmailParam();
+    void startTicketClaim({ eventId, email });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per deep-link email
   }, [searchParams, pathname, router]);
 
   useEffect(() => {
@@ -2135,12 +2211,21 @@ function HomeContent() {
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
       } else if (isAlreadyRegisteredResponse(data)) {
-        await resumeExistingRegistration({
-          eventId: selectedEvent.id,
-          email: data.email ?? emailTrim,
-          name: data.name ?? nameTrim,
-          wallet: data.wallet ?? address,
-        });
+        const claimEmail = (data.email ?? emailTrim ?? '').trim();
+        if (claimEmail) {
+          await startTicketClaim({
+            eventId: selectedEvent.id,
+            email: claimEmail,
+            name: data.name ?? nameTrim,
+          });
+        } else {
+          await resumeExistingRegistration({
+            eventId: selectedEvent.id,
+            email: null,
+            name: data.name ?? nameTrim,
+            wallet: data.wallet ?? address,
+          });
+        }
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
       }
@@ -2219,11 +2304,10 @@ function HomeContent() {
         const updated = list.find((e) => e.id === selectedEvent.id);
         if (updated) setSelectedEvent(updated);
       } else if (isAlreadyRegisteredResponse(data)) {
-        await resumeExistingRegistration({
+        await startTicketClaim({
           eventId: selectedEvent.id,
           email: data.email ?? email,
           name: data.name ?? nameTrim,
-          wallet: data.wallet ?? null,
         });
       } else {
         showWalletToast(data.error || 'Registration failed. Please try again.');
@@ -3236,6 +3320,79 @@ function HomeContent() {
                           <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
                           <p className="text-[9px] text-white/25 mt-1">Registration is closed for this event.</p>
                         </div>
+                      ) : ticketClaim && ticketClaim.eventId === selectedEvent.id ? (
+                        <div className="space-y-3 p-3 border border-emerald-500/25 bg-emerald-500/[0.06]">
+                          <p className="text-[8px] tracking-[0.25em] uppercase text-emerald-300/90 font-black">
+                            Already registered — verify email
+                          </p>
+                          <p className="text-[11px] text-white/65 leading-relaxed">
+                            We sent a 6-digit code to{' '}
+                            <span className="font-mono text-white/85 break-all">{ticketClaim.email}</span>.
+                            Enter it to open your ticket and payment details.
+                          </p>
+                          {ticketClaim.devCode ? (
+                            <p className="text-[10px] font-mono text-amber-300/90">
+                              DEV code: {ticketClaim.devCode}
+                            </p>
+                          ) : null}
+                          <div className="space-y-1">
+                            <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
+                              Email code *
+                            </label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="one-time-code"
+                              maxLength={6}
+                              value={ticketClaimCode}
+                              onChange={(e) =>
+                                setTicketClaimCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                              }
+                              placeholder="000000"
+                              className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-lg font-mono tracking-[0.35em] text-center placeholder:text-white/20 focus:outline-none focus:border-white/25"
+                            />
+                          </div>
+                          {ticketClaim.error ? (
+                            <p className="text-[9px] text-red-400 font-bold uppercase tracking-widest">
+                              {ticketClaim.error}
+                            </p>
+                          ) : null}
+                          <button
+                            type="button"
+                            disabled={!!ticketClaim.sending || !!ticketClaim.verifying}
+                            onClick={() => void verifyTicketClaim()}
+                            className="w-full py-3 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
+                          >
+                            {ticketClaim.verifying ? 'Verifying…' : 'Open my ticket'}
+                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={!!ticketClaim.sending || !!ticketClaim.verifying}
+                              onClick={() =>
+                                void startTicketClaim({
+                                  eventId: ticketClaim.eventId,
+                                  email: ticketClaim.email,
+                                  name: ticketClaim.name,
+                                })
+                              }
+                              className="flex-1 py-2.5 border border-white/15 text-[9px] font-bold tracking-[0.15em] uppercase text-white/70 hover:bg-white/5 disabled:opacity-50"
+                            >
+                              {ticketClaim.sending ? 'Sending…' : 'Resend code'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!!ticketClaim.verifying}
+                              onClick={() => {
+                                setTicketClaim(null);
+                                setTicketClaimCode('');
+                              }}
+                              className="flex-1 py-2.5 border border-white/15 text-[9px] font-bold tracking-[0.15em] uppercase text-white/50 hover:bg-white/5"
+                            >
+                              Back
+                            </button>
+                          </div>
+                        </div>
                       ) : (
                         <form onSubmit={handleRegisterNormal} className="space-y-3 p-3 border border-white/10 bg-white/[0.02]">
                           <p className="text-[8px] tracking-[0.25em] uppercase text-white/50 font-bold">Sign up with email</p>
@@ -3287,13 +3444,12 @@ function HomeContent() {
                               email={normalSignupEmail}
                               name={normalSignupName}
                               amountUsdc={selectedEvent.ticketPriceUsdc!}
-                              disabled={registering}
+                              disabled={registering || !!ticketClaim?.sending}
                               onAlreadyRegistered={(info) => {
-                                void resumeExistingRegistration({
+                                void startTicketClaim({
                                   eventId: selectedEvent.id,
                                   email: info.email ?? normalSignupEmail,
                                   name: info.name ?? normalSignupName,
-                                  wallet: info.wallet ?? null,
                                 });
                               }}
                             />
@@ -3308,6 +3464,20 @@ function HomeContent() {
                               {registering ? 'Processing...' : 'Register for Event'}
                             </button>
                           ) : null}
+                          <button
+                            type="button"
+                            disabled={registering || !!ticketClaim?.sending}
+                            onClick={() =>
+                              void startTicketClaim({
+                                eventId: selectedEvent.id,
+                                email: normalSignupEmail,
+                                name: normalSignupName || null,
+                              })
+                            }
+                            className="w-full py-2.5 border border-white/15 text-[9px] font-bold tracking-[0.15em] uppercase text-white/60 hover:bg-white/5 disabled:opacity-50"
+                          >
+                            Already registered? Connect with email
+                          </button>
                         </form>
                       )
                     ) : (

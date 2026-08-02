@@ -51,11 +51,15 @@ export function StepayPayButton({
                     data.alreadyRegistered === true ||
                     data.error === 'Already registered'
                 ) {
-                    onAlreadyRegistered?.({
-                        email: data.email ?? email.trim().toLowerCase(),
-                        name: data.name ?? name.trim(),
-                        wallet: data.wallet ?? wallet ?? null,
-                    });
+                    if (onAlreadyRegistered) {
+                        onAlreadyRegistered({
+                            email: data.email ?? email.trim().toLowerCase(),
+                            name: data.name ?? name.trim(),
+                            wallet: data.wallet ?? wallet ?? null,
+                        });
+                        return;
+                    }
+                    setError('Already registered — use Connect with email to verify.');
                     return;
                 }
                 setError(typeof data.error === 'string' ? data.error : 'Could not start Stepay checkout.');
