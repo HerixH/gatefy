@@ -67,24 +67,17 @@ export async function POST(request: Request) {
         );
     }
 
-    // Show code in the app when email wasn't delivered, or when DEV mode is on (local / test).
-    const showCodeInApp =
-        !!sent.skipped ||
-        process.env.DEV_MODE === 'true' ||
-        process.env.NEXT_PUBLIC_DEV_MODE === 'true' ||
-        process.env.NODE_ENV === 'development';
-
+    // Never surface the OTP in the UI when email was delivered — user must enter it from inbox.
+    // Only return devCode if email could not be sent (local without Resend).
     const res = NextResponse.json({
         ok: true,
         email,
         stored: 'database',
         emailSent: !!sent.ok && !sent.skipped,
-        ...(showCodeInApp ? { devCode: code } : {}),
+        ...(sent.skipped ? { devCode: code } : {}),
         message: sent.skipped
-            ? 'Email delivery is not configured. Use the code shown below.'
-            : showCodeInApp
-              ? 'Code sent to your email — and shown below for testing.'
-              : 'Check your inbox for a 6-digit code.',
+            ? 'Email delivery is not configured. Use the code returned for local testing.'
+            : 'Check your inbox for a 6-digit code, then enter it here.',
     });
     res.cookies.set(ORGANIZER_OTP_COOKIE, cookieValue, shortLivedCookieOptions(600));
     return res;

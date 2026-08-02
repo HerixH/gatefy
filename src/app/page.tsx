@@ -782,12 +782,8 @@ function HomeContent() {
           return;
         }
         setOrganizerOtpSentTo(r.email);
-        if (r.devCode) {
-          setOrganizerOtpDraft(r.devCode);
-          showWalletToast(`Dev code: ${r.devCode}`);
-        } else {
-          showWalletToast(r.message);
-        }
+        setOrganizerOtpDraft('');
+        showWalletToast(r.message);
         return;
       }
       const v = await verifyEmailCode(organizerOtpSentTo, organizerOtpDraft);

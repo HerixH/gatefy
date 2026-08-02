@@ -154,14 +154,12 @@ export function CreateEventWizard({
     const [stepError, setStepError] = useState('');
     const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
     const [otpDraft, setOtpDraft] = useState('');
-    const [otpShownInApp, setOtpShownInApp] = useState<string | null>(null);
 
     useEffect(() => {
         setStepIndex(0);
         setStepError('');
         setOtpSentTo(null);
         setOtpDraft('');
-        setOtpShownInApp(null);
     }, [address]);
 
     useEffect(() => {
@@ -487,14 +485,8 @@ export function CreateEventWizard({
                                                         return;
                                                     }
                                                     setOtpSentTo(form.organizerEmail.trim().toLowerCase());
-                                                    if (r.devCode) {
-                                                        setOtpShownInApp(r.devCode);
-                                                        setOtpDraft(r.devCode);
-                                                        showToast(`Your code: ${r.devCode}`);
-                                                    } else {
-                                                        setOtpShownInApp(null);
-                                                        showToast(r.message || 'Code sent.');
-                                                    }
+                                                    setOtpDraft('');
+                                                    showToast(r.message || 'Check your email for the code.');
                                                 }}
                                                 className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
                                             >
@@ -503,18 +495,11 @@ export function CreateEventWizard({
                                         ) : (
                                             <div className="space-y-2">
                                                 <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                                                    6-digit code *
+                                                    6-digit code from email *
                                                 </label>
-                                                {otpShownInApp ? (
-                                                    <div className="p-4 border border-emerald-400/40 bg-emerald-500/10 space-y-1">
-                                                        <p className="text-[8px] uppercase tracking-[0.3em] text-emerald-300/90 font-black">
-                                                            Your code (also emailed)
-                                                        </p>
-                                                        <p className="text-3xl font-mono font-black tracking-[0.35em] text-white tabular-nums">
-                                                            {otpShownInApp.split('').join(' ')}
-                                                        </p>
-                                                    </div>
-                                                ) : null}
+                                                <p className="text-[10px] text-white/45 leading-relaxed">
+                                                    Check your inbox, then type the code here.
+                                                </p>
                                                 <input
                                                     type="text"
                                                     inputMode="numeric"
@@ -523,7 +508,7 @@ export function CreateEventWizard({
                                                     onChange={(e) =>
                                                         setOtpDraft(e.target.value.replace(/\D/g, '').slice(0, 6))
                                                     }
-                                                    placeholder="123456"
+                                                    placeholder="Enter code from email"
                                                     className={inputCls}
                                                 />
                                                 <button
@@ -552,7 +537,6 @@ export function CreateEventWizard({
                                                     onClick={() => {
                                                         setOtpSentTo(null);
                                                         setOtpDraft('');
-                                                        setOtpShownInApp(null);
                                                     }}
                                                 >
                                                     Use a different email
