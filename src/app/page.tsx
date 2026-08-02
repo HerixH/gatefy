@@ -2058,9 +2058,13 @@ function HomeContent() {
                           <div className="text-right shrink-0">
                             <p className="text-[9px] font-mono text-secondary/50">{formatDate(ev.date)}</p>
                             <p className="text-[8px] tracking-widest text-secondary/30 mt-0.5">
-                              {ev.maxAttendees != null && ev.maxAttendees > 0
-                                ? `${getRegisteredCount(ev)} / ${ev.maxAttendees} · ${getRemainingSeats(ev) ?? 0} left`
-                                : `${ev.attendeeCount} Verified`}
+                              {isEventOrganizer(ev.organizer, orgCtx)
+                                ? ev.maxAttendees != null && ev.maxAttendees > 0
+                                  ? `${getRegisteredCount(ev)} / ${ev.maxAttendees} · ${getRemainingSeats(ev) ?? 0} left`
+                                  : `${ev.attendeeCount} Verified`
+                                : ev.maxAttendees != null && ev.maxAttendees > 0
+                                  ? `${getRemainingSeats(ev) ?? 0} spots left`
+                                  : null}
                             </p>
                           </div>
                         </div>
@@ -2582,14 +2586,16 @@ function HomeContent() {
                       {selectedEvent.organizer.slice(0, 8)}...{selectedEvent.organizer.slice(-4)}
                     </p>
                   </div>
-                  <div className="space-y-0.5">
-                    <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Attendees</p>
-                    <p className="text-xs font-mono text-white/70">
-                      {selectedEvent.maxAttendees != null && selectedEvent.maxAttendees > 0
-                        ? `${getRegisteredCount(selectedEvent)} / ${selectedEvent.maxAttendees} (${selectedEvent.attendeeCount} verified)`
-                        : selectedEvent.attendeeCount}
-                    </p>
-                  </div>
+                  {isEventOrganizer(selectedEvent.organizer, orgCtx) ? (
+                    <div className="space-y-0.5">
+                      <p className="text-[8px] tracking-[0.25em] uppercase text-white/40 font-bold">Attendees</p>
+                      <p className="text-xs font-mono text-white/70">
+                        {selectedEvent.maxAttendees != null && selectedEvent.maxAttendees > 0
+                          ? `${getRegisteredCount(selectedEvent)} / ${selectedEvent.maxAttendees} (${selectedEvent.attendeeCount} verified)`
+                          : selectedEvent.attendeeCount}
+                      </p>
+                    </div>
+                  ) : null}
                   {selectedEvent.maxAttendees != null && selectedEvent.maxAttendees > 0 && (
                     <>
                       <div className="space-y-0.5">
