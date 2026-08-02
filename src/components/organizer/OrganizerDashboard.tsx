@@ -75,6 +75,8 @@ function OrganizerDashboardInner() {
     const [signInDraft, setSignInDraft] = useState('');
     const [otpDraft, setOtpDraft] = useState('');
     const [otpSentTo, setOtpSentTo] = useState<string | null>(null);
+    /** Shown in-app when API returns devCode (DEV mode or email skipped). */
+    const [otpShownInApp, setOtpShownInApp] = useState<string | null>(null);
     const [authBusy, setAuthBusy] = useState(false);
     const [events, setEvents] = useState<OrganizerEvent[]>([]);
     const [loading, setLoading] = useState(false);
@@ -485,9 +487,11 @@ function OrganizerDashboardInner() {
                                                 }
                                                 setOtpSentTo(r.email);
                                                 if (r.devCode) {
-                                                    showToast(`Dev code: ${r.devCode}`);
+                                                    setOtpShownInApp(r.devCode);
                                                     setOtpDraft(r.devCode);
+                                                    showToast(`Your code: ${r.devCode}`);
                                                 } else {
+                                                    setOtpShownInApp(null);
                                                     showToast(r.message);
                                                 }
                                             } finally {
@@ -532,6 +536,21 @@ function OrganizerDashboardInner() {
                                         className="space-y-2"
                                     >
                                         <p className="text-[9px] text-white/40 font-mono">Code sent to {otpSentTo}</p>
+                                        {otpShownInApp ? (
+                                            <div className="p-4 border border-emerald-400/40 bg-emerald-500/10 space-y-1">
+                                                <p className="text-[8px] uppercase tracking-[0.3em] text-emerald-300/90 font-black">
+                                                    Your code (also emailed)
+                                                </p>
+                                                <p className="text-3xl font-mono font-black tracking-[0.35em] text-white tabular-nums">
+                                                    {otpShownInApp.split('').join(' ')}
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <p className="text-[10px] text-white/45 leading-relaxed">
+                                                Check your inbox (and spam) for the 6-digit code. It is not shown here in
+                                                production for security.
+                                            </p>
+                                        )}
                                         <div className="flex flex-col sm:flex-row gap-2">
                                             <input
                                                 type="text"
@@ -557,6 +576,7 @@ function OrganizerDashboardInner() {
                                             onClick={() => {
                                                 setOtpSentTo(null);
                                                 setOtpDraft('');
+                                                setOtpShownInApp(null);
                                             }}
                                         >
                                             Use a different email

@@ -60,10 +60,6 @@ export async function POST(request: Request) {
 
     const sent = await sendOrganizerSignInCodeEmail({ to: email, code });
 
-    const dev =
-        process.env.NODE_ENV === 'development' ||
-        process.env.DEV_MODE === 'true' ||
-        process.env.NEXT_PUBLIC_DEV_MODE === 'true';
     if (!sent.ok && !sent.skipped) {
         return NextResponse.json(
             { error: sent.error || 'Could not send sign-in email.' },
@@ -71,16 +67,24 @@ export async function POST(request: Request) {
         );
     }
 
+    // Show code in the app when email wasn't delivered, or when DEV mode is on (local / test).
+    const showCodeInApp =
+        !!sent.skipped ||
+        process.env.DEV_MODE === 'true' ||
+        process.env.NEXT_PUBLIC_DEV_MODE === 'true' ||
+        process.env.NODE_ENV === 'development';
+
     const res = NextResponse.json({
         ok: true,
         email,
         stored: 'database',
-        ...(dev && (sent.skipped || process.env.NEXT_PUBLIC_DEV_MODE === 'true')
-            ? { devCode: code }
-            : {}),
+        emailSent: !!sent.ok && !sent.skipped,
+        ...(showCodeInApp ? { devCode: code } : {}),
         message: sent.skipped
-            ? 'Email delivery is not configured. Use the code shown (dev) or set RESEND_API_KEY.'
-            : 'Check your inbox for a 6-digit code.',
+            ? 'Email delivery is not configured. Use the code shown below.'
+            : showCodeInApp
+              ? 'Code sent to your email — and shown below for testing.'
+              : 'Check your inbox for a 6-digit code.',
     });
     res.cookies.set(ORGANIZER_OTP_COOKIE, cookieValue, shortLivedCookieOptions(600));
     return res;
