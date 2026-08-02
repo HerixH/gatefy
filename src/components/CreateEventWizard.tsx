@@ -1,6 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import {
+    useEffect,
+    useMemo,
+    useState,
+    type Dispatch,
+    type FormEvent,
+    type SetStateAction,
+} from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { EventLocationField } from '@/components/EventLocationField';
 import { formatEventTicketSummary } from '@/lib/event-payment';
@@ -23,7 +30,7 @@ export type CreateEventFormState = {
     mobileMoneyInstructions: string;
     ticketAcceptUsdc: boolean;
     ticketAcceptMobileMoney: boolean;
-    ticketAcceptStellar?: boolean;
+    ticketAcceptStellar: boolean;
 };
 
 type StepId = 'host' | 'basics' | 'place' | 'tickets' | 'finish';
@@ -51,7 +58,7 @@ function PreviewChip({ label, value }: { label: string; value: string }) {
 
 type Props = {
     form: CreateEventFormState;
-    setForm: React.Dispatch<React.SetStateAction<any>>;
+    setForm: Dispatch<SetStateAction<CreateEventFormState>>;
     address?: string | null;
     organizerSessionEmail?: string | null;
     creating: boolean;
@@ -59,7 +66,7 @@ type Props = {
     uploadingBanner: boolean;
     setUploadingBanner: (v: boolean) => void;
     minStartDatetimeLocal: string;
-    onSubmit: (e: React.FormEvent) => void;
+    onSubmit: (e: FormEvent) => void;
     onCancel: () => void;
     showToast: (msg: string) => void;
     /** Optional: persist organizer email session on host step. */
