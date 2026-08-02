@@ -55,7 +55,8 @@ export async function generateCode(opts?: { vip?: boolean; txHash?: string; purc
 export async function peekCode(code: string): Promise<ClaimCode | undefined> {
     if (!isSupabaseConfigured) return undefined;
     const supabase = getSupabase();
-    const { data, error } = await supabase.from('claim_codes').select('*').eq('code', code).eq('used', false).maybeSingle();
+    const clean = code.trim().toUpperCase();
+    const { data, error } = await supabase.from('claim_codes').select('*').eq('code', clean).eq('used', false).maybeSingle();
     if (error) throw error;
     if (!data) return undefined;
     return {
@@ -75,34 +76,47 @@ export async function verifyCode(
     wallet?: string,
     eventId?: string,
     email?: string
-): Promise<{ success: boolean; newCheckin: boolean }> {
+): Promise<{ success: boolean; newCheckin: boolean; error?: string }> {
     if (!isSupabaseConfigured) throw new Error('Supabase not configured.');
     const supabase = getSupabase();
     let newCheckin = false;
 
+    const cleanCode = code.trim().toUpperCase();
     const cleanEmail = email?.trim().toLowerCase();
+    const cleanWallet = wallet?.trim() ? wallet.trim().toLowerCase() : '';
+
+    if (!cleanWallet && !cleanEmail) {
+        return {
+            success: false,
+            newCheckin: false,
+            error: 'Connect a wallet or use the email you registered with to verify.',
+        };
+    }
 
     if (!eventId) {
-        const { data: codes, error: fetchErr } = await supabase.from('claim_codes').select('*').eq('code', code).eq('used', false);
+        const { data: codes, error: fetchErr } = await supabase
+            .from('claim_codes')
+            .select('*')
+            .eq('code', cleanCode)
+            .eq('used', false);
         if (fetchErr) throw fetchErr;
-        if (!codes?.length) return { success: false, newCheckin: false };
+        if (!codes?.length) return { success: false, newCheckin: false, error: 'Invalid or already used code.' };
 
         const { error: updateErr } = await supabase.from('claim_codes').update({
             used: true,
             used_at: new Date().toISOString(),
-            used_by: wallet ?? null,
-        }).eq('code', code);
+            used_by: cleanWallet || cleanEmail || null,
+        }).eq('code', cleanCode);
         if (updateErr) throw updateErr;
     } else {
+        // Event check-in: event.verification_code is authoritative — do not require claim_codes.
         const normEventId = eventId.trim().toLowerCase();
-        const { data: codes } = await supabase.from('claim_codes').select('code').eq('code', code);
-        if (!codes?.length) return { success: false, newCheckin: false };
 
-        if (wallet) {
+        if (cleanWallet) {
             const { data: existing } = await supabase
                 .from('attendance')
                 .select('id')
-                .eq('wallet', wallet.toLowerCase())
+                .eq('wallet', cleanWallet)
                 .eq('event_id', normEventId)
                 .limit(1);
             if (existing?.length) return { success: true, newCheckin: false };
@@ -120,21 +134,30 @@ export async function verifyCode(
 
     const normEventIdForInsert = eventId ? eventId.trim().toLowerCase() : null;
 
-    if (wallet) {
+    if (cleanWallet) {
         const { data: dup } = await supabase
             .from('attendance')
             .select('id')
-            .eq('wallet', wallet.toLowerCase())
-            .eq('code', code)
+            .eq('wallet', cleanWallet)
+            .eq('code', cleanCode)
             .eq('event_id', normEventIdForInsert)
             .limit(1);
         if (!dup?.length) {
             const { error: insErr } = await supabase.from('attendance').insert({
-                wallet: wallet.toLowerCase(),
-                code,
+                wallet: cleanWallet,
+                email: cleanEmail || null,
+                code: cleanCode,
                 event_id: normEventIdForInsert,
             });
-            if (!insErr) newCheckin = true;
+            if (insErr) {
+                console.error('[verifyCode] attendance insert failed:', insErr);
+                return {
+                    success: false,
+                    newCheckin: false,
+                    error: insErr.message || 'Could not record attendance.',
+                };
+            }
+            newCheckin = true;
         }
     } else if (cleanEmail) {
         const { data: dup } = await supabase
@@ -142,16 +165,24 @@ export async function verifyCode(
             .select('id')
             .eq('event_id', normEventIdForInsert)
             .ilike('email', cleanEmail)
-            .eq('code', code)
+            .eq('code', cleanCode)
             .limit(1);
         if (!dup?.length) {
             const { error: insErr } = await supabase.from('attendance').insert({
                 wallet: null,
                 email: cleanEmail,
-                code,
+                code: cleanCode,
                 event_id: normEventIdForInsert,
             });
-            if (!insErr) newCheckin = true;
+            if (insErr) {
+                console.error('[verifyCode] attendance insert failed:', insErr);
+                return {
+                    success: false,
+                    newCheckin: false,
+                    error: insErr.message || 'Could not record attendance.',
+                };
+            }
+            newCheckin = true;
         }
     }
 

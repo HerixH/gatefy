@@ -20,7 +20,7 @@ export const Scanner: React.FC<ScannerProps> = ({ onScan, onClose }) => {
         if (videoRef.current) {
             codeReader.decodeFromVideoDevice(null, videoRef.current, (result, err) => {
                 if (result) {
-                    onScan(result.getText());
+                    onScan(result.getText().trim().toUpperCase());
                     codeReader.reset();
                 }
                 if (err && !(err.name === 'NotFoundException')) {

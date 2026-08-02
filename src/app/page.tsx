@@ -578,7 +578,17 @@ function HomeContent() {
   };
 
   const handleScan = async (data: string) => {
-    const ev = selectedEvent;
+    const code = String(data || '').trim().toUpperCase();
+    if (!code) {
+      showWalletToast('Enter or scan a verification code.');
+      return;
+    }
+
+    const ev =
+      selectedEvent && selectedEvent.verificationCode?.toUpperCase() === code
+        ? selectedEvent
+        : events.find((e) => e.verificationCode?.toUpperCase() === code) || selectedEvent;
+
     let regEmail: string | undefined;
     if (typeof window !== 'undefined' && ev?.id) {
       try {
@@ -594,16 +604,21 @@ function HomeContent() {
       showWalletToast('Register with your email for this event first, then verify.');
       return;
     }
-    if (!emailMode && !address) {
+    if (!emailMode && !address && !regEmail) {
       setShowScanner(false);
-      showWalletToast('Connect your wallet to verify attendance — use the button in the top right.');
+      showWalletToast('Connect your wallet (or register with email) to verify attendance.');
+      return;
+    }
+    if (ev && isPast(ev.date, ev.endDate)) {
+      setShowScanner(false);
+      showWalletToast('Verification is closed — this event has ended.');
       return;
     }
     setScanning(true);
     try {
-      const body: Record<string, string> = { code: data };
+      const body: Record<string, string> = { code };
       if (address) body.wallet = address;
-      if (emailMode && regEmail) body.email = regEmail.trim().toLowerCase();
+      if (regEmail) body.email = regEmail.trim().toLowerCase();
       try {
         const stellar = sessionStorage.getItem('gatefy-stellar-address');
         if (stellar && /^G[A-Z0-9]{55}$/.test(stellar)) body.stellarAddress = stellar;
@@ -623,11 +638,18 @@ function HomeContent() {
         } else {
           setMintReceipt(result.mint ?? null);
           setMinted(true);
+          if (result.mint?.ok) {
+            showWalletToast(result.message || 'Attendance verified and minted on Stellar.');
+          } else if (result.mint?.error) {
+            showWalletToast(`Checked in. Mint: ${result.mint.error}`);
+          } else {
+            showWalletToast(result.message || 'Attendance verified.');
+          }
         }
         setShowScanner(false);
         refetchOrganizerLists();
       } else {
-        showWalletToast(result.message || 'Verification failed. Check your code and try again.');
+        showWalletToast(result.message || result.error || 'Verification failed. Check your code and try again.');
       }
     } catch {
       showWalletToast('Network error during verification. Please try again.');
@@ -2619,32 +2641,25 @@ function HomeContent() {
                             <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
                             <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                           </div>
-                        ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
-                          isUserVerified ? (
-                            <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
-                              <div className="flex items-center justify-center gap-2">
-                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                                <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
-                              </div>
-                              <p className="text-[9px] text-white/25 mt-1">You have checked in for this event.</p>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setShowScanner(true)}
-                              className="btn-premium w-full py-4 group"
-                            >
-                              <div className="flex items-center justify-center gap-3">
-                                <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
-                                <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
-                              </div>
-                            </button>
-                          )
-                        ) : (
+                        ) : isUserVerified ? (
                           <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
-                            <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
-                            <p className="text-[9px] text-white/30 mt-1">Event starts {formatDateTime(selectedEvent.date)}</p>
+                            <div className="flex items-center justify-center gap-2">
+                              <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                              <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
+                            </div>
+                            <p className="text-[9px] text-white/25 mt-1">You have checked in for this event.</p>
                           </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setShowScanner(true)}
+                            className="btn-premium w-full py-4 group"
+                          >
+                            <div className="flex items-center justify-center gap-3">
+                              <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
+                              <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
+                            </div>
+                          </button>
                         )}
                       </div>
                     ))}
@@ -2785,32 +2800,25 @@ function HomeContent() {
                         <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Event ended</p>
                         <p className="text-[9px] text-white/25 mt-1">Verification is closed for past events.</p>
                       </div>
-                    ) : isOngoing(selectedEvent.date, selectedEvent.endDate) ? (
-                      isUserVerified ? (
-                        <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                            <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
-                          </div>
-                          <p className="text-[9px] text-white/25 mt-1">You have already checked in for this event.</p>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setShowScanner(true)}
-                          className="btn-premium w-full py-4 group"
-                        >
-                          <div className="flex items-center justify-center gap-3">
-                            <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
-                            <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
-                          </div>
-                        </button>
-                      )
-                    ) : (
+                    ) : isUserVerified ? (
                       <div className="p-4 border border-white/10 bg-white/[0.02] text-center">
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-bold">Verify when event starts</p>
-                        <p className="text-[9px] text-white/30 mt-1">Event starts {formatDateTime(selectedEvent.date)}</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+                          <p className="text-[10px] uppercase tracking-[0.2em] text-green-400/80 font-bold">Attendance verified</p>
+                        </div>
+                        <p className="text-[9px] text-white/25 mt-1">You have already checked in for this event.</p>
                       </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowScanner(true)}
+                        className="btn-premium w-full py-4 group"
+                      >
+                        <div className="flex items-center justify-center gap-3">
+                          <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse" />
+                          <span className="tracking-[0.2em] uppercase text-sm font-bold">Verify Attendance</span>
+                        </div>
+                      </button>
                     ))}
                   </div>
                 )}

@@ -18,7 +18,8 @@ const MINIMAL_ERC20_ABI = parseAbi([
 
 export async function POST(request: Request) {
     try {
-        const { code, wallet, email: emailRaw, stellarAddress: stellarRaw } = await request.json();
+        const { code: codeRaw, wallet, email: emailRaw, stellarAddress: stellarRaw } = await request.json();
+        const code = typeof codeRaw === 'string' ? codeRaw.trim().toUpperCase() : '';
         const email = typeof emailRaw === 'string' ? emailRaw.trim().toLowerCase() : '';
         const stellarAddress =
             typeof stellarRaw === 'string' && /^G[A-Z0-9]{55}$/.test(stellarRaw.trim())
@@ -54,11 +55,16 @@ export async function POST(request: Request) {
                         message: 'Verification denied: register for this event with this email first.',
                     }, { status: 403 });
                 }
-            } else if (wallet && wallet !== '0xDEV') {
-                if (!(await isRegistered(event.id, wallet))) {
+            } else {
+                const hasWallet = Boolean(wallet && wallet !== '0xDEV');
+                const registeredWallet = hasWallet ? await isRegistered(event.id, wallet) : false;
+                const registeredEmail = email ? await isRegisteredByEmail(event.id, email) : false;
+                if (!registeredWallet && !registeredEmail) {
                     return NextResponse.json({
                         success: false,
-                        message: 'Verification Denied: You must register for this event first.',
+                        message: hasWallet
+                            ? 'Verification denied: register for this event with this wallet first.'
+                            : 'Verification denied: connect the wallet you registered with, or register first.',
                     }, { status: 403 });
                 }
             }
@@ -94,11 +100,11 @@ export async function POST(request: Request) {
 
         // 5. Mark code used / record attendance — email-only events store email, not wallet
         const emailMode = event?.isBlockchain === false;
-        const { success, newCheckin } = await verifyCode(
+        const { success, newCheckin, error: verifyError } = await verifyCode(
             code,
-            emailMode ? undefined : wallet,
+            emailMode ? undefined : wallet && wallet !== '0xDEV' ? wallet : undefined,
             event?.id,
-            emailMode ? email || undefined : undefined
+            email || undefined
         );
 
         if (success) {
@@ -201,7 +207,10 @@ export async function POST(request: Request) {
             });
         }
 
-        return NextResponse.json({ success: false, message: 'Verification failed.' }, { status: 400 });
+        return NextResponse.json(
+            { success: false, message: verifyError || 'Verification failed.' },
+            { status: 400 }
+        );
     } catch (error) {
         console.error('Verification Route Error:', error);
         return NextResponse.json({ error: 'Verification failed' }, { status: 500 });

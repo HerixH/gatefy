@@ -270,14 +270,19 @@ export async function getEventById(eventId: string): Promise<Event | undefined> 
 }
 
 export async function getEventByCode(code: string): Promise<Event | undefined> {
+    const cleanCode = code.trim().toUpperCase();
     if (isSupabaseConfigured) {
         const supabase = getSupabase();
-        const { data, error } = await supabase.from('events').select('*').eq('verification_code', code).maybeSingle();
+        const { data, error } = await supabase
+            .from('events')
+            .select('*')
+            .eq('verification_code', cleanCode)
+            .maybeSingle();
         if (error) throw error;
         return data ? rowToEvent(data as EventRow) : undefined;
     }
     const events = await getEvents();
-    return events.find(e => e.verificationCode === code);
+    return events.find((e) => e.verificationCode === cleanCode);
 }
 
 /** Partial fields organizers may change after creation (identity & verification code are immutable). */
