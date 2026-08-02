@@ -24,7 +24,10 @@ const C = {
 } as const;
 
 function appOrigin(): string {
-    return (process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+    let raw = (process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL ?? 'http://localhost:3000').trim();
+    // VERCEL_URL is host-only — iPhone Mail won't open protocol-less links.
+    if (raw && !/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+    return raw.replace(/\/$/, '');
 }
 
 function brandName(): string {
@@ -82,28 +85,41 @@ function preheaderHtml(text: string): string {
     return `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${t}</div>`;
 }
 
+/**
+ * Full-width CTA — table + padded &lt;a&gt; so iPhone Mail / Gmail keep a 44pt tap target
+ * and don’t clip the label the way a lone inline-block button can.
+ */
 function bulletproofButtonHref(href: string, label: string): string {
     const h = escapeHtml(href);
     const l = escapeHtml(label);
     return `
-<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 8px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:20px 0 8px;border-collapse:collapse;">
   <tr>
-    <td align="left">
+    <td align="center" bgcolor="${C.white}" style="background-color:${C.white};border-radius:10px;mso-padding-alt:0;">
       <!--[if mso]>
-      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${h.replace(/"/g, '&quot;')}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="12%" stroke="f" fillcolor="${C.white}">
+      <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${h.replace(/"/g, '&quot;')}" style="height:48px;v-text-anchor:middle;width:280px;" arcsize="12%" stroke="f" fillcolor="${C.white}">
         <w:anchorlock/>
-        <center style="color:${C.black};font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;">${l}</center>
+        <center style="color:${C.black};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:600;">${l}</center>
       </v:roundrect>
       <![endif]-->
       <!--[if !mso]><!-- -->
-      <a href="${h}" target="_blank" rel="noopener noreferrer"
-        style="background-color:${C.white};color:${C.black};display:inline-block;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;font-weight:600;line-height:48px;text-align:center;text-decoration:none;padding:0 28px;border-radius:8px;">
+      <a href="${h}"
+        style="background-color:${C.white};border-radius:10px;color:${C.black};display:block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:600;line-height:20px;margin:0;min-height:20px;padding:16px 12px;text-align:center;text-decoration:none;-webkit-text-size-adjust:none;mso-hide:all;">
         ${l}
       </a>
       <!--<![endif]-->
     </td>
   </tr>
 </table>`;
+}
+
+/** Secondary link — text only so iPhone doesn’t stack multiple full-width Safari choosers. */
+function plainLinkHref(href: string, label: string): string {
+    const h = escapeHtml(href);
+    const l = escapeHtml(label);
+    return `<p style="margin:10px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;text-align:center;-webkit-text-size-adjust:none;">
+  <a href="${h}" style="color:${C.accent};text-decoration:underline;">${l}</a>
+</p>`;
 }
 
 function emailShell(opts: { preheader: string; innerHtml: string }): string {
@@ -114,29 +130,51 @@ function emailShell(opts: { preheader: string; innerHtml: string }): string {
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no" />
   <meta name="color-scheme" content="dark" />
   <meta name="supported-color-schemes" content="dark" />
   <title>${bn}</title>
+  <style type="text/css">
+    :root { color-scheme: dark; supported-color-schemes: dark; }
+    html, body { margin: 0 !important; padding: 0 !important; width: 100% !important; -webkit-text-size-adjust: 100%; }
+    table, td { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    a { text-decoration: none; }
+    /* Stop iOS Mail from auto-linking dates / addresses and restyling them blue */
+    a[x-apple-data-detectors],
+    .unstyle-auto-detected a {
+      color: inherit !important;
+      text-decoration: none !important;
+      font-size: inherit !important;
+      font-family: inherit !important;
+      font-weight: inherit !important;
+      line-height: inherit !important;
+    }
+    @media only screen and (max-width: 620px) {
+      .email-outer-pad { padding: 24px 12px !important; }
+      .email-card { padding: 24px 16px 28px !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background-color:${C.pageBg};-webkit-text-size-adjust:100%;">
+<body style="margin:0;padding:0;width:100%;background-color:${C.pageBg};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
   ${preheaderHtml(preheader)}
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.pageBg};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${C.pageBg};width:100%;">
     <tr>
-      <td align="center" style="padding:40px 20px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
+      <td align="center" class="email-outer-pad" style="padding:40px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;width:100%;">
           <tr>
-            <td style="padding:0 0 24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;font-weight:600;letter-spacing:0.02em;color:${C.text};">
+            <td style="padding:0 0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;letter-spacing:0.02em;color:${C.text};">
               ${bn}
             </td>
           </tr>
           <tr>
-            <td style="background-color:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:16px;padding:36px 32px 40px;">
+            <td class="email-card unstyle-auto-detected" style="background-color:${C.cardBg};border:1px solid ${C.cardBorder};border-radius:16px;padding:28px 20px 32px;">
               ${innerHtml}
             </td>
           </tr>
           <tr>
-            <td style="padding:28px 8px 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:12px;line-height:1.6;color:${C.faint};text-align:center;">
+            <td style="padding:28px 8px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:${C.faint};text-align:center;">
               You’re receiving this because of activity on ${bn}.<br />
               © ${year} ${bn}
             </td>
@@ -221,7 +259,8 @@ export async function sendPaymentReceiptEmail(opts: {
         paymentReference,
     } = opts;
     const origin = appOrigin();
-    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    // Deep-link into the event so mobile opens Gate Protocol first (not an explorer chooser).
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}&email=${encodeURIComponent(to)}`;
     const subject = `Payment receipt · ${event.name}`;
     const text = [
         `Hi${attendeeName ? ` ${attendeeName}` : ''},`,
@@ -235,7 +274,7 @@ export async function sendPaymentReceiptEmail(opts: {
         `When: ${formatEventWhen(event)}`,
         event.location ? `Where: ${event.location}` : '',
         '',
-        `Event: ${link}`,
+        `Open your ticket: ${link}`,
         '',
         `— ${brandName()}`,
     ]
@@ -245,9 +284,12 @@ export async function sendPaymentReceiptEmail(opts: {
     const greet = attendeeName
         ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,`
         : 'Hi there,';
-    const explorerLabel = paymentExplorerUrl?.includes('basescan')
-        ? 'View payment on Basescan'
-        : 'View payment on explorer';
+    const explorerPlain =
+        paymentExplorerUrl?.includes('basescan')
+            ? 'View payment on Basescan'
+            : paymentExplorerUrl?.includes('stellar.expert')
+              ? 'View payment on Stellar Expert'
+              : 'View payment online';
     const inner = `
 <p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
   ${greet}
@@ -262,7 +304,7 @@ export async function sendPaymentReceiptEmail(opts: {
           paymentLabel ? ` · ${escapeHtml(paymentLabel)}` : ''
       }${
           paymentTxHash
-              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Tx ${escapeHtml(
+              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};word-break:break-all;">Tx ${escapeHtml(
                     paymentTxHash.length > 24
                         ? `${paymentTxHash.slice(0, 10)}…${paymentTxHash.slice(-8)}`
                         : paymentTxHash
@@ -270,7 +312,7 @@ export async function sendPaymentReceiptEmail(opts: {
               : ''
       }${
           paymentReference
-              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};">Ref ${escapeHtml(paymentReference)}</span>`
+              ? `<br/><span style="font-family:ui-monospace,monospace;font-size:12px;color:${C.muted};word-break:break-all;">Ref ${escapeHtml(paymentReference)}</span>`
               : ''
       }
     </td>
@@ -278,10 +320,10 @@ export async function sendPaymentReceiptEmail(opts: {
 </table>
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${paymentExplorerUrl ? bulletproofButtonHref(paymentExplorerUrl, explorerLabel) : ''}
-${bulletproofButtonHref(link, 'Open event')}
-<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
-  A separate email confirms your registration and includes your check-in QR.
+${bulletproofButtonHref(link, 'Open your ticket')}
+${paymentExplorerUrl ? plainLinkHref(paymentExplorerUrl, explorerPlain) : ''}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};text-align:center;">
+  A second email has your check-in QR. Tap <strong style="color:${C.text};">Open your ticket</strong> above to return to Gate Protocol.
 </p>`;
 
     const html = emailShell({ preheader: `Receipt · ${ticketPriceUsdc} USDC · ${event.name}`, innerHtml: inner });
@@ -323,7 +365,7 @@ export async function sendRegistrationConfirmationEmail(opts: {
 
     const { to, event, attendeeName, ticketPriceUsdc, paymentLabel } = opts;
     const origin = appOrigin();
-    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}&email=${encodeURIComponent(to)}`;
     const qrBase64 = await qrPngBase64ForEmail(event.verificationCode);
     const qrImgSrc = qrBase64 ? `cid:${CHECKIN_QR_CONTENT_ID}` : null;
     const paid = ticketPriceUsdc != null && ticketPriceUsdc > 0;
@@ -368,10 +410,9 @@ ${
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
 ${verificationCodeBlock(event.verificationCode, qrImgSrc)}
-${bulletproofButtonHref(link, 'View event details')}
-<p style="margin:20px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
-  Prefer a plain link?
-  <a href="${escapeHtml(link)}" style="color:${C.accent};text-decoration:underline;text-underline-offset:2px;">Open in browser</a>
+${bulletproofButtonHref(link, 'Open your ticket')}
+<p style="margin:12px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};text-align:center;">
+  On phone: tap the button to open Gate Protocol and see your registration.
 </p>`;
 
     const html = emailShell({
@@ -556,17 +597,43 @@ ${bulletproofButtonHref(link, 'Open event page')}
     return { ok: true };
 }
 
-/** After a successful check-in at an event — sent when we can resolve the registrant’s email. */
+/** After a successful check-in — includes on-chain explorer links when a mint just succeeded. */
 export async function sendAttendanceVerifiedEmail(opts: {
     to: string;
     event: Event;
     attendeeName?: string | null;
+    chain?: string | null;
+    txHash?: string | null;
+    tokenId?: string | null;
+    explorerUrl?: string | null;
+    baseTxHash?: string | null;
+    baseExplorerUrl?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
     const key = process.env.RESEND_API_KEY?.trim();
     const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
-    const { to, event, attendeeName } = opts;
+    const {
+        to,
+        event,
+        attendeeName,
+        chain,
+        txHash,
+        tokenId,
+        explorerUrl,
+        baseTxHash,
+        baseExplorerUrl,
+    } = opts;
     const origin = appOrigin();
-    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}&email=${encodeURIComponent(to)}`;
+    const c = (chain || '').toLowerCase();
+    const stellarExplorer =
+        explorerUrl && explorerUrl.includes('stellar.expert')
+            ? explorerUrl
+            : explorerUrl && c !== 'base'
+              ? explorerUrl
+              : null;
+    const baseExplorer =
+        baseExplorerUrl ||
+        (explorerUrl && (explorerUrl.includes('basescan') || c === 'base') ? explorerUrl : null);
 
     const subject = `You're checked in · ${event.name}`;
     const text = [
@@ -576,8 +643,13 @@ export async function sendAttendanceVerifiedEmail(opts: {
         '',
         `When: ${formatEventWhen(event)}`,
         event.location ? `Where: ${event.location}` : '',
+        tokenId ? `Token: #${tokenId}` : '',
+        txHash ? `Transaction: ${txHash}` : '',
+        stellarExplorer ? `Stellar Expert: ${stellarExplorer}` : '',
+        baseExplorer && baseExplorer !== stellarExplorer ? `Basescan: ${baseExplorer}` : '',
+        baseTxHash && baseTxHash !== txHash ? `Base tx: ${baseTxHash}` : '',
         '',
-        `Event link: ${link}`,
+        `Open your ticket: ${link}`,
         '',
         `— ${brandName()}`,
     ]
@@ -585,18 +657,24 @@ export async function sendAttendanceVerifiedEmail(opts: {
         .join('\n');
 
     const greet = attendeeName ? `Hi <strong style="color:${C.text};">${escapeHtml(attendeeName)}</strong>,` : 'Hi there,';
-    const preheader = `Attendance confirmed for ${event.name}`;
+    const preheader = stellarExplorer || baseExplorer
+        ? `Checked in · on-chain proof for ${event.name}`
+        : `Attendance confirmed for ${event.name}`;
     const inner = `
-<p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+<p style="margin:0 0 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
   ${greet}
 </p>
-<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+<p style="margin:0 0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
   Your attendance is <strong style="color:${C.white};">verified</strong> for <strong style="color:${C.white};">${escapeHtml(event.name)}</strong>.
 </p>
 ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
-${bulletproofButtonHref(link, 'View event')}
-<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+${tokenId ? detailRow('Token', `#${tokenId}`) : ''}
+${txHash ? detailRow('Tx', txHash.length > 20 ? `${txHash.slice(0, 12)}…${txHash.slice(-8)}` : txHash) : ''}
+${bulletproofButtonHref(link, 'Open your ticket')}
+${stellarExplorer ? plainLinkHref(stellarExplorer, 'View on Stellar Expert') : ''}
+${baseExplorer && baseExplorer !== stellarExplorer ? plainLinkHref(baseExplorer, 'View on Basescan') : ''}
+<p style="margin:16px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};text-align:center;">
   Keep this email for your records.
 </p>`;
 
@@ -642,7 +720,7 @@ export async function sendAttendanceMintedEmail(opts: {
     const { to, event, attendeeName, chain, txHash, tokenId, explorerUrl, baseTxHash, baseExplorerUrl } =
         opts;
     const origin = appOrigin();
-    const link = `${origin}/?event=${encodeURIComponent(event.id)}`;
+    const link = `${origin}/?event=${encodeURIComponent(event.id)}&email=${encodeURIComponent(to)}`;
     const c = (chain || 'soroban').toLowerCase();
     const chainLabel =
         c === 'both'
@@ -651,7 +729,7 @@ export async function sendAttendanceMintedEmail(opts: {
               ? 'Base'
               : 'Stellar (Soroban)';
     const explorerLabel =
-        c === 'base' ? 'View on Basescan' : c === 'both' ? 'View on Stellar Expert' : 'View on Stellar Expert';
+        c === 'base' ? 'View on Basescan' : 'View on Stellar Expert';
 
     const subject = `Attendance proof minted · ${event.name}`;
     const text = [
@@ -667,7 +745,7 @@ export async function sendAttendanceMintedEmail(opts: {
         baseTxHash && baseTxHash !== txHash ? `Base tx: ${baseTxHash}` : '',
         baseExplorerUrl && baseExplorerUrl !== explorerUrl ? `Base explorer: ${baseExplorerUrl}` : '',
         '',
-        `Event link: ${link}`,
+        `Open event: ${link}`,
         '',
         `— ${brandName()}`,
     ]
@@ -687,10 +765,10 @@ ${detailRow('When', formatEventWhen(event))}
 ${event.location ? detailRow('Where', event.location) : ''}
 ${tokenId ? detailRow('Token', `#${tokenId}`) : ''}
 ${txHash ? detailRow('Tx', txHash.length > 20 ? `${txHash.slice(0, 12)}…${txHash.slice(-8)}` : txHash) : ''}
-${explorerUrl ? bulletproofButtonHref(explorerUrl, explorerLabel) : ''}
-${baseExplorerUrl && baseExplorerUrl !== explorerUrl ? bulletproofButtonHref(baseExplorerUrl, 'View on Basescan') : ''}
-${bulletproofButtonHref(link, 'View event')}
-<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+${bulletproofButtonHref(link, 'Open your ticket')}
+${explorerUrl ? plainLinkHref(explorerUrl, explorerLabel) : ''}
+${baseExplorerUrl && baseExplorerUrl !== explorerUrl ? plainLinkHref(baseExplorerUrl, 'View on Basescan') : ''}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};text-align:center;">
   Keep this email as your on-chain attendance receipt.
 </p>`;
 

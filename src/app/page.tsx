@@ -1374,6 +1374,66 @@ function HomeContent() {
     };
   }, [searchParams, pathname, router, selectedEvent?.id]);
 
+  // Email deep links (?event=&email=) from receipt / confirmation — restore registration on mobile.
+  useEffect(() => {
+    if (searchParams.get('stepay')) return; // handled above
+    const eventId = (searchParams.get('event') || '').trim();
+    const email = (searchParams.get('email') || '').trim().toLowerCase();
+    if (!eventId || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+
+    writeRegCache(eventId, { email });
+    setNormalSignupEmail(email);
+
+    let cancelled = false;
+    const clearEmailParam = () => {
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete('email');
+      const q = next.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
+    };
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/register?eventId=${encodeURIComponent(eventId)}&email=${encodeURIComponent(email)}`,
+          { cache: 'no-store' }
+        );
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.registered) {
+          setIsUserRegistered(true);
+          setEventRegProfile({
+            email: data.email ?? email,
+            name: data.name ?? null,
+            wallet: data.wallet ?? null,
+          });
+          writeRegCache(eventId, {
+            email: data.email ?? email,
+            name: data.name ?? null,
+          });
+          try {
+            const vRes = await fetch(
+              `/api/events/verified?eventId=${encodeURIComponent(eventId)}&email=${encodeURIComponent(email)}`,
+              { cache: 'no-store' }
+            );
+            const v = await vRes.json();
+            if (!cancelled) applyVerifiedResponse(v);
+          } catch {
+            /* ignore */
+          }
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        if (!cancelled) clearEmailParam();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, pathname, router]);
+
   useEffect(() => {
     const eventId = searchParams.get('event');
     if (!eventId || events.length === 0) return;

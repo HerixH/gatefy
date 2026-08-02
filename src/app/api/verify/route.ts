@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { mintResultToDbFields, peekCode, updateAttendanceMint, verifyCode } from '@/lib/codes';
 import { getEventByCode, incrementAttendee } from '@/lib/events';
 import { getRegistrationForEvent, isRegistered, isRegisteredByEmail } from '@/lib/registrations';
-import { sendAttendanceMintedEmail, sendAttendanceVerifiedEmail } from '@/lib/email';
+import { sendAttendanceVerifiedEmail } from '@/lib/email';
 import { mintAttendanceProof } from '@/lib/attendance-mint';
 import { createPublicClient, http, parseAbi } from 'viem';
 import { base } from 'viem/chains';
@@ -139,18 +139,11 @@ export async function POST(request: Request) {
                     }
                     toEmail = reg?.email?.trim() || (emailMode && email ? email : '') || '';
                     attendeeName = reg?.name ?? null;
-                    if (toEmail) {
-                        void sendAttendanceVerifiedEmail({
-                            to: toEmail,
-                            event,
-                            attendeeName,
-                        }).catch((e) => console.error('[verify] check-in email failed:', e));
-                    }
                 } catch (e) {
-                    console.error('[verify] check-in email lookup/send error:', e);
+                    console.error('[verify] check-in email lookup error:', e);
                 }
 
-                // Soroban and/or Base mint — after successful new check-in only
+                // Mint first so the check-in email can include Stellar Expert / Basescan links.
                 try {
                     const mintResult = await mintAttendanceProof({
                         eventId: event.id,
@@ -181,24 +174,6 @@ export async function POST(request: Request) {
                         email: emailMode ? email : null,
                         ...fields,
                     });
-
-                    if (mintResult.ok && toEmail) {
-                        void sendAttendanceMintedEmail({
-                            to: toEmail,
-                            event,
-                            attendeeName,
-                            chain: mintResult.chain,
-                            txHash: mintResult.txHash,
-                            tokenId: mintResult.tokenId,
-                            explorerUrl: mintResult.explorerUrl,
-                            baseTxHash:
-                                mintResult.also?.txHash ??
-                                (mintResult.chain === 'base' ? mintResult.txHash : null),
-                            baseExplorerUrl:
-                                mintResult.also?.explorerUrl ??
-                                (mintResult.chain === 'base' ? mintResult.explorerUrl : null),
-                        }).catch((e) => console.error('[verify] mint email failed:', e));
-                    }
                 } catch (e) {
                     console.error('[verify] attendance mint error:', e);
                     mint = {
@@ -207,6 +182,24 @@ export async function POST(request: Request) {
                         status: 'failed',
                         error: e instanceof Error ? e.message : 'Mint failed',
                     };
+                }
+
+                if (toEmail) {
+                    void sendAttendanceVerifiedEmail({
+                        to: toEmail,
+                        event,
+                        attendeeName,
+                        ...(mint?.ok
+                            ? {
+                                  chain: mint.chain,
+                                  txHash: mint.txHash,
+                                  tokenId: mint.tokenId,
+                                  explorerUrl: mint.explorerUrl,
+                                  baseTxHash: mint.baseTxHash,
+                                  baseExplorerUrl: mint.baseExplorerUrl,
+                              }
+                            : {}),
+                    }).catch((e) => console.error('[verify] check-in email failed:', e));
                 }
             }
 
