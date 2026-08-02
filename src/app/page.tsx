@@ -14,6 +14,7 @@ import { ConnectStellarButton } from '@/components/ConnectStellarButton';
 import { CreateEventWizard } from '@/components/CreateEventWizard';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
 import { EventLocationField } from '@/components/EventLocationField';
+import { EventsNearMe } from '@/components/EventsNearMe';
 import { readStellarAddress } from '@/lib/stellar-session';
 import {
   isEventOrganizer,
@@ -2195,6 +2196,23 @@ function HomeContent() {
                 )}
               </div>
             </div>
+
+            <EventsNearMe
+              events={events
+                .filter((ev) => !isPast(ev.date, ev.endDate))
+                .map((ev) => ({
+                  id: ev.id,
+                  name: ev.name,
+                  location: ev.location ?? '',
+                  date: ev.date,
+                  endDate: ev.endDate,
+                }))}
+              onSelectEvent={(id) => {
+                const ev = events.find((e) => e.id === id);
+                if (ev) setSelectedEvent(ev);
+              }}
+              formatDate={formatDate}
+            />
 
             {/* User Uploads (Managed Events) — filtered by connected wallet so each wallet sees only its own events */}
             {(((isConnected && address) || organizerSessionEmail)) && (
