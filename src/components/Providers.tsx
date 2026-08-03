@@ -1,37 +1,55 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
     RainbowKitProvider,
     getDefaultConfig,
     darkTheme,
 } from '@rainbow-me/rainbowkit';
-import { coinbaseWallet } from '@rainbow-me/rainbowkit/wallets';
-import { WagmiProvider } from 'wagmi';
+import { coinbaseWallet, injectedWallet } from '@rainbow-me/rainbowkit/wallets';
+import { WagmiProvider, type Config } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import '@rainbow-me/rainbowkit/styles.css';
 
-// Only Coinbase / Base wallet for EVM. Freighter (Stellar) is handled separately in ConnectWalletButton.
-// No MetaMask, Rainbow, WalletConnect, or injected multi-wallet list.
-const config = getDefaultConfig({
-    appName: 'GATE PROTOCOL',
-    projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'da9e31959714af0c9fac3f6c827a5d3e',
-    chains: [base, baseSepolia],
-    ssr: true,
-    wallets: [
-        {
-            groupName: 'Base',
-            wallets: [coinbaseWallet],
-        },
-    ],
-});
+declare global {
+    var __gatefyWagmiConfig: Config | undefined;
+}
 
-const queryClient = new QueryClient();
+/**
+ * Singleton wagmi config.
+ * Avoid listing many WalletConnect-backed wallets — each calls Core.init() and under
+ * Turbopack HMR that surfaces as `unhandledRejection: undefined` / Runtime Error "undefined".
+ *
+ * Base EVM: Coinbase Wallet + browser injected (MetaMask, etc.).
+ * Stellar Freighter: ConnectWalletButton (separate).
+ */
+function getWagmiConfig(): Config {
+    if (globalThis.__gatefyWagmiConfig) return globalThis.__gatefyWagmiConfig;
+
+    const config = getDefaultConfig({
+        appName: 'GATE PROTOCOL',
+        projectId:
+            process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'da9e31959714af0c9fac3f6c827a5d3e',
+        chains: [base, baseSepolia],
+        ssr: true,
+        wallets: [
+            {
+                groupName: 'Base',
+                wallets: [coinbaseWallet, injectedWallet],
+            },
+        ],
+    });
+
+    globalThis.__gatefyWagmiConfig = config;
+    return config;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
+    const [queryClient] = useState(() => new QueryClient());
+    const [config] = useState(() => getWagmiConfig());
+
     return (
-        // No auto-reconnect on reload — connect only when the user chooses Base or Freighter.
         <WagmiProvider config={config} reconnectOnMount={false}>
             <QueryClientProvider client={queryClient}>
                 <RainbowKitProvider

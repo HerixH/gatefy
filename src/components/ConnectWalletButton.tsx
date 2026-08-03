@@ -18,13 +18,20 @@ function shortAddr(addr: string) {
 type Props = {
     className?: string;
     compact?: boolean;
+    /** Full-width trigger + panel (e.g. inside mobile menu). */
+    fullWidth?: boolean;
     onStellarConnected?: (address: string) => void;
 };
 
 /**
  * Single “Connect Wallet” control with Base (RainbowKit) and Freighter (Stellar) inside.
  */
-export function ConnectWalletButton({ className = '', compact = false, onStellarConnected }: Props) {
+export function ConnectWalletButton({
+    className = '',
+    compact = false,
+    fullWidth = false,
+    onStellarConnected,
+}: Props) {
     const { openConnectModal } = useConnectModal();
     const { address, isConnected } = useAccount();
     const { disconnect } = useDisconnect();
@@ -86,7 +93,7 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
         'w-full text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] hover:bg-white/8 disabled:opacity-50 transition-colors';
 
     return (
-        <div ref={rootRef} className={`relative ${className}`}>
+        <div ref={rootRef} className={`relative ${fullWidth ? 'w-full' : ''} ${className}`}>
             <button
                 type="button"
                 onClick={() => {
@@ -94,9 +101,11 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
                     setError(null);
                 }}
                 className={
-                    compact
-                        ? 'px-3 py-2 border border-white/25 bg-white text-black text-[9px] font-bold tracking-wide hover:bg-neutral-200'
-                        : 'px-4 py-2.5 border border-white/25 bg-white text-black text-[11px] font-bold tracking-wide hover:bg-neutral-200'
+                    fullWidth
+                        ? 'w-full min-h-[48px] px-4 py-3 border border-white/25 bg-white text-black text-[12px] font-black tracking-[0.16em] uppercase hover:bg-neutral-200'
+                        : compact
+                          ? 'px-3 py-2 border border-white/25 bg-white text-black text-[9px] font-bold tracking-wide hover:bg-neutral-200'
+                          : 'px-4 py-2.5 border border-white/25 bg-white text-black text-[11px] font-bold tracking-wide hover:bg-neutral-200'
                 }
             >
                 {label}
@@ -104,20 +113,24 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
 
             {open ? (
                 <div
-                    className={`absolute right-0 top-full mt-1 z-[600] min-w-[220px] border border-white/15 bg-black/95 backdrop-blur-md shadow-xl ${
-                        compact ? '' : ''
-                    }`}
+                    className={
+                        fullWidth
+                            ? 'relative mt-2 z-[600] w-full border border-white/15 bg-black/95 backdrop-blur-md'
+                            : 'absolute right-0 top-full mt-1 z-[600] min-w-[220px] border border-white/15 bg-black/95 backdrop-blur-md shadow-xl'
+                    }
                 >
                     <div className="px-3 py-2 border-b border-white/10">
                         <p className="text-[8px] uppercase tracking-[0.25em] text-white/40 font-bold">
-                            Base or Freighter
+                            Choose network wallet
                         </p>
                     </div>
 
                     <div className="py-1">
                         {isConnected && address ? (
                             <div className="px-3 py-2 space-y-1.5">
-                                <p className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Base</p>
+                                <p className="text-[9px] uppercase tracking-widest text-white/35 font-bold">
+                                    Base (EVM)
+                                </p>
                                 <p className="text-[10px] font-mono text-white/70">{shortAddr(address)}</p>
                                 <button
                                     type="button"
@@ -139,7 +152,7 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
                                 }}
                                 className={`${item} text-white`}
                             >
-                                Base
+                                Base — Coinbase, MetaMask…
                             </button>
                         )}
 
@@ -147,7 +160,9 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
 
                         {stellar ? (
                             <div className="px-3 py-2 space-y-1.5">
-                                <p className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Freighter</p>
+                                <p className="text-[9px] uppercase tracking-widest text-violet-300/80 font-bold">
+                                    Stellar · Freighter
+                                </p>
                                 <p className="text-[10px] font-mono text-white/70">{shortAddr(stellar)}</p>
                                 <button
                                     type="button"
@@ -165,9 +180,9 @@ export function ConnectWalletButton({ className = '', compact = false, onStellar
                                 type="button"
                                 disabled={busy}
                                 onClick={() => void connectStellar()}
-                                className={`${item} text-white`}
+                                className={`${item} text-violet-200`}
                             >
-                                {busy ? 'Connecting…' : 'Freighter'}
+                                {busy ? 'Connecting…' : 'Stellar — Freighter'}
                             </button>
                         )}
                     </div>

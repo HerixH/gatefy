@@ -1,4 +1,4 @@
-import { OrganizerDashboard } from '@/components/organizer/OrganizerDashboard';
+import { OrganizerDashboardClient } from './OrganizerDashboardClient';
 
 export const metadata = {
     title: 'Host dashboard — Gate Protocol',
@@ -6,5 +6,5 @@ export const metadata = {
 };
 
 export default function OrganizerPage() {
-    return <OrganizerDashboard />;
+    return <OrganizerDashboardClient />;
 }

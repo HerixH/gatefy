@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { ConnectButton, useConnectModal } from '@rainbow-me/rainbowkit';
 import { useAccount, useSignMessage } from 'wagmi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
+import { ConnectWalletButton } from '@/components/ConnectWalletButton';
+import { readStellarAddress } from '@/lib/stellar-session';
 import {
     eventAcceptsMobileMoney,
     eventAcceptsStepay,
@@ -50,8 +51,8 @@ type RosterFilter = 'all' | 'pending' | 'verified' | 'paid' | 'unpaid' | 'awaiti
 
 function OrganizerDashboardInner() {
     const { address, isConnected } = useAccount();
-    const { openConnectModal } = useConnectModal();
     const { signMessageAsync } = useSignMessage();
+    const [stellarAddress, setStellarAddress] = useState<string | null>(null);
     const searchParams = useSearchParams();
     const router = useRouter();
     const pathname = usePathname();
@@ -74,6 +75,13 @@ function OrganizerDashboardInner() {
             router.replace('/?create=1');
         }
     }, [searchParams, router]);
+
+    useEffect(() => {
+        setStellarAddress(readStellarAddress());
+        const onFocus = () => setStellarAddress(readStellarAddress());
+        window.addEventListener('focus', onFocus);
+        return () => window.removeEventListener('focus', onFocus);
+    }, []);
 
     const [signInDraft, setSignInDraft] = useState('');
     const [otpDraft, setOtpDraft] = useState('');
@@ -368,17 +376,29 @@ function OrganizerDashboardInner() {
 
     return (
         <div className="min-h-screen bg-background text-foreground grid-bg flex flex-col">
-            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-4 sm:px-8 border-b border-white/5 bg-black/80 backdrop-blur-xl">
-                <Link href="/" className="text-[10px] font-black tracking-[0.25em] uppercase text-white/80 hover:text-white">
+            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 px-4 py-3.5 sm:px-8 border-b border-white/5 bg-black/80 backdrop-blur-xl">
+                <Link
+                    href="/"
+                    className="text-[10px] font-black tracking-[0.18em] sm:tracking-[0.25em] uppercase text-white/80 hover:text-white shrink-0"
+                >
                     Gate Protocol
                 </Link>
-                <nav className="flex items-center gap-4 sm:gap-6">
+                <nav className="hidden sm:flex items-center gap-4 sm:gap-6 min-w-0">
                     <Link href="/#events" className="text-[8px] tracking-[0.2em] uppercase text-white/40 hover:text-white font-bold">
                         Events
                     </Link>
                     <span className="text-[8px] tracking-[0.2em] uppercase text-blue-300/90 font-bold">Host dashboard</span>
                 </nav>
-                <ConnectButton showBalance={false} chainStatus="none" accountStatus="address" />
+                {/* Base (RainbowKit) + Freighter — not Coinbase-only ConnectButton */}
+                <div className="shrink-0 max-w-[55%] sm:max-w-none">
+                    <ConnectWalletButton
+                        compact
+                        onStellarConnected={(addr) => {
+                            setStellarAddress(addr);
+                            showToast('Freighter connected');
+                        }}
+                    />
+                </div>
             </header>
 
             <AnimatePresence>
@@ -427,17 +447,23 @@ function OrganizerDashboardInner() {
                             <div className="space-y-3 p-4 border border-blue-500/20 bg-blue-500/[0.04]">
                                 <p className="text-[9px] uppercase tracking-widest text-blue-300/90 font-black">Wallet</p>
                                 <p className="text-[10px] text-white/50 leading-relaxed">
-                                    Connect, then sign a one-time message to verify ownership.
+                                    Connect <strong className="text-white/70">Base</strong> (Coinbase Wallet, MetaMask,
+                                    …) or <strong className="text-white/70">Freighter</strong> (Stellar). Host verify
+                                    signature uses Base; Freighter is for Stellar rails.
                                 </p>
-                                {!isConnected || !address ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => openConnectModal?.()}
-                                        className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200"
-                                    >
-                                        Connect wallet
-                                    </button>
-                                ) : (
+                                <ConnectWalletButton
+                                    fullWidth
+                                    onStellarConnected={(addr) => {
+                                        setStellarAddress(addr);
+                                        showToast('Freighter connected');
+                                    }}
+                                />
+                                {stellarAddress ? (
+                                    <p className="text-[9px] font-mono text-violet-300/90 break-all">
+                                        Freighter · {stellarAddress.slice(0, 6)}…{stellarAddress.slice(-6)}
+                                    </p>
+                                ) : null}
+                                {isConnected && address ? (
                                     <button
                                         type="button"
                                         disabled={authBusy}
@@ -459,10 +485,16 @@ function OrganizerDashboardInner() {
                                                 setAuthBusy(false);
                                             }
                                         }}
-                                        className="w-full py-3 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-50"
+                                        className="w-full min-h-[44px] py-3 border border-white/20 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/5 disabled:opacity-50"
                                     >
-                                        {authBusy ? 'Waiting for signature…' : `Sign to verify ${address.slice(0, 6)}…${address.slice(-4)}`}
+                                        {authBusy
+                                            ? 'Waiting for signature…'
+                                            : `Sign to verify host · ${address.slice(0, 6)}…${address.slice(-4)}`}
                                     </button>
+                                ) : (
+                                    <p className="text-[9px] text-white/35 leading-relaxed">
+                                        After connecting Base, tap Sign to verify host. Or use email code below.
+                                    </p>
                                 )}
                             </div>
                             <div className="flex items-center gap-3 text-[8px] uppercase tracking-widest text-white/25 font-bold">

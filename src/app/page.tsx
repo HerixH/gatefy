@@ -2460,7 +2460,8 @@ function HomeContent() {
                 />
               </span>
             </button>
-            <div className="scale-100 sm:scale-90 lg:scale-100 origin-right">
+            {/* Desktop / tablet: wallet in header. Mobile: inside the menu below. */}
+            <div className="hidden md:block scale-90 lg:scale-100 origin-right">
               <ConnectWalletButton compact />
             </div>
           </div>
@@ -2492,6 +2493,10 @@ function HomeContent() {
                   </Link>
                 ))}
               </nav>
+              <div className="mt-4 space-y-2">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Wallet</p>
+                <ConnectWalletButton fullWidth />
+              </div>
             </motion.div>
           ) : null}
         </AnimatePresence>
