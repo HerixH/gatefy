@@ -80,7 +80,7 @@ export function formatEventTicketSummary(
     const price = ev.ticketPriceUsdc ?? 0;
     if (!(Number.isFinite(price) && price > 0)) return 'Free';
     const rails: string[] = [];
-    if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('Base');
+    if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
     if (eventAcceptsStellar(ev)) rails.push('Stellar');
     if (eventAcceptsStepay(ev)) rails.push('Stepay');
     if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');

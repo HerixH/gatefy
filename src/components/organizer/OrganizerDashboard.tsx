@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
 import {
     eventAcceptsMobileMoney,
+    eventAcceptsStepay,
     eventAcceptsStellar,
     eventAcceptsUsdc,
     formatEventTicketSummary,
@@ -22,7 +23,9 @@ import { getPublicRegistrationLink } from '@/lib/organizer-event';
 import { downloadEventQrImage } from '@/lib/organizer-qr';
 import {
     exportOrganizerRosterCsv,
+    payBadgeClassName,
     registrantMatchesCheckIn,
+    registrationPayBadge,
     registrationPayLabel,
     registrationPaymentDetail,
     type OrganizerAttendeeRow,
@@ -896,8 +899,12 @@ function OrganizerDashboardInner() {
                                                 <p className="text-[8px] font-mono text-white/30">
                                                     Rails:{' '}
                                                     {[
-                                                        eventAcceptsUsdc(selectedEvent) ? 'Base' : null,
+                                                        selectedEvent.isBlockchain !== false &&
+                                                        eventAcceptsUsdc(selectedEvent)
+                                                            ? 'USDC'
+                                                            : null,
                                                         eventAcceptsStellar(selectedEvent) ? 'Stellar' : null,
+                                                        eventAcceptsStepay(selectedEvent) ? 'Stepay' : null,
                                                         eventAcceptsMobileMoney(selectedEvent) ? 'Mobile' : null,
                                                     ]
                                                         .filter(Boolean)
@@ -1043,31 +1050,63 @@ function OrganizerDashboardInner() {
                                                                 : 'No check-ins yet'
                                                         }
                                                     >
-                                                        {filteredAttendees.map((a, i) => (
+                                                        {filteredAttendees.map((a, i) => {
+                                                            const reg =
+                                                                registrations.find((r) =>
+                                                                    registrantMatchesCheckIn(r, a)
+                                                                ) ?? null;
+                                                            const pay = registrationPayBadge(
+                                                                reg,
+                                                                selectedEvent.ticketPriceUsdc ?? 0
+                                                            );
+                                                            return (
                                                             <li
                                                                 key={i}
-                                                                className="p-2.5 text-[10px] font-mono border-b border-white/[0.04]"
+                                                                className="p-2.5 text-[10px] font-mono border-b border-white/[0.04] space-y-1.5"
                                                             >
-                                                                <p className="text-white/75 truncate">
-                                                                    {a.wallet
-                                                                        ? `${a.wallet.slice(0, 10)}…${a.wallet.slice(-6)}`
-                                                                        : a.email || '—'}
-                                                                </p>
-                                                                {a.code ? (
-                                                                    <p className="text-blue-400/70 text-[8px]">
-                                                                        {a.code}
-                                                                    </p>
+                                                                <div className="flex items-start justify-between gap-2">
+                                                                    <div className="min-w-0">
+                                                                        <p className="text-white/75 truncate">
+                                                                            {a.wallet
+                                                                                ? `${a.wallet.slice(0, 10)}…${a.wallet.slice(-6)}`
+                                                                                : a.email || '—'}
+                                                                        </p>
+                                                                        {a.code ? (
+                                                                            <p className="text-blue-400/70 text-[8px]">
+                                                                                {a.code}
+                                                                            </p>
+                                                                        ) : null}
+                                                                        <p className="text-[8px] text-white/25">
+                                                                            {new Date(a.checkedInAt).toLocaleString('en-GB', {
+                                                                                day: '2-digit',
+                                                                                month: 'short',
+                                                                                hour: '2-digit',
+                                                                                minute: '2-digit',
+                                                                            })}
+                                                                        </p>
+                                                                    </div>
+                                                                    <span className="text-[7px] uppercase tracking-wider text-green-400/80 font-black shrink-0">
+                                                                        Verified
+                                                                    </span>
+                                                                </div>
+                                                                {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
+                                                                    <span
+                                                                        className={`inline-flex max-w-full items-center px-2 py-0.5 border text-[8px] font-black uppercase tracking-wider ${payBadgeClassName(pay.tone)}`}
+                                                                        title={
+                                                                            reg
+                                                                                ? registrationPayLabel(
+                                                                                      reg,
+                                                                                      selectedEvent.ticketPriceUsdc ?? 0
+                                                                                  )
+                                                                                : pay.label
+                                                                        }
+                                                                    >
+                                                                        {pay.label}
+                                                                    </span>
                                                                 ) : null}
-                                                                <p className="text-[8px] text-white/25">
-                                                                    {new Date(a.checkedInAt).toLocaleString('en-GB', {
-                                                                        day: '2-digit',
-                                                                        month: 'short',
-                                                                        hour: '2-digit',
-                                                                        minute: '2-digit',
-                                                                    })}
-                                                                </p>
                                                             </li>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </RosterColumn>
                                                 ) : null}
                                                 {showPendingColumn ? (
@@ -1083,14 +1122,14 @@ function OrganizerDashboardInner() {
                                                     >
                                                         {filteredPendingRegs.map((r, i) => {
                                                             const detail = registrationPaymentDetail(r);
-                                                            const unpaid = isUnpaidRegistration(
-                                                                r.paymentStatus,
+                                                            const pay = registrationPayBadge(
+                                                                r,
                                                                 selectedEvent.ticketPriceUsdc ?? 0
                                                             );
                                                             return (
                                                                 <li
                                                                     key={i}
-                                                                    className="p-2.5 text-[10px] border-b border-white/[0.04] space-y-1"
+                                                                    className="p-2.5 text-[10px] border-b border-white/[0.04] space-y-1.5"
                                                                 >
                                                                     <div className="flex justify-between gap-2">
                                                                         <div className="min-w-0">
@@ -1106,18 +1145,17 @@ function OrganizerDashboardInner() {
                                                                                 </p>
                                                                             ) : null}
                                                                         </div>
-                                                                        <span
-                                                                            className={`text-[8px] shrink-0 font-bold uppercase ${
-                                                                                unpaid
-                                                                                    ? 'text-amber-400/80'
-                                                                                    : 'text-emerald-400/70'
-                                                                            }`}
-                                                                        >
-                                                                            {registrationPayLabel(
-                                                                                r,
-                                                                                selectedEvent.ticketPriceUsdc ?? 0
-                                                                            )}
-                                                                        </span>
+                                                                        {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
+                                                                            <span
+                                                                                className={`inline-flex shrink-0 items-center px-2 py-0.5 border text-[8px] font-black uppercase tracking-wider ${payBadgeClassName(pay.tone)}`}
+                                                                                title={registrationPayLabel(
+                                                                                    r,
+                                                                                    selectedEvent.ticketPriceUsdc ?? 0
+                                                                                )}
+                                                                            >
+                                                                                {pay.label}
+                                                                            </span>
+                                                                        ) : null}
                                                                     </div>
                                                                     {detail ? (
                                                                         <div className="flex items-center gap-2">

@@ -2022,7 +2022,26 @@ function HomeContent() {
                   </div>
                 ) : filteredAttendees.length > 0 ? (
                   <div className="divide-y divide-white/[0.04]">
-                    {filteredAttendees.map((a, i) => (
+                    {filteredAttendees.map((a, i) => {
+                      const reg = registrations.find((r) => registrantMatchesCheckIn(r, a)) ?? null;
+                      const st = (reg?.paymentStatus ?? 'none').toLowerCase();
+                      const paid =
+                        st === 'paid_crypto' || st === 'paid_stellar' || st === 'paid_mobile';
+                      const payLabel =
+                        ticketSpot <= 0
+                          ? null
+                          : paid
+                            ? st === 'paid_stellar' && (reg?.paymentReference ?? '').startsWith('stepay:')
+                              ? 'Paid · Stepay'
+                              : st === 'paid_stellar'
+                                ? 'Paid · Stellar'
+                                : st === 'paid_mobile'
+                                  ? 'Paid · Mobile'
+                                  : 'Paid · Base'
+                            : st === 'pending_mobile'
+                              ? 'Awaiting MoMo'
+                              : 'Unpaid';
+                      return (
                       <button
                         key={i}
                         type="button"
@@ -2030,12 +2049,12 @@ function HomeContent() {
                           setRosterDetail({
                             kind: 'verified',
                             attendee: a,
-                            registration: registrations.find((r) => registrantMatchesCheckIn(r, a)) ?? null,
+                            registration: reg,
                           })
                         }
-                        className="w-full text-left p-3 flex items-center justify-between group hover:bg-white/[0.04] transition-colors"
+                        className="w-full text-left p-3 flex items-center justify-between gap-2 group hover:bg-white/[0.04] transition-colors"
                       >
-                        <div className="space-y-0.5 min-w-0">
+                        <div className="space-y-1 min-w-0">
                           <p className="text-[10px] font-mono text-white/70 truncate">
                             {a.wallet ? `${a.wallet.slice(0, 10)}...${a.wallet.slice(-8)}` : (a.email || '—')}
                           </p>
@@ -2045,10 +2064,24 @@ function HomeContent() {
                           <p className="text-[8px] font-mono text-white/25">
                             {new Date(a.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                           </p>
+                          {payLabel ? (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 border text-[8px] font-black uppercase tracking-wider ${
+                                paid
+                                  ? 'border-emerald-400/55 bg-emerald-500/25 text-emerald-200'
+                                  : st === 'pending_mobile'
+                                    ? 'border-amber-400/50 bg-amber-500/20 text-amber-200'
+                                    : 'border-orange-400/45 bg-orange-500/15 text-orange-200'
+                              }`}
+                            >
+                              {payLabel}
+                            </span>
+                          ) : null}
                         </div>
-                        <span className="text-[8px] uppercase tracking-widest text-green-500/60 font-bold shrink-0 ml-2">Verified</span>
+                        <span className="text-[8px] uppercase tracking-widest text-green-400/80 font-black shrink-0">Verified</span>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="p-6 text-center">
@@ -2097,9 +2130,30 @@ function HomeContent() {
                               Registered {new Date(r.registeredAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                             </p>
                           </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0 ml-2">
-                            <span className="text-[8px] uppercase tracking-widest text-amber-400/50 font-bold">Pending</span>
-                            <span className="text-[8px] font-mono text-white/35">{regPayLabel(r)}</span>
+                          <div className="flex flex-col items-end gap-1.5 shrink-0 ml-2">
+                            <span className="text-[8px] uppercase tracking-widest text-amber-400/70 font-bold">Pending</span>
+                            {ticketSpot > 0 ? (
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 border text-[8px] font-black uppercase tracking-wider ${
+                                  (r.paymentStatus ?? '').toLowerCase().startsWith('paid')
+                                    ? 'border-emerald-400/55 bg-emerald-500/25 text-emerald-200'
+                                    : (r.paymentStatus ?? '') === 'pending_mobile'
+                                      ? 'border-amber-400/50 bg-amber-500/20 text-amber-200'
+                                      : 'border-orange-400/45 bg-orange-500/15 text-orange-200'
+                                }`}
+                              >
+                                {(() => {
+                                  const st = (r.paymentStatus ?? 'none').toLowerCase();
+                                  if (st === 'paid_stellar' && (r.paymentReference ?? '').startsWith('stepay:'))
+                                    return 'Paid · Stepay';
+                                  if (st === 'paid_stellar') return 'Paid · Stellar';
+                                  if (st === 'paid_crypto') return 'Paid · Base';
+                                  if (st === 'paid_mobile') return 'Paid · Mobile';
+                                  if (st === 'pending_mobile') return 'Awaiting MoMo';
+                                  return 'Unpaid';
+                                })()}
+                              </span>
+                            ) : null}
                           </div>
                         </button>
                       ))}

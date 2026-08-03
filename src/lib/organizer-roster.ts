@@ -66,6 +66,40 @@ export function registrationPayLabel(r: OrganizerRegRow, ticketPriceUsdc: number
     return String(st);
 }
 
+/** Short label + tone for high-visibility roster pills. */
+export function registrationPayBadge(
+    r: OrganizerRegRow | null | undefined,
+    ticketPriceUsdc: number
+): { tone: 'paid' | 'unpaid' | 'pending' | 'free' | 'none'; label: string } {
+    if (ticketPriceUsdc <= 0) return { tone: 'free', label: 'Free' };
+    if (!r) return { tone: 'none', label: 'No payment data' };
+    const st = (r.paymentStatus ?? 'none').toLowerCase();
+    if (st === 'paid_crypto') return { tone: 'paid', label: 'Paid · Base' };
+    if (st === 'paid_stellar') {
+        const stepay = (r.paymentReference ?? '').startsWith('stepay:');
+        return { tone: 'paid', label: stepay ? 'Paid · Stepay' : 'Paid · Stellar' };
+    }
+    if (st === 'paid_mobile') return { tone: 'paid', label: 'Paid · Mobile' };
+    if (st === 'pending_mobile') return { tone: 'pending', label: 'Awaiting MoMo' };
+    if (st === 'rejected_mobile') return { tone: 'unpaid', label: 'MoMo rejected' };
+    return { tone: 'unpaid', label: 'Unpaid' };
+}
+
+export function payBadgeClassName(tone: ReturnType<typeof registrationPayBadge>['tone']): string {
+    switch (tone) {
+        case 'paid':
+            return 'border-emerald-400/55 bg-emerald-500/25 text-emerald-200';
+        case 'pending':
+            return 'border-amber-400/50 bg-amber-500/20 text-amber-200';
+        case 'unpaid':
+            return 'border-orange-400/45 bg-orange-500/15 text-orange-200';
+        case 'free':
+            return 'border-white/15 bg-white/[0.06] text-white/55';
+        default:
+            return 'border-white/10 bg-white/[0.04] text-white/40';
+    }
+}
+
 export function exportOrganizerRosterCsv(
     eventName: string,
     ticketPriceUsdc: number,
