@@ -1,17 +1,43 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
-/* Leaflet inside dark modals — avoid blank white map pane */
+/* Leaflet — keep map chrome inside its host (never above modals) */
+.gatefy-map-host {
+  isolation: isolate;
+  contain: paint;
+  z-index: 0;
+}
 .leaflet-container {
   width: 100%;
   height: 100%;
   background: #0a0a0a !important;
   font: inherit;
+  z-index: 0 !important;
 }
-.leaflet-pane,
+.leaflet-pane {
+  z-index: 1 !important;
+}
+.leaflet-map-pane {
+  z-index: 1 !important;
+}
+.leaflet-tile-pane {
+  z-index: 2 !important;
+}
+.leaflet-overlay-pane {
+  z-index: 3 !important;
+}
+.leaflet-marker-pane {
+  z-index: 4 !important;
+}
+.leaflet-tooltip-pane {
+  z-index: 5 !important;
+}
+.leaflet-popup-pane {
+  z-index: 6 !important;
+}
 .leaflet-top,
 .leaflet-bottom {
-  z-index: auto;
+  z-index: 7 !important;
 }
 .leaflet-control-attribution {
   background: rgba(0, 0, 0, 0.55) !important;

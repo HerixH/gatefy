@@ -197,7 +197,7 @@ export function EventsNearMeMap({
 
     return (
         <div className={`space-y-1.5 ${className ?? ''}`}>
-            <div className="relative h-56 w-full border border-white/10 overflow-hidden bg-neutral-950">
+            <div className="gatefy-map-host relative h-56 w-full border border-white/10 overflow-hidden isolate bg-neutral-950">
                 <MapContainer
                     center={center}
                     zoom={country?.zoom ?? 12}
@@ -257,7 +257,7 @@ export function EventsNearMeMap({
                     ) : null}
                 </MapContainer>
 
-                <div className="pointer-events-none absolute inset-0 z-[500] flex flex-col justify-between p-2">
+                <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col justify-between p-2">
                     <div className="pointer-events-auto flex flex-wrap justify-end gap-1 max-w-full">
                         <button
                             type="button"

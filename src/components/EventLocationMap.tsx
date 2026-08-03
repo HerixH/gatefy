@@ -447,7 +447,7 @@ export function EventLocationMap({
         <div className={`space-y-1.5 ${className ?? ''}`}>
             <div
                 ref={hostRef}
-                className={`${height} border border-white/10 overflow-hidden relative bg-neutral-950 ${
+                className={`gatefy-map-host ${height} border border-white/10 overflow-hidden relative isolate bg-neutral-950 ${
                     pinMode ? 'cursor-crosshair' : ''
                 }`}
                 style={{ minHeight: minHeightPx }}
@@ -514,124 +514,127 @@ export function EventLocationMap({
                 </MapContainer>
                 )}
 
-                <div className="pointer-events-none absolute inset-0 z-[500] flex flex-col justify-between p-2 sm:p-2.5">
-                    <div className="flex items-start justify-end gap-1.5">
-                        {following ? (
-                            <div className="pointer-events-none shrink-0 self-start px-2 py-1.5 bg-emerald-950/85 border border-emerald-400/50 text-[7px] sm:text-[8px] font-black uppercase tracking-widest text-emerald-200">
-                                Live · {modeLabel(travelMode)}
-                            </div>
-                        ) : null}
-                        <div className="pointer-events-auto flex flex-wrap justify-end gap-1 max-w-[90%]">
-                            {allowPin ? (
+                {/* Compact (event detail) = map preview only — no chrome that can stack over the modal */}
+                {!compact ? (
+                    <div className="pointer-events-none absolute inset-0 z-[5] flex flex-col justify-between p-2 sm:p-2.5">
+                        <div className="flex items-start justify-end gap-1.5">
+                            {following ? (
+                                <div className="pointer-events-none shrink-0 self-start px-2 py-1.5 bg-emerald-950/85 border border-emerald-400/50 text-[7px] sm:text-[8px] font-black uppercase tracking-widest text-emerald-200">
+                                    Live · {modeLabel(travelMode)}
+                                </div>
+                            ) : null}
+                            <div className="pointer-events-auto flex flex-wrap justify-end gap-1 max-w-[90%]">
+                                {allowPin ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setPinMode((p) => !p)}
+                                        className={`${chip} ${
+                                            pinMode
+                                                ? 'border-fuchsia-400/60 text-fuchsia-100'
+                                                : 'border-white/20 text-white/55 hover:text-white'
+                                        }`}
+                                    >
+                                        {pinMode ? 'Pin on' : 'Pin'}
+                                    </button>
+                                ) : null}
                                 <button
                                     type="button"
-                                    onClick={() => setPinMode((p) => !p)}
+                                    onClick={() => setBaseLayer('street')}
                                     className={`${chip} ${
-                                        pinMode
-                                            ? 'border-fuchsia-400/60 text-fuchsia-100'
+                                        baseLayer === 'street'
+                                            ? 'border-white/50 text-white'
                                             : 'border-white/20 text-white/55 hover:text-white'
                                     }`}
                                 >
-                                    {pinMode ? 'Pin on' : 'Pin'}
+                                    Street
                                 </button>
-                            ) : null}
-                            <button
-                                type="button"
-                                onClick={() => setBaseLayer('street')}
-                                className={`${chip} ${
-                                    baseLayer === 'street'
-                                        ? 'border-white/50 text-white'
-                                        : 'border-white/20 text-white/55 hover:text-white'
-                                }`}
-                            >
-                                Street
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setBaseLayer('satellite')}
-                                className={`${chip} ${
-                                    baseLayer === 'satellite'
-                                        ? 'border-amber-300/60 text-amber-100'
-                                        : 'border-white/20 text-white/55 hover:text-white'
-                                }`}
-                            >
-                                Satellite
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setTravelMode('driving')}
-                                className={`${chip} ${
-                                    travelMode === 'driving'
-                                        ? 'border-blue-400/60 text-blue-100'
-                                        : 'border-white/20 text-white/55 hover:text-white'
-                                }`}
-                            >
-                                Drive
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setTravelMode('walking')}
-                                className={`${chip} ${
-                                    travelMode === 'walking'
-                                        ? 'border-emerald-400/60 text-emerald-100'
-                                        : 'border-white/20 text-white/55 hover:text-white'
-                                }`}
-                            >
-                                Walk
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="pointer-events-auto space-y-1.5">
-                        {msg ? (
-                            <p className="px-2 py-1 bg-black/75 backdrop-blur-sm border border-white/15 text-[8px] font-mono text-white/80 w-fit max-w-full truncate">
-                                {msg}
-                            </p>
-                        ) : null}
-                        <div className="flex flex-wrap gap-1">
-                            <button
-                                type="button"
-                                disabled={busy || !dest}
-                                onClick={() => void applyRoute(travelMode, false)}
-                                className={`${chip} border-blue-400/45 text-blue-100 hover:bg-blue-500/20`}
-                            >
-                                {busy && !following ? 'Routing…' : 'Directions'}
-                            </button>
-                            <button
-                                type="button"
-                                disabled={busy || !dest}
-                                onClick={() => {
-                                    if (following) {
-                                        setFollowing(false);
-                                        setMsg(
-                                            route
-                                                ? `${route.distanceKm} km · ~${route.durationMin} min ${modeLabel(route.mode)}`
-                                                : ''
-                                        );
-                                        return;
-                                    }
-                                    void applyRoute(travelMode, true);
-                                }}
-                                className={`${chip} ${
-                                    following
-                                        ? 'border-amber-400/50 text-amber-100 hover:bg-amber-500/20'
-                                        : 'border-emerald-400/45 text-emerald-100 hover:bg-emerald-500/20'
-                                }`}
-                            >
-                                {following ? 'Stop' : 'Follow'}
-                            </button>
-                            {route || origin ? (
                                 <button
                                     type="button"
-                                    onClick={clearRoute}
-                                    className={`${chip} border-white/25 text-white/70 hover:text-white`}
+                                    onClick={() => setBaseLayer('satellite')}
+                                    className={`${chip} ${
+                                        baseLayer === 'satellite'
+                                            ? 'border-amber-300/60 text-amber-100'
+                                            : 'border-white/20 text-white/55 hover:text-white'
+                                    }`}
                                 >
-                                    Clear
+                                    Satellite
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setTravelMode('driving')}
+                                    className={`${chip} ${
+                                        travelMode === 'driving'
+                                            ? 'border-blue-400/60 text-blue-100'
+                                            : 'border-white/20 text-white/55 hover:text-white'
+                                    }`}
+                                >
+                                    Drive
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setTravelMode('walking')}
+                                    className={`${chip} ${
+                                        travelMode === 'walking'
+                                            ? 'border-emerald-400/60 text-emerald-100'
+                                            : 'border-white/20 text-white/55 hover:text-white'
+                                    }`}
+                                >
+                                    Walk
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="pointer-events-auto space-y-1.5">
+                            {msg ? (
+                                <p className="px-2 py-1 bg-black/75 backdrop-blur-sm border border-white/15 text-[8px] font-mono text-white/80 w-fit max-w-full truncate">
+                                    {msg}
+                                </p>
                             ) : null}
+                            <div className="flex flex-wrap gap-1">
+                                <button
+                                    type="button"
+                                    disabled={busy || !dest}
+                                    onClick={() => void applyRoute(travelMode, false)}
+                                    className={`${chip} border-blue-400/45 text-blue-100 hover:bg-blue-500/20`}
+                                >
+                                    {busy && !following ? 'Routing…' : 'Directions'}
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={busy || !dest}
+                                    onClick={() => {
+                                        if (following) {
+                                            setFollowing(false);
+                                            setMsg(
+                                                route
+                                                    ? `${route.distanceKm} km · ~${route.durationMin} min ${modeLabel(route.mode)}`
+                                                    : ''
+                                            );
+                                            return;
+                                        }
+                                        void applyRoute(travelMode, true);
+                                    }}
+                                    className={`${chip} ${
+                                        following
+                                            ? 'border-amber-400/50 text-amber-100 hover:bg-amber-500/20'
+                                            : 'border-emerald-400/45 text-emerald-100 hover:bg-emerald-500/20'
+                                    }`}
+                                >
+                                    {following ? 'Stop' : 'Follow'}
+                                </button>
+                                {route || origin ? (
+                                    <button
+                                        type="button"
+                                        onClick={clearRoute}
+                                        className={`${chip} border-white/25 text-white/70 hover:text-white`}
+                                    >
+                                        Clear
+                                    </button>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
-                </div>
+                ) : null}
             </div>
             {!compact ? (
                 <p className="text-[8px] text-white/25 leading-relaxed truncate" title={dest?.label ?? country?.name}>

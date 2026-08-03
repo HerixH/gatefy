@@ -2773,22 +2773,25 @@ function HomeContent() {
               </div>
             </div>
 
-            <EventsNearMe
-              events={events
-                .filter((ev) => !isPast(ev.date, ev.endDate))
-                .map((ev) => ({
-                  id: ev.id,
-                  name: ev.name,
-                  location: ev.location ?? '',
-                  date: ev.date,
-                  endDate: ev.endDate,
-                }))}
-              onSelectEvent={(id) => {
-                const ev = events.find((e) => e.id === id);
-                if (ev) setSelectedEvent(ev);
-              }}
-              formatDate={formatDate}
-            />
+            {/* Unmount while event modal is open — map chrome (z-index) must not paint over the sheet */}
+            {!selectedEvent ? (
+              <EventsNearMe
+                events={events
+                  .filter((ev) => !isPast(ev.date, ev.endDate))
+                  .map((ev) => ({
+                    id: ev.id,
+                    name: ev.name,
+                    location: ev.location ?? '',
+                    date: ev.date,
+                    endDate: ev.endDate,
+                  }))}
+                onSelectEvent={(id) => {
+                  const ev = events.find((e) => e.id === id);
+                  if (ev) setSelectedEvent(ev);
+                }}
+                formatDate={formatDate}
+              />
+            ) : null}
 
             {/* Host workspace lives on /organizer — keep landing attendee-focused */}
             {hostSignedIn && (organizerSessionEmail || sessionWallet) ? (
