@@ -1,8 +1,8 @@
 import { OrganizerDashboardClient } from './OrganizerDashboardClient';
 
 export const metadata = {
-    title: 'Host dashboard — Gate Protocol',
-    description: 'Manage your events, tickets, buyers, and check-ins.',
+    title: 'Your events — Gate Protocol',
+    description: 'Host workspace: manage your events, tickets, buyers, and check-ins.',
 };
 
 export default function OrganizerPage() {

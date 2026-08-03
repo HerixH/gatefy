@@ -387,7 +387,7 @@ function OrganizerDashboardInner() {
                     <Link href="/#events" className="text-[8px] tracking-[0.2em] uppercase text-white/40 hover:text-white font-bold">
                         Events
                     </Link>
-                    <span className="text-[8px] tracking-[0.2em] uppercase text-blue-300/90 font-bold">Host dashboard</span>
+                    <span className="text-[8px] tracking-[0.2em] uppercase text-blue-300/90 font-bold">Your events</span>
                 </nav>
                 {/* Base (RainbowKit) + Freighter — not Coinbase-only ConnectButton */}
                 <div className="shrink-0 max-w-[55%] sm:max-w-none">
@@ -416,22 +416,38 @@ function OrganizerDashboardInner() {
 
             <main className="flex-1 pt-24 pb-16 px-4 sm:px-8 max-w-6xl mx-auto w-full">
                 <div className="space-y-8">
-                    <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-                        <div>
-                            <p className="text-[9px] tracking-[0.4em] uppercase text-blue-400/90 font-black">Organizer</p>
-                            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">Event dashboard</h1>
-                            <p className="text-sm text-white/45 mt-1 max-w-xl">
-                                Tickets, buyers, check-ins, and QR codes — all in one place.
-                            </p>
+                    <div className="relative overflow-hidden border border-blue-500/20 bg-gradient-to-br from-blue-950/40 via-black to-black px-5 py-6 sm:px-8 sm:py-8">
+                        <div
+                            className="pointer-events-none absolute inset-y-0 right-0 w-1/2 opacity-40"
+                            style={{
+                                background:
+                                    'radial-gradient(ellipse at 80% 20%, rgba(59,130,246,0.35), transparent 55%)',
+                            }}
+                        />
+                        <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-5">
+                            <div className="min-w-0">
+                                <p className="text-[9px] tracking-[0.4em] uppercase text-blue-300/90 font-black">
+                                    Host workspace
+                                </p>
+                                <h1 className="text-3xl sm:text-4xl font-black tracking-tight mt-1">Your events</h1>
+                                <p className="text-sm text-white/50 mt-2 max-w-xl leading-relaxed">
+                                    Manage tickets, buyers, check-ins, and door QR codes for every event you host.
+                                </p>
+                            </div>
+                            {signedIn ? (
+                                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto shrink-0">
+                                    <span className="text-[10px] font-mono text-white/45 tracking-widest uppercase self-start sm:self-center">
+                                        {loading ? '…' : `${totals.events} total`}
+                                    </span>
+                                    <Link
+                                        href="/?create=1"
+                                        className="w-full sm:w-auto min-h-[48px] sm:min-h-0 inline-flex items-center justify-center px-5 py-3 bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 text-center"
+                                    >
+                                        Create event
+                                    </Link>
+                                </div>
+                            ) : null}
                         </div>
-                        {signedIn && (
-                            <Link
-                                href="/?create=1"
-                                className="shrink-0 px-4 py-2.5 bg-white text-black text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 text-center"
-                            >
-                                Create event
-                            </Link>
-                        )}
                     </div>
 
                     {sessionLoading ? (
@@ -607,13 +623,13 @@ function OrganizerDashboardInner() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex flex-wrap items-center justify-between gap-3 text-[9px] font-mono text-white/40 border border-white/10 bg-white/[0.02] px-4 py-3">
-                                <span>
+                            <div className="flex flex-wrap items-center justify-between gap-3 text-[9px] font-mono text-white/50 border-l-2 border-l-blue-400/70 bg-white/[0.02] pl-4 pr-4 py-3">
+                                <span className="min-w-0 truncate">
                                     {sessionWallet
-                                        ? `Verified wallet ${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
+                                        ? `Wallet ${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
                                         : ''}
                                     {sessionWallet && organizerSessionEmail ? ' · ' : ''}
-                                    {organizerSessionEmail ? `Verified email ${organizerSessionEmail}` : ''}
+                                    {organizerSessionEmail ? organizerSessionEmail : ''}
                                 </span>
                                 <div className="flex flex-wrap gap-2">
                                     {isConnected && address && !sessionWallet ? (
@@ -654,40 +670,49 @@ function OrganizerDashboardInner() {
                             </div>
 
                             {!loading && events.length === 0 ? (
-                                <div className="border border-amber-500/25 bg-amber-500/[0.05] p-4 space-y-2">
-                                    <p className="text-[10px] uppercase tracking-widest text-amber-400/90 font-bold">No events for this sign-in</p>
+                                <div className="border border-amber-500/25 bg-amber-500/[0.05] p-5 space-y-2">
+                                    <p className="text-[10px] uppercase tracking-widest text-amber-400/90 font-bold">
+                                        No events for this sign-in
+                                    </p>
                                     <p className="text-[11px] text-white/55 leading-relaxed">
                                         {isConnected && !organizerSessionEmail
-                                            ? 'This wallet has no hosted events yet — or your events were created with email. Add your organizer email above.'
+                                            ? 'This wallet has no hosted events yet — or your events were created with email. Sign in with the organizer email you used.'
                                             : !isConnected && organizerSessionEmail
                                               ? 'No events for this email — connect the wallet you used, or check the spelling matches create-event email.'
-                                              : 'Try the other sign-in method above, or create your first event.'}
+                                              : 'Create your first event, or try the other sign-in method.'}
                                     </p>
-                                    <Link href="/?create=1" className="inline-block text-[9px] uppercase text-white font-bold hover:underline">
+                                    <Link
+                                        href="/?create=1"
+                                        className="inline-block text-[9px] uppercase text-white font-bold hover:underline"
+                                    >
                                         Create event →
                                     </Link>
                                 </div>
                             ) : null}
 
-                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                            <div className="flex flex-wrap items-stretch gap-0 border border-white/10 divide-x divide-white/10 overflow-x-auto">
                                 {[
                                     { label: 'Events', value: totals.events },
                                     { label: 'Registrations', value: totals.registrations },
                                     { label: 'Verified', value: totals.verified },
                                     {
-                                        label: 'Paid tickets',
+                                        label: 'Paid',
                                         value: totals.paid,
                                         sub: totals.unpaid > 0 ? `${totals.unpaid} unpaid` : undefined,
                                     },
                                     {
-                                        label: 'Est. paid',
+                                        label: 'Est. revenue',
                                         value: totals.revenue > 0 ? totals.revenue : '—',
-                                        sub: totals.revenue > 0 ? 'paid × ticket price' : 'free events',
+                                        sub: totals.revenue > 0 ? 'paid × price' : 'free / unpaid',
                                     },
                                 ].map((s) => (
-                                    <div key={s.label} className="border border-white/10 bg-white/[0.02] p-4">
-                                        <p className="text-[8px] uppercase tracking-widest text-white/30 font-bold">{s.label}</p>
-                                        <p className="text-xl font-black text-white mt-1">{s.value}</p>
+                                    <div key={s.label} className="min-w-[7.5rem] flex-1 px-4 py-3.5">
+                                        <p className="text-[8px] uppercase tracking-widest text-white/35 font-bold">
+                                            {s.label}
+                                        </p>
+                                        <p className="text-2xl font-black text-white mt-1 tabular-nums tracking-tight">
+                                            {s.value}
+                                        </p>
                                         {'sub' in s && s.sub ? (
                                             <p className="text-[8px] text-amber-400/80 mt-0.5">{s.sub}</p>
                                         ) : null}
@@ -699,77 +724,132 @@ function OrganizerDashboardInner() {
 
                             {events.length > 0 ? (
                             <>
-                            <div className="flex flex-wrap gap-2">
-                                {(['all', 'upcoming', 'ongoing', 'past'] as const).map((f) => (
-                                    <button
-                                        key={f}
-                                        type="button"
-                                        onClick={() => setStatusFilter(f)}
-                                        className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-widest border ${
-                                            statusFilter === f
-                                                ? 'bg-white text-black border-white'
-                                                : 'border-white/15 text-white/45 hover:text-white'
-                                        }`}
-                                    >
-                                        {f}
-                                    </button>
-                                ))}
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                <div className="flex flex-wrap gap-2">
+                                    {(['all', 'upcoming', 'ongoing', 'past'] as const).map((f) => (
+                                        <button
+                                            key={f}
+                                            type="button"
+                                            onClick={() => setStatusFilter(f)}
+                                            className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-widest border transition-colors ${
+                                                statusFilter === f
+                                                    ? 'bg-blue-500 text-white border-blue-500'
+                                                    : 'border-white/15 text-white/45 hover:text-white hover:border-white/30'
+                                            }`}
+                                        >
+                                            {f}
+                                        </button>
+                                    ))}
+                                </div>
+                                <input
+                                    type="search"
+                                    value={eventSearch}
+                                    onChange={(e) => setEventSearch(e.target.value)}
+                                    placeholder="Search by name, place, id…"
+                                    className="w-full sm:w-64 bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-[11px] font-mono placeholder:text-white/25 focus:outline-none focus:border-blue-400/40"
+                                />
                             </div>
 
-                            <div className="grid lg:grid-cols-[minmax(0,340px)_1fr] gap-6 items-start">
-                                <div className="space-y-2">
-                                    <input
-                                        type="search"
-                                        value={eventSearch}
-                                        onChange={(e) => setEventSearch(e.target.value)}
-                                        placeholder="Search events…"
-                                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-[11px] font-mono placeholder:text-white/25 focus:outline-none focus:border-white/25"
-                                    />
-                                <div className="border border-white/10 divide-y divide-white/[0.06] max-h-[65vh] overflow-y-auto">
+                            <div className="grid lg:grid-cols-[minmax(0,380px)_1fr] gap-6 items-start">
+                                <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-0.5">
                                     {loading && events.length === 0 ? (
                                         <p className="p-10 text-center text-[10px] uppercase text-white/25 animate-pulse">
                                             Loading…
                                         </p>
                                     ) : filteredEvents.length === 0 ? (
-                                        <div className="p-10 text-center space-y-3">
+                                        <div className="p-10 text-center space-y-3 border border-white/10">
                                             <p className="text-[10px] uppercase text-white/25">No events in this filter</p>
                                             <Link href="/?create=1" className="text-[9px] uppercase text-white/50 hover:text-white">
                                                 Create event
                                             </Link>
                                         </div>
                                     ) : (
-                                        filteredEvents.map((ev) => (
-                                            <button
-                                                key={ev.id}
-                                                type="button"
-                                                onClick={() => selectEvent(ev.id)}
-                                                className={`w-full p-4 text-left transition-colors ${
-                                                    selectedId?.toLowerCase() === ev.id.toLowerCase()
-                                                        ? 'bg-blue-500/10 border-l-2 border-l-blue-400'
-                                                        : 'hover:bg-white/[0.03]'
-                                                }`}
-                                            >
-                                                <div className="flex items-start justify-between gap-2">
-                                                    <p className="text-sm font-bold truncate">{ev.name}</p>
-                                                    {statusBadge(ev)}
-                                                </div>
-                                                <p className="text-[9px] font-mono text-white/35 mt-1">
-                                                    {formatEventDateTime(ev.date)}
-                                                </p>
-                                                <p className="text-[8px] text-white/40 mt-1">{formatEventTicketSummary(ev)}</p>
-                                                <p className="text-[8px] font-mono text-white/30 mt-2">
-                                                    {ev.registrationCount ?? 0} reg · {ev.attendeeCount} in
-                                                    {(ev.ticketPriceUsdc ?? 0) > 0
-                                                        ? ` · ${ev.paidRegistrationCount ?? 0} paid`
-                                                        : ''}
-                                                </p>
-                                            </button>
-                                        ))
+                                        filteredEvents.map((ev, i) => {
+                                            const reg = getRegisteredCount(ev);
+                                            const remaining = getRemainingSeats(ev);
+                                            const cap =
+                                                ev.maxAttendees != null && ev.maxAttendees > 0
+                                                    ? Math.min(100, Math.round((reg / ev.maxAttendees) * 100))
+                                                    : null;
+                                            const selected = selectedId?.toLowerCase() === ev.id.toLowerCase();
+                                            return (
+                                                <motion.button
+                                                    key={ev.id}
+                                                    type="button"
+                                                    initial={{ opacity: 0, y: 8 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    transition={{ delay: Math.min(i * 0.03, 0.24), duration: 0.35 }}
+                                                    onClick={() => selectEvent(ev.id)}
+                                                    className={`w-full text-left border p-4 transition-colors ${
+                                                        selected
+                                                            ? 'border-blue-400/50 bg-blue-500/[0.08]'
+                                                            : 'border-white/10 bg-white/[0.015] hover:border-white/25 hover:bg-white/[0.03]'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="flex items-center gap-2 mb-1.5">
+                                                                <span
+                                                                    className={`w-1.5 h-1.5 shrink-0 ${
+                                                                        ev.cancelledAt
+                                                                            ? 'bg-red-400'
+                                                                            : isUpcoming(ev.date, ev.endDate)
+                                                                              ? 'bg-emerald-400'
+                                                                              : isOngoing(ev.date, ev.endDate)
+                                                                                ? 'bg-amber-400 animate-pulse'
+                                                                                : 'bg-white/25'
+                                                                    }`}
+                                                                />
+                                                                {statusBadge(ev)}
+                                                            </div>
+                                                            <p className="text-[15px] font-bold tracking-tight truncate">
+                                                                {ev.name}
+                                                            </p>
+                                                            <p className="text-[9px] uppercase tracking-[0.14em] text-white/40 font-bold mt-1 truncate">
+                                                                {formatEventTicketSummary(ev)}
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-right shrink-0">
+                                                            <p className="text-[9px] font-mono text-white/40">
+                                                                {formatEventDateTime(ev.date)}
+                                                            </p>
+                                                            <p className="text-[10px] font-mono text-blue-300/90 mt-1.5 tabular-nums">
+                                                                {ev.maxAttendees != null && ev.maxAttendees > 0
+                                                                    ? `${reg} / ${ev.maxAttendees}`
+                                                                    : `${ev.attendeeCount} check-ins`}
+                                                            </p>
+                                                            {ev.maxAttendees != null && ev.maxAttendees > 0 ? (
+                                                                <p className="text-[8px] text-white/35 mt-0.5">
+                                                                    {remaining ?? 0} left
+                                                                </p>
+                                                            ) : null}
+                                                            {(ev.ticketPriceUsdc ?? 0) > 0 ? (
+                                                                <p className="text-[8px] font-mono text-white/40 mt-1">
+                                                                    {ev.paidRegistrationCount ?? 0} paid
+                                                                    {(ev.unpaidRegistrationCount ?? 0) > 0
+                                                                        ? ` · ${ev.unpaidRegistrationCount} unpaid`
+                                                                        : ''}
+                                                                </p>
+                                                            ) : null}
+                                                        </div>
+                                                    </div>
+                                                    {cap != null ? (
+                                                        <div className="mt-3 h-1 bg-white/10 overflow-hidden">
+                                                            <motion.div
+                                                                className="h-full bg-blue-400/80"
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${cap}%` }}
+                                                                transition={{ duration: 0.5, delay: 0.1 }}
+                                                            />
+                                                        </div>
+                                                    ) : null}
+                                                </motion.button>
+                                            );
+                                        })
                                     )}
                                 </div>
-                                </div>
 
-                                <div className="min-h-[320px] border border-white/10 bg-white/[0.01]">
+                                <div className="min-h-[320px] border border-white/10 bg-gradient-to-b from-white/[0.03] to-transparent">
                                     {!selectedEvent ? (
                                         <div className="p-12 text-center text-[10px] uppercase tracking-widest text-white/25">
                                             Select an event to manage tickets & buyers

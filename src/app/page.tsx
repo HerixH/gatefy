@@ -145,7 +145,6 @@ function HomeContent() {
     sessionWallet,
     signedIn: hostSignedIn,
     orgCtx,
-    managedQuery: managedEventsQuerySuffix,
     requestEmailCode,
     verifyEmailCode,
     requestWalletChallenge,
@@ -173,9 +172,6 @@ function HomeContent() {
   const [scannerStatus, setScannerStatus] = useState<string | null>(null);
   const verifyInFlightRef = useRef(false);
   const [events, setEvents] = useState<Event[]>([]);
-  /** Organizer-scoped list from GET /api/events/managed (lighter than filtering the public catalog). */
-  const [managedEvents, setManagedEvents] = useState<Event[]>([]);
-  const [managedEventsLoading, setManagedEventsLoading] = useState(false);
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [createdEvent, setCreatedEvent] = useState<Event | null>(null); // shown after creation
@@ -875,10 +871,6 @@ function HomeContent() {
     fetchEvents();
   }, [address]);
 
-  useEffect(() => {
-    fetchManagedEvents();
-  }, [managedEventsQuerySuffix]);
-
   const fetchEvents = async (): Promise<Event[]> => {
     try {
       const res = await fetch('/api/events', { cache: 'no-store' });
@@ -894,40 +886,9 @@ function HomeContent() {
     }
   };
 
-  const fetchManagedEvents = async (): Promise<Event[]> => {
-    if (!managedEventsQuerySuffix) {
-      setManagedEvents([]);
-      return [];
-    }
-    setManagedEventsLoading(true);
-    try {
-      const res = await fetch(`/api/events/managed?${managedEventsQuerySuffix}`, { cache: 'no-store' });
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        setManagedEvents(data);
-        return data;
-      }
-      setManagedEvents([]);
-      return [];
-    } catch (e) {
-      console.error(e);
-      setManagedEvents([]);
-      return [];
-    } finally {
-      setManagedEventsLoading(false);
-    }
-  };
-
   const mergeEventInLists = (updated: Event) => {
     const idKey = updated.id.toLowerCase();
     setEvents((prev) => {
-      const i = prev.findIndex((e) => e.id.toLowerCase() === idKey);
-      if (i < 0) return prev;
-      const next = [...prev];
-      next[i] = { ...next[i], ...updated };
-      return next;
-    });
-    setManagedEvents((prev) => {
       const i = prev.findIndex((e) => e.id.toLowerCase() === idKey);
       if (i < 0) return prev;
       const next = [...prev];
@@ -1220,7 +1181,7 @@ function HomeContent() {
         await refreshSession();
         setShowCreateEvent(false);
         setCreatedEvent(newEvent); // show QR download modal
-        await Promise.all([fetchEvents(), fetchManagedEvents()]);
+        await fetchEvents();
       } else {
         const err = await res.json().catch(() => ({}));
         const msg = err?.error || 'Failed to create event';
@@ -1334,7 +1295,6 @@ function HomeContent() {
       const updated = data as Event;
       mergeEventInLists(updated);
       await fetchEvents();
-      await fetchManagedEvents();
       setSelectedEvent(updated);
       setShowManageEvent(false);
       showWalletToast('Event updated.');
@@ -2830,103 +2790,28 @@ function HomeContent() {
               formatDate={formatDate}
             />
 
-            {/* User Uploads (Managed Events) — filtered by connected wallet so each wallet sees only its own events */}
-            {(((isConnected && address) || organizerSessionEmail)) && (
-              <div id="your-events" className="space-y-4 scroll-mt-28">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex flex-col gap-0.5">
-                    <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Your Uploads</p>
-                    <p className="text-[8px] font-mono text-white/40 tracking-wider">
-                      {address
-                        ? `Wallet: ${address.slice(0, 6)}...${address.slice(-4)}`
-                        : organizerSessionEmail
-                          ? `Email: ${organizerSessionEmail}`
-                          : ''}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Link
-                      href="/organizer"
-                      className="text-[8px] font-black uppercase tracking-widest border border-blue-400/35 text-blue-200/90 px-3 py-1.5 hover:bg-blue-500/10"
-                    >
-                      Full dashboard
-                    </Link>
-                    <span className="text-[9px] font-mono text-white/70 tracking-widest">
-                      {managedEventsLoading ? '…' : `${managedEvents.length} Total`}
-                    </span>
-                  </div>
+            {/* Host workspace lives on /organizer — keep landing attendee-focused */}
+            {hostSignedIn && (organizerSessionEmail || sessionWallet) ? (
+              <div className="border border-blue-500/20 bg-blue-500/[0.04] px-3 py-3.5 sm:px-4 sm:py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="min-w-0 w-full sm:flex-1">
+                  <p className="text-[10px] sm:text-[10px] uppercase tracking-[0.22em] sm:tracking-[0.28em] font-black text-blue-200/90">
+                    Your events
+                  </p>
+                  <p className="text-[11px] text-white/50 mt-1.5 font-mono break-all sm:truncate leading-snug">
+                    {organizerSessionEmail ||
+                      (sessionWallet
+                        ? `${sessionWallet.slice(0, 6)}…${sessionWallet.slice(-4)}`
+                        : 'Host session active')}
+                  </p>
                 </div>
-
-                <div className="border border-white/5 bg-white/[0.01] backdrop-blur-3xl overflow-hidden">
-                  {managedEventsLoading && managedEvents.length === 0 ? (
-                    <div className="p-8 flex flex-col items-center justify-center text-center gap-4">
-                      <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30 animate-pulse">Loading your events…</p>
-                    </div>
-                  ) : managedEvents.length === 0 ? (
-                    <div className="p-8 flex flex-col items-center justify-center text-center gap-4">
-                      <p className="text-[10px] text-center tracking-[0.3em] uppercase opacity-30">No uploads found</p>
-                      <button
-                        type="button"
-                        onClick={() => setShowCreateEvent(true)}
-                        className="text-[9px] font-black uppercase tracking-widest text-white/50 hover:text-white border border-white/15 px-4 py-2"
-                      >
-                        Create event
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-white/[0.05]">
-                      {[...managedEvents]
-                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // Show newest uploads first
-                        .map((ev, i) => (
-                          <motion.button
-                            key={`upload-${ev.id}`}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: i * 0.04 }}
-                            onClick={() => setSelectedEvent(ev)}
-                            className="w-full p-4 text-left hover:bg-white/[0.03] transition-colors group"
-                          >
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                  {isUpcoming(ev.date, ev.endDate) ? (
-                                    <div className="w-1 h-1 bg-green-500 rounded-full shrink-0" title="Upcoming" />
-                                  ) : isOngoing(ev.date, ev.endDate) ? (
-                                    <div className="w-1 h-1 bg-amber-500 rounded-full shrink-0 animate-pulse" title="Ongoing" />
-                                  ) : (
-                                    <div className="w-1 h-1 bg-white/20 rounded-full shrink-0" title="Past" />
-                                  )}
-                                  <p className="text-[11px] font-bold tracking-tight truncate opacity-70">{ev.name}</p>
-                                </div>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-secondary/20 font-bold truncate pl-3">
-                                  {formatEventTicketSummary(ev)} · {formatOrganizerShort(ev)}
-                                </p>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <p className="text-[8px] font-mono text-secondary/40">{formatDateTime(ev.date)}</p>
-                                <p className="text-[8px] tracking-widest text-accent mt-0.5">
-                                  {ev.maxAttendees != null && ev.maxAttendees > 0
-                                    ? `${getRegisteredCount(ev)} / ${ev.maxAttendees} · ${getRemainingSeats(ev) ?? 0} left`
-                                    : `${ev.attendeeCount} checkins`}
-                                </p>
-                                {(ev.ticketPriceUsdc ?? 0) > 0 &&
-                                (ev.paidRegistrationCount != null || ev.unpaidRegistrationCount != null) ? (
-                                  <p className="text-[8px] font-mono text-white/35 mt-0.5">
-                                    {ev.paidRegistrationCount ?? 0} paid
-                                    {(ev.unpaidRegistrationCount ?? 0) > 0
-                                      ? ` · ${ev.unpaidRegistrationCount} unpaid`
-                                      : ''}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
-                          </motion.button>
-                        ))}
-                    </div>
-                  )}
-                </div>
+                <Link
+                  href="/organizer"
+                  className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center min-h-[48px] sm:min-h-[44px] px-4 sm:px-5 py-3 bg-white text-black text-[11px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-widest hover:bg-neutral-200"
+                >
+                  Host dashboard →
+                </Link>
               </div>
-            )}
+            ) : null}
 
             {/* Protocol info */}
             <div className="space-y-2">
@@ -3992,17 +3877,16 @@ function HomeContent() {
                   <p className="text-[8px] tracking-[0.35em] uppercase text-green-400 font-bold">Event registered</p>
                   <p className="text-[9px] font-mono text-white/35 tracking-widest truncate">{createdEvent.id}</p>
                 </div>
-                <button
-                  type="button"
+                <Link
+                  href={`/organizer?event=${encodeURIComponent(createdEvent.id)}`}
                   onClick={() => {
                     setCreatedEvent(null);
                     setSelectedEvent(null);
-                    fetchEvents();
                   }}
                   className="shrink-0 text-[9px] font-bold tracking-[0.25em] uppercase text-white/40 hover:text-white"
                 >
                   Done
-                </button>
+                </Link>
               </div>
 
               <div className="p-4 space-y-3">
@@ -4085,6 +3969,13 @@ function HomeContent() {
                     Copy registration link
                   </span>
                 </button>
+                <Link
+                  href={`/organizer?event=${encodeURIComponent(createdEvent.id)}`}
+                  onClick={() => setCreatedEvent(null)}
+                  className="block w-full py-2.5 bg-white text-black text-center tracking-[0.15em] uppercase text-[10px] font-bold hover:bg-neutral-200"
+                >
+                  Open in host dashboard
+                </Link>
               </div>
             </motion.div>
           </motion.div>
