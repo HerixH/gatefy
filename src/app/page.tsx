@@ -154,6 +154,8 @@ function HomeContent() {
     refreshSession,
   } = useOrganizerSession(address);
   const [hostAuthBusy, setHostAuthBusy] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [hostSignInOpen, setHostSignInOpen] = useState(false);
 
   const [showScanner, setShowScanner] = useState(false);
   const [minted, setMinted] = useState(false);
@@ -2375,62 +2377,124 @@ function HomeContent() {
 
   return (
     <div className="min-h-screen w-full max-w-[100vw] bg-background text-foreground grid-bg selection:bg-white selection:text-black overflow-x-clip">
-      {/* Header / Navigation */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-1.5 sm:gap-4 px-3 py-3 sm:px-6 lg:px-12 lg:py-6 pointer-events-none bg-gradient-to-b from-black to-transparent">
-        <Link href="/" className="flex items-center gap-1.5 sm:gap-3 pointer-events-auto cursor-pointer group shrink-0 min-w-0 max-w-[42%] sm:max-w-none">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="shrink-0 sm:w-9 sm:h-9">
-            <defs>
-              <filter id="nav-glow" x="-40%" y="-40%" width="180%" height="180%">
-                <feGaussianBlur stdDeviation="1.2" result="blur" />
-                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-            </defs>
-            <g filter="url(#nav-glow)">
-              <rect x="1" y="1" width="26" height="26" rx="1.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
-              <path d="M1 7 L1 1 L7 1" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M21 1 L27 1 L27 7" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M1 21 L1 27 L7 27" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M21 27 L27 27 L27 21" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
-            </g>
-          </svg>
-          <div className="flex flex-col leading-[1.1] gap-0 min-w-0">
-            <span className="text-[9px] sm:text-[10px] lg:text-xs font-semibold tracking-[0.08em] sm:tracking-[0.14em] text-white group-hover:text-white/90 truncate">
-              Gate <span className="text-white/65 font-medium tracking-[0.06em] sm:tracking-[0.1em]">Protocol</span>
+      {/* Header / Navigation — mobile: brand + menu + wallet; desktop: full nav */}
+      <header className="fixed top-0 left-0 right-0 z-50 pointer-events-none bg-gradient-to-b from-black via-black/90 to-transparent">
+        <div className="flex items-center justify-between gap-3 px-4 py-3.5 sm:px-6 lg:px-12 lg:py-6">
+          <Link
+            href="/"
+            onClick={() => setMobileNavOpen(false)}
+            className="flex items-center gap-2 sm:gap-3 pointer-events-auto cursor-pointer group shrink-0 min-w-0"
+          >
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="shrink-0 sm:w-9 sm:h-9">
+              <defs>
+                <filter id="nav-glow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="1.2" result="blur" />
+                  <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+              </defs>
+              <g filter="url(#nav-glow)">
+                <rect x="1" y="1" width="26" height="26" rx="1.5" stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
+                <path d="M1 7 L1 1 L7 1" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M21 1 L27 1 L27 7" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M1 21 L1 27 L7 27" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M21 27 L27 27 L27 21" stroke="rgba(255,255,255,0.95)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="14" cy="14" r="3" fill="rgba(255,255,255,1)" />
+              </g>
+            </svg>
+            <span className="text-[13px] sm:text-[10px] lg:text-xs font-semibold tracking-[0.06em] sm:tracking-[0.14em] text-white group-hover:text-white/90">
+              Gate <span className="text-white/65 font-medium">Protocol</span>
             </span>
+          </Link>
+
+          <nav className="hidden md:flex flex-1 items-center justify-center gap-6 lg:gap-8 pointer-events-auto">
+            <Link
+              href="/#events"
+              className="text-[9px] tracking-[0.28em] uppercase text-white/55 hover:text-white transition-colors font-bold whitespace-nowrap"
+            >
+              Events
+            </Link>
+            <Link
+              href="/about"
+              className="text-[9px] tracking-[0.28em] uppercase text-white/55 hover:text-white transition-colors font-bold whitespace-nowrap"
+            >
+              About
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="text-[9px] tracking-[0.28em] uppercase text-white/55 hover:text-white transition-colors font-bold whitespace-nowrap"
+            >
+              Leaderboard
+            </Link>
+            <Link
+              href="/organizer"
+              className="text-[9px] tracking-[0.28em] uppercase text-white/55 hover:text-white transition-colors font-bold whitespace-nowrap"
+            >
+              Host
+            </Link>
+          </nav>
+
+          <div className="pointer-events-auto flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen((o) => !o)}
+              className="md:hidden flex h-11 w-11 items-center justify-center border border-white/20 bg-black/50 text-white"
+            >
+              <span className="sr-only">Menu</span>
+              <span className="relative block h-3.5 w-5">
+                <span
+                  className={`absolute left-0 block h-[1.5px] w-full bg-white transition-transform ${
+                    mobileNavOpen ? 'top-[6px] rotate-45' : 'top-0'
+                  }`}
+                />
+                <span
+                  className={`absolute left-0 top-[6px] block h-[1.5px] w-full bg-white transition-opacity ${
+                    mobileNavOpen ? 'opacity-0' : 'opacity-100'
+                  }`}
+                />
+                <span
+                  className={`absolute left-0 block h-[1.5px] w-full bg-white transition-transform ${
+                    mobileNavOpen ? 'top-[6px] -rotate-45' : 'top-[12px]'
+                  }`}
+                />
+              </span>
+            </button>
+            <div className="scale-100 sm:scale-90 lg:scale-100 origin-right">
+              <ConnectWalletButton compact />
+            </div>
           </div>
-        </Link>
-
-        <nav className="flex flex-1 items-center justify-center gap-1.5 sm:gap-5 md:gap-8 pointer-events-auto min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-0.5">
-          <Link
-            href="/#events"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
-          >
-            Events
-          </Link>
-          <Link
-            href="/about"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
-          >
-            About
-          </Link>
-          <Link
-            href="/leaderboard"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
-          >
-            Leaderboard
-          </Link>
-          <Link
-            href="/organizer"
-            className="text-[7px] sm:text-[8px] md:text-[9px] tracking-[0.1em] sm:tracking-[0.25em] md:tracking-[0.3em] uppercase text-white/50 hover:text-white transition-colors font-bold whitespace-nowrap"
-          >
-            Host
-          </Link>
-        </nav>
-
-        <div className="pointer-events-auto shrink-0 flex items-center justify-end max-w-[48%] sm:max-w-none scale-[0.85] sm:scale-90 lg:scale-100 origin-right">
-          <ConnectWalletButton compact />
         </div>
+
+        <AnimatePresence>
+          {mobileNavOpen ? (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2 }}
+              className="md:hidden pointer-events-auto border-t border-white/10 bg-black/95 backdrop-blur-xl px-4 pb-5 pt-3"
+            >
+              <nav className="flex flex-col" aria-label="Mobile">
+                {[
+                  { label: 'Events', href: '/#events' },
+                  { label: 'About', href: '/about' },
+                  { label: 'Leaderboard', href: '/leaderboard' },
+                  { label: 'Host dashboard', href: '/organizer' },
+                ].map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileNavOpen(false)}
+                    className="py-3.5 border-b border-white/[0.08] text-[13px] tracking-[0.18em] uppercase text-white/85 font-bold active:bg-white/5"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </header>
 
       {/* Corner notice only — never opens the wallet modal; tap to dismiss */}
@@ -2454,8 +2518,8 @@ function HomeContent() {
       </AnimatePresence>
 
       {/* Hero Section */}
-      <main className="relative w-full max-w-[1400px] mx-auto min-h-screen flex flex-col justify-center pt-28 sm:pt-32 lg:pt-48 pb-16 sm:pb-20 lg:pb-32 px-4 sm:px-6 lg:px-12 box-border">
-        <div className="grid w-full min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] gap-10 lg:gap-24 items-start">
+      <main className="relative w-full max-w-[1400px] mx-auto min-h-[100dvh] flex flex-col justify-center pt-24 sm:pt-32 lg:pt-48 pb-12 sm:pb-20 lg:pb-32 px-4 sm:px-6 lg:px-12 box-border">
+        <div className="grid w-full min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,400px)] gap-8 sm:gap-10 lg:gap-24 items-start">
           {/* Left: Hero */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -2463,30 +2527,30 @@ function HomeContent() {
             transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
             className="flex flex-col items-stretch sm:items-center lg:items-start text-left sm:text-center lg:text-left w-full min-w-0 max-w-full"
           >
-            <div className="w-full max-w-full py-2 border-b border-white/20 mb-6 sm:mb-8 lg:mb-12">
-              <span className="block text-[8px] sm:text-[9px] lg:text-[10px] font-bold tracking-[0.12em] sm:tracking-[0.22em] lg:tracking-[0.4em] uppercase text-secondary/80 break-words">
+            <div className="w-full max-w-full py-2 border-b border-white/20 mb-5 sm:mb-8 lg:mb-12">
+              <span className="block text-[10px] sm:text-[9px] lg:text-[10px] font-bold tracking-[0.14em] sm:tracking-[0.22em] lg:tracking-[0.4em] uppercase text-secondary/85 break-words">
                 Autonomous Verification Protocol
               </span>
-              <span className="block mt-2 text-[8px] lg:text-[9px] font-mono tracking-[0.16em] uppercase text-white/30">
+              <span className="block mt-1.5 text-[10px] lg:text-[9px] font-mono tracking-[0.14em] uppercase text-white/40">
                 Web App
               </span>
             </div>
 
-            <h1 className="w-full max-w-full text-[clamp(2.75rem,14vw,10rem)] sm:text-[12vw] lg:text-[10rem] font-medium leading-[0.85] tracking-tighter mb-6 lg:mb-16 text-gradient break-words">
+            <h1 className="w-full max-w-full text-[clamp(2.5rem,12.5vw,10rem)] sm:text-[12vw] lg:text-[10rem] font-medium leading-[0.88] tracking-tighter mb-5 sm:mb-6 lg:mb-16 text-gradient break-words">
               THE<br />
               PRESENT<br />
               IS PROOF
             </h1>
 
-            <div className="w-full max-w-xl space-y-6 sm:space-y-8 lg:space-y-12 mx-0 sm:mx-auto lg:mx-0">
-              <p className="text-base sm:text-lg lg:text-2xl text-secondary/80 font-light leading-relaxed">
+            <div className="w-full max-w-xl space-y-5 sm:space-y-8 lg:space-y-12 mx-0 sm:mx-auto lg:mx-0">
+              <p className="text-[15px] sm:text-lg lg:text-2xl text-secondary/85 font-light leading-relaxed">
                 A digital imprint of your physical journey. Immutable, elegant, and verified on the Blockchain architecture.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 lg:gap-6 w-full">
                 <button
                   onClick={() => setShowScanner(true)}
-                  className="btn-premium flex w-full sm:w-auto items-center justify-center gap-4 py-4 lg:py-4"
+                  className="btn-premium flex w-full sm:w-auto items-center justify-center gap-4 py-4 min-h-[48px] lg:py-4"
                 >
                   <span className="tracking-[0.14em] sm:tracking-[0.2em] uppercase text-xs sm:text-sm font-bold">Initiate Scan</span>
                 </button>
@@ -2499,7 +2563,7 @@ function HomeContent() {
                       setForm(f => ({ ...f, isBlockchain: false }));
                     }
                   }}
-                  className="w-full sm:w-auto px-6 sm:px-8 py-4 lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
+                  className="w-full sm:w-auto px-6 sm:px-8 py-4 min-h-[48px] lg:py-4 border border-white/20 text-white font-medium hover:bg-white/5 transition-all flex items-center justify-center"
                 >
                   <span className="tracking-[0.14em] sm:tracking-[0.2em] uppercase text-xs sm:text-sm font-bold">Create Event</span>
                 </button>
@@ -2518,36 +2582,46 @@ function HomeContent() {
           >
             {/* Live Events */}
             {/* Session: DB status + wallet + email registration (this event) */}
-            <div className="border border-white/5 bg-white/[0.02] backdrop-blur-3xl p-4 space-y-3 w-full min-w-0 max-w-full box-border">
-              <p className="text-[10px] uppercase tracking-[0.3em] font-black text-white">Your session</p>
-              <div className="space-y-2 text-[9px] font-mono tracking-wider">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-white/40 uppercase tracking-[0.2em]">Database</span>
-                  {databaseConfigured === null ? (
-                    <span className="text-white/30">…</span>
-                  ) : databaseConfigured ? (
-                    <span className="text-emerald-500/90 flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]" />
-                      Connected
-                    </span>
-                  ) : (
-                    <span className="text-amber-500/90">Not configured</span>
-                  )}
-                </div>
+            <div className="border border-white/10 bg-white/[0.02] backdrop-blur-3xl p-4 space-y-3 w-full min-w-0 max-w-full box-border">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-[0.22em] font-black text-white">Your session</p>
+                {databaseConfigured ? (
+                  <span className="text-[10px] text-emerald-400/90 flex items-center gap-1.5 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    Connected
+                  </span>
+                ) : databaseConfigured === false ? (
+                  <span className="text-[10px] text-amber-400/90 font-mono">Offline</span>
+                ) : (
+                  <span className="text-[10px] text-white/30 font-mono">…</span>
+                )}
+              </div>
+              <div className="space-y-2 text-[11px] sm:text-[9px] font-mono tracking-wider">
                 {isConnected && address && (
                   <div className="flex items-start justify-between gap-2 pt-1 border-t border-white/[0.06]">
-                    <span className="text-white/40 uppercase tracking-[0.2em] shrink-0">Wallet</span>
-                    <span className="text-white/80 text-right break-all">
+                    <span className="text-white/45 uppercase tracking-[0.16em] shrink-0">Wallet</span>
+                    <span className="text-white/85 text-right break-all">
                       {address.slice(0, 6)}...{address.slice(-4)}
                     </span>
                   </div>
                 )}
                 <div className="pt-2 border-t border-white/[0.06] space-y-2">
-                  <span className="text-white/40 uppercase tracking-[0.2em] text-[9px] block font-bold">
-                    Host sign-in (database session)
-                  </span>
-                  <p className="text-[8px] text-white/25 leading-relaxed">
-                    Verify email with a code or sign a wallet challenge. Sessions are stored in Supabase — connecting a wallet alone is not enough.
+                  <button
+                    type="button"
+                    onClick={() => setHostSignInOpen((o) => !o)}
+                    className="w-full flex items-center justify-between gap-2 text-left md:pointer-events-none"
+                    aria-expanded={hostSignInOpen || hostSignedIn}
+                  >
+                    <span className="text-white/55 uppercase tracking-[0.16em] text-[11px] sm:text-[9px] font-bold">
+                      Host sign-in
+                    </span>
+                    <span className="md:hidden text-[10px] text-white/40 uppercase tracking-widest">
+                      {hostSignInOpen || hostSignedIn ? 'Hide' : 'Show'}
+                    </span>
+                  </button>
+                  <div className={`space-y-2 ${hostSignInOpen || hostSignedIn ? 'block' : 'hidden'} md:block`}>
+                  <p className="text-[11px] sm:text-[8px] text-white/45 sm:text-white/25 leading-relaxed">
+                    Verify email with a code or sign a wallet challenge. Connecting a wallet alone is not enough.
                   </p>
                   {hostSignedIn && (organizerSessionEmail || sessionWallet) ? (
                     <div className="space-y-2">
@@ -2617,7 +2691,7 @@ function HomeContent() {
                         <button
                           type="submit"
                           disabled={hostAuthBusy}
-                          className="w-full py-2.5 bg-white text-black text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200 disabled:opacity-50"
+                          className="w-full min-h-[44px] py-3 bg-white text-black text-[10px] sm:text-[8px] font-black tracking-[0.12em] sm:tracking-[0.2em] uppercase hover:bg-neutral-200 disabled:opacity-50"
                         >
                           {hostAuthBusy
                             ? 'Working…'
@@ -2628,6 +2702,7 @@ function HomeContent() {
                       </form>
                     </div>
                   )}
+                  </div>
                 </div>
                 {selectedEvent?.isBlockchain === false &&
                   eventRegProfile?.email &&
