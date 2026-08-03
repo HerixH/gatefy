@@ -4,12 +4,18 @@ import { useState, useEffect, useCallback, useMemo, startTransition } from 'reac
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeCanvas } from 'qrcode.react';
-import { formatOrganizerShort, isEmailOrganizerId } from '@/lib/event-organizer';
+import {
+    formatOrganizerShort,
+    getOrganizerEmailFromId,
+    isEmailOrganizerId,
+} from '@/lib/event-organizer';
 import {
     formatEventTicketSummary,
     isPaidRegistration,
     registrationPaymentLabel,
 } from '@/lib/event-payment';
+import { isPast } from '@/lib/event-status';
+import { explorerUrlForMint } from '@/lib/attendance-mint';
 
 interface AttendanceRecord {
     wallet?: string | null;
@@ -17,6 +23,10 @@ interface AttendanceRecord {
     code: string;
     checkedInAt: string;
     eventId?: string;
+    mintChain?: string | null;
+    mintStatus?: string | null;
+    mintTxHash?: string | null;
+    mintTokenId?: string | null;
 }
 
 interface DashboardEvent {
@@ -24,6 +34,7 @@ interface DashboardEvent {
     name: string;
     description: string;
     date: string;
+    endDate?: string;
     location: string;
     organizer: string;
     organizerDisplayName?: string;
@@ -74,7 +85,23 @@ export default function AdminDashboard() {
     const [attendanceCollapsed, setAttendanceCollapsed] = useState<Record<string, boolean>>({});
     const [selectedEventQR, setSelectedEventQR] = useState<DashboardEvent | null>(null);
     const [selectedEventDetail, setSelectedEventDetail] = useState<DashboardEvent | null>(null);
+    const [rosterQuery, setRosterQuery] = useState('');
+    const [rosterFilter, setRosterFilter] = useState('');
+    const [rosterPerson, setRosterPerson] = useState<
+        | { kind: 'verified'; row: AttendanceRecord }
+        | { kind: 'pending'; row: Registration }
+        | null
+    >(null);
     const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+    const [contactEvent, setContactEvent] = useState<DashboardEvent | null>(null);
+    const [contactSubject, setContactSubject] = useState('');
+    const [contactMessage, setContactMessage] = useState('');
+    const [contactToEmail, setContactToEmail] = useState('');
+    const [contactBusy, setContactBusy] = useState(false);
+    const [contactError, setContactError] = useState('');
+    const [contactOk, setContactOk] = useState('');
 
     // Interactivity: Search & Filter
     const [searchQuery, setSearchQuery] = useState('');
@@ -119,6 +146,10 @@ export default function AdminDashboard() {
         async (ev: DashboardEvent, cancelled: boolean) => {
             let reason: string | null = null;
             if (cancelled) {
+                if (isPast(ev.date, ev.endDate)) {
+                    window.alert('Past events cannot be cancelled, even by admins.');
+                    return;
+                }
                 const ok = window.confirm(
                     `Cancel “${ev.name}” for misconduct / policy? It will leave public browse and signup will close. The host cannot restore it.`
                 );
@@ -180,14 +211,31 @@ export default function AdminDashboard() {
         if (Array.isArray(data)) setRegistrations(data);
     }, []);
 
+    const refreshAll = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await Promise.all([fetchAttendance(), fetchRegistrations(), fetchEvents()]);
+            setLastRefreshed(new Date());
+        } finally {
+            setRefreshing(false);
+        }
+    }, [fetchAttendance, fetchRegistrations, fetchEvents]);
+
     useEffect(() => {
         if (!authed) return;
         startTransition(() => {
-            void fetchAttendance();
-            void fetchRegistrations();
-            void fetchEvents();
+            void refreshAll();
         });
-    }, [authed, fetchAttendance, fetchRegistrations, fetchEvents]);
+    }, [authed, refreshAll]);
+
+    // Soft live poll while the terminal is open (overview stays current).
+    useEffect(() => {
+        if (!authed) return;
+        const id = window.setInterval(() => {
+            void refreshAll();
+        }, 30_000);
+        return () => window.clearInterval(id);
+    }, [authed, refreshAll]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -289,6 +337,46 @@ export default function AdminDashboard() {
             );
     }, [events, registrations, attendance]);
 
+    const platformStats = useMemo(() => {
+        const paid = registrations.filter((r) => isPaidRegistration(r.paymentStatus)).length;
+        const pendingMobile = registrations.filter(
+            (r) => (r.paymentStatus ?? '').toLowerCase() === 'pending_mobile',
+        ).length;
+        const cancelled = events.filter((e) => !!e.cancelledAt).length;
+        const adminCancelled = events.filter((e) => e.cancelledByAdmin).length;
+        const minted = attendance.filter((a) => (a.mintStatus ?? '').toLowerCase() === 'minted').length;
+        const activeEvents = events.filter((e) => !e.cancelledAt).length;
+        const checkInRate =
+            registrations.length > 0
+                ? Math.round((attendance.length / registrations.length) * 100)
+                : null;
+        return {
+            paid,
+            pendingMobile,
+            cancelled,
+            adminCancelled,
+            minted,
+            activeEvents,
+            checkInRate,
+            registrations: registrations.length,
+            walletHosts: organizerSummaries.filter((h) => h.hostType === 'wallet').length,
+            emailHosts: organizerSummaries.filter((h) => h.hostType === 'email').length,
+        };
+    }, [registrations, events, attendance, organizerSummaries]);
+
+    const densestEvents = useMemo(() => {
+        return [...events]
+            .filter((e) => !e.cancelledAt)
+            .sort((a, b) => (b.attendeeCount ?? 0) - (a.attendeeCount ?? 0) || (b.registrationCount ?? 0) - (a.registrationCount ?? 0))
+            .slice(0, 6);
+    }, [events]);
+
+    const recentActivity = useMemo(() => {
+        return [...attendance]
+            .sort((a, b) => new Date(b.checkedInAt).getTime() - new Date(a.checkedInAt).getTime())
+            .slice(0, 8);
+    }, [attendance]);
+
     // Filtered data
     const filteredEvents = events.filter((ev) => {
         const orgLower = ev.organizer.toLowerCase();
@@ -326,6 +414,51 @@ export default function AdminDashboard() {
         setSearchQuery('');
     };
 
+    const openContactHost = (ev: DashboardEvent) => {
+        const known = getOrganizerEmailFromId(ev.organizer) || '';
+        setContactEvent(ev);
+        setContactToEmail(known);
+        setContactSubject(`Regarding ${ev.name}`);
+        setContactMessage('');
+        setContactError('');
+        setContactOk('');
+    };
+
+    const sendContactHost = async () => {
+        if (!contactEvent) return;
+        setContactBusy(true);
+        setContactError('');
+        setContactOk('');
+        try {
+            const res = await fetch('/api/admin/contact-host', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({
+                    eventId: contactEvent.id,
+                    subject: contactSubject,
+                    message: contactMessage,
+                    ...(contactToEmail.trim() ? { toEmail: contactToEmail.trim() } : {}),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 401) {
+                setAuthed(false);
+                return;
+            }
+            if (!res.ok) {
+                setContactError(typeof data?.error === 'string' ? data.error : 'Failed to send.');
+                return;
+            }
+            setContactOk(`Sent to ${typeof data?.to === 'string' ? data.to : contactToEmail}`);
+            setContactMessage('');
+        } catch {
+            setContactError('Network error');
+        } finally {
+            setContactBusy(false);
+        }
+    };
+
     const exportManagersCSV = () => {
         exportToCSV(
             filteredOrganizerSummaries.map((r) => ({
@@ -340,78 +473,218 @@ export default function AdminDashboard() {
         );
     };
 
-    const filteredAttendance = attendance.filter(record =>
-        (record.wallet ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (record.email ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        record.code.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
     const LEGACY_EVENT_KEY = '__legacy__';
+    const attendanceSearch = searchQuery.trim().toLowerCase();
+
+    /** Match full strings, or truncated UI form like `0xde25f466…f2a13e7a`. */
+    const textMatchesSearch = (value: string | null | undefined, query = attendanceSearch) => {
+        if (!query) return true;
+        const h = (value ?? '').toLowerCase();
+        if (!h) return false;
+        if (h.includes(query)) return true;
+        const parts = query.split(/…|\.{2,}/).filter(Boolean);
+        if (parts.length === 2) {
+            const [pre, suf] = parts;
+            if (pre.length >= 4 && suf.length >= 4 && h.startsWith(pre) && h.endsWith(suf)) return true;
+        }
+        return false;
+    };
+
+    /** Canonical event id (dashboard casing) so attendance rows match Events tab ids. */
+    const canonicalEventId = (raw?: string | null) => {
+        const t = raw?.trim();
+        if (!t) return LEGACY_EVENT_KEY;
+        const hit = events.find((e) => e.id.toLowerCase() === t.toLowerCase());
+        return hit?.id ?? t;
+    };
+
+    const eventMatchesAttendanceSearch = (eventId: string) => {
+        if (!attendanceSearch) return true;
+        if (eventId === LEGACY_EVENT_KEY) return 'legacy'.includes(attendanceSearch);
+        const ev = events.find((e) => e.id.toLowerCase() === eventId.toLowerCase());
+        if (!ev) return textMatchesSearch(eventId);
+        return (
+            textMatchesSearch(ev.name) ||
+            textMatchesSearch(ev.location) ||
+            textMatchesSearch(ev.id) ||
+            textMatchesSearch(ev.organizer) ||
+            textMatchesSearch(ev.organizerDisplayName)
+        );
+    };
+
+    const attendanceRecordMatchesSearch = (record: AttendanceRecord) => {
+        if (!attendanceSearch) return true;
+        if (eventMatchesAttendanceSearch(canonicalEventId(record.eventId))) return true;
+        return (
+            textMatchesSearch(record.wallet) ||
+            textMatchesSearch(record.email) ||
+            textMatchesSearch(record.code) ||
+            textMatchesSearch(record.mintTxHash) ||
+            textMatchesSearch(record.mintChain) ||
+            textMatchesSearch(record.mintTokenId)
+        );
+    };
+
+    const registrationMatchesSearch = (reg: Registration) => {
+        if (!attendanceSearch) return true;
+        if (eventMatchesAttendanceSearch(canonicalEventId(reg.eventId))) return true;
+        return (
+            textMatchesSearch(reg.wallet) ||
+            textMatchesSearch(reg.email) ||
+            textMatchesSearch(reg.name) ||
+            textMatchesSearch(reg.paymentTxHash) ||
+            textMatchesSearch(reg.paymentReference) ||
+            textMatchesSearch(reg.paymentStatus)
+        );
+    };
+
+    const filteredAttendance = attendance.filter(attendanceRecordMatchesSearch);
 
     const groupedAttendance = filteredAttendance.reduce<Record<string, AttendanceRecord[]>>((acc, record) => {
-        const key = record.eventId || LEGACY_EVENT_KEY;
+        const key = canonicalEventId(record.eventId);
         if (!acc[key]) acc[key] = [];
         acc[key].push(record);
         return acc;
     }, {});
 
+    /** Full verified set (ignores search) — used so search doesn't reclassify verified people as registered-only. */
+    const verifiedAllByEvent = attendance.reduce<Record<string, AttendanceRecord[]>>((acc, record) => {
+        const key = canonicalEventId(record.eventId);
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(record);
+        return acc;
+    }, {});
+
+    /** True if wallet OR email matches a verified check-in (regs often have both). */
+    const registrationIsCheckedIn = (
+        r: Registration,
+        attendedWallets: Set<string>,
+        attendedEmails: Set<string>
+    ) => {
+        const w = r.wallet?.trim().toLowerCase();
+        const e = r.email?.trim().toLowerCase();
+        if (w && attendedWallets.has(w)) return true;
+        if (e && attendedEmails.has(e)) return true;
+        return false;
+    };
+
+    function getRegisteredOnly(eventId: string): Registration[] {
+        if (eventId === LEGACY_EVENT_KEY) return [];
+        const verifiedRecords = verifiedAllByEvent[eventId] || [];
+        const attendedWallets = new Set(
+            verifiedRecords.map((r) => (r.wallet ?? '').toLowerCase()).filter(Boolean)
+        );
+        const attendedEmails = new Set(
+            verifiedRecords.map((r) => (r.email ?? '').toLowerCase()).filter(Boolean)
+        );
+        return registrations.filter((r) => {
+            if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
+            if (registrationIsCheckedIn(r, attendedWallets, attendedEmails)) return false;
+            return registrationMatchesSearch(r);
+        });
+    }
+
     const attendanceSectionIds: string[] = [
         ...events
-            .map(e => e.id)
+            .map((e) => e.id)
             .filter(
-                id =>
-                    (groupedAttendance[id]?.length ?? 0) > 0 ||
-                    registrations.some(r => (r.eventId ?? '').toLowerCase() === id.toLowerCase())
+                (id) => (groupedAttendance[id]?.length ?? 0) > 0 || getRegisteredOnly(id).length > 0
             ),
     ];
+    for (const key of Object.keys(groupedAttendance)) {
+        if (key === LEGACY_EVENT_KEY) continue;
+        if (!attendanceSectionIds.some((id) => id.toLowerCase() === key.toLowerCase())) {
+            attendanceSectionIds.push(key);
+        }
+    }
     if ((groupedAttendance[LEGACY_EVENT_KEY]?.length ?? 0) > 0) {
         attendanceSectionIds.push(LEGACY_EVENT_KEY);
     }
 
-    function getRegisteredOnly(eventId: string): Registration[] {
-        if (eventId === LEGACY_EVENT_KEY) return [];
-        const verifiedRecords = groupedAttendance[eventId] || [];
-        const attendedWallets = new Set(
-            verifiedRecords.map(r => (r.wallet ?? '').toLowerCase()).filter(Boolean)
+    const renderMintVerify = (record: Pick<AttendanceRecord, 'mintChain' | 'mintStatus' | 'mintTxHash' | 'mintTokenId'>) => {
+        const minted = (record.mintStatus ?? '').toLowerCase() === 'minted';
+        if (!minted) {
+            return <span className="text-white/20">—</span>;
+        }
+        const explorer = explorerUrlForMint(record.mintChain, record.mintTxHash);
+        const chainLabel = (record.mintChain || 'soroban').toLowerCase();
+        const tokenPart = record.mintTokenId ? ` #${record.mintTokenId}` : '';
+        return (
+            <span className="text-[8px] font-mono text-blue-300/85 leading-relaxed">
+                Minted{tokenPart}
+                {' · '}
+                {explorer ? (
+                    <a
+                        href={explorer}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2 decoration-blue-400/50 hover:text-blue-200 hover:decoration-blue-200"
+                        title="Verify mint on explorer"
+                    >
+                        {chainLabel}
+                    </a>
+                ) : (
+                    <span>{chainLabel}</span>
+                )}
+                {explorer ? (
+                    <>
+                        {' · '}
+                        <a
+                            href={explorer}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white/45 hover:text-white underline underline-offset-2"
+                        >
+                            verify tx
+                        </a>
+                    </>
+                ) : null}
+            </span>
         );
-        const attendedEmails = new Set(
-            verifiedRecords.map(r => (r.email ?? '').toLowerCase()).filter(Boolean)
-        );
-        return registrations.filter(r => {
-            if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
-            if (r.wallet?.trim()) {
-                return !attendedWallets.has(r.wallet.toLowerCase());
-            }
-            if (r.email?.trim()) {
-                return !attendedEmails.has(r.email.toLowerCase());
-            }
-            return false;
-        });
-    }
+    };
 
     const toggleAttendanceSection = (eventId: string) => {
         setAttendanceCollapsed(prev => ({ ...prev, [eventId]: !prev[eventId] }));
     };
 
     const exportAttendanceReport = () => {
-        const rows: { Event: string; Identity: string; Status: string; 'Auth Code': string; Timestamp: string }[] = [];
-        const eventName = (id: string) => (id === LEGACY_EVENT_KEY ? 'Legacy check-ins' : (events.find(e => e.id === id || e.id.toLowerCase() === id)?.name ?? id));
-        attendance.forEach(record => {
+        const rows: {
+            Event: string;
+            Identity: string;
+            Status: string;
+            'Auth Code': string;
+            Mint: string;
+            'Mint Tx': string;
+            Explorer: string;
+            Timestamp: string;
+        }[] = [];
+        const eventName = (id: string) =>
+            id === LEGACY_EVENT_KEY
+                ? 'Legacy check-ins'
+                : (events.find((e) => e.id === id || e.id.toLowerCase() === id.toLowerCase())?.name ?? id);
+        attendance.forEach((record) => {
             const id = record.wallet?.trim() || record.email?.trim() || '—';
+            const minted = (record.mintStatus ?? '').toLowerCase() === 'minted';
+            const explorer = explorerUrlForMint(record.mintChain, record.mintTxHash);
             rows.push({
-                Event: eventName(record.eventId || LEGACY_EVENT_KEY),
+                Event: eventName(canonicalEventId(record.eventId)),
                 Identity: id,
                 Status: 'Verified',
                 'Auth Code': record.code,
+                Mint: minted
+                    ? `Minted${record.mintTokenId ? ` #${record.mintTokenId}` : ''} · ${(record.mintChain || 'soroban').toLowerCase()}`
+                    : (record.mintStatus || '—'),
+                'Mint Tx': record.mintTxHash || '',
+                Explorer: explorer || '',
                 Timestamp: new Date(record.checkedInAt).toLocaleString('en-GB'),
             });
         });
-        registrations.forEach(reg => {
+        registrations.forEach((reg) => {
             const regWallet = reg.wallet;
             const walletHit =
                 !!regWallet &&
                 attendance.some(
-                    a =>
+                    (a) =>
                         a.eventId &&
                         (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
                         (a.wallet ?? '').toLowerCase() === regWallet.toLowerCase()
@@ -420,17 +693,22 @@ export default function AdminDashboard() {
             const emailHit =
                 !!regEmail &&
                 attendance.some(
-                    a =>
+                    (a) =>
                         a.eventId &&
                         (reg.eventId ?? '').toLowerCase() === a.eventId.toLowerCase() &&
                         (a.email ?? '').toLowerCase() === regEmail.toLowerCase()
                 );
             if (!walletHit && !emailHit) {
                 rows.push({
-                    Event: events.find(e => e.id.toLowerCase() === (reg.eventId ?? '').toLowerCase())?.name ?? reg.eventId,
+                    Event:
+                        events.find((e) => e.id.toLowerCase() === (reg.eventId ?? '').toLowerCase())?.name ??
+                        reg.eventId,
                     Identity: reg.wallet?.trim() || reg.email?.trim() || '—',
                     Status: 'Registered only',
                     'Auth Code': '-',
+                    Mint: '—',
+                    'Mint Tx': '',
+                    Explorer: '',
                     Timestamp: new Date(reg.registeredAt).toLocaleString('en-GB'),
                 });
             }
@@ -468,13 +746,59 @@ export default function AdminDashboard() {
         const verified = getVerifiedForEvent(eventId);
         const attendedWallets = new Set(verified.map(r => (r.wallet ?? '').toLowerCase()).filter(Boolean));
         const attendedEmails = new Set(verified.map(r => (r.email ?? '').toLowerCase()).filter(Boolean));
-        return registrations.filter(r => {
+        return registrations.filter((r) => {
             if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
-            if (r.wallet?.trim()) return !attendedWallets.has(r.wallet.toLowerCase());
-            if (r.email?.trim()) return !attendedEmails.has(r.email.toLowerCase());
+            return !registrationIsCheckedIn(r, attendedWallets, attendedEmails);
+        });
+    };
+
+    const openEventRoster = (ev: DashboardEvent) => {
+        setRosterQuery('');
+        setRosterFilter('');
+        setRosterPerson(null);
+        setSelectedEventDetail(ev);
+    };
+
+    const applyRosterSearch = () => {
+        setRosterFilter(rosterQuery.trim());
+        setRosterPerson(null);
+    };
+
+    const findRegistrationForAttendance = (eventId: string, row: AttendanceRecord): Registration | undefined => {
+        const w = (row.wallet ?? '').toLowerCase();
+        const e = (row.email ?? '').toLowerCase();
+        return registrations.find((r) => {
+            if ((r.eventId ?? '').toLowerCase() !== eventId.toLowerCase()) return false;
+            if (w && (r.wallet ?? '').toLowerCase() === w) return true;
+            if (e && (r.email ?? '').toLowerCase() === e) return true;
             return false;
         });
     };
+
+    const rosterQ = rosterFilter.toLowerCase();
+    const rosterVerifiedAll = selectedEventDetail ? getVerifiedForEvent(selectedEventDetail.id) : [];
+    const rosterPendingAll = selectedEventDetail ? getRegisteredOnlyForEvent(selectedEventDetail.id) : [];
+    const rosterVerified = !rosterQ
+        ? rosterVerifiedAll
+        : rosterVerifiedAll.filter(
+              (row) =>
+                  textMatchesSearch(row.wallet, rosterQ) ||
+                  textMatchesSearch(row.email, rosterQ) ||
+                  textMatchesSearch(row.code, rosterQ) ||
+                  textMatchesSearch(row.mintTxHash, rosterQ) ||
+                  textMatchesSearch(row.mintChain, rosterQ) ||
+                  textMatchesSearch(row.mintTokenId, rosterQ)
+          );
+    const rosterPending = !rosterQ
+        ? rosterPendingAll
+        : rosterPendingAll.filter(
+              (reg) =>
+                  textMatchesSearch(reg.wallet, rosterQ) ||
+                  textMatchesSearch(reg.email, rosterQ) ||
+                  textMatchesSearch(reg.name, rosterQ) ||
+                  textMatchesSearch(reg.paymentTxHash, rosterQ) ||
+                  textMatchesSearch(reg.paymentReference, rosterQ)
+          );
 
     const exportEventRoster = (ev: DashboardEvent) => {
         const verified = getVerifiedForEvent(ev.id);
@@ -485,29 +809,42 @@ export default function AdminDashboard() {
             Name: string;
             Email: string;
             Code: string;
+            Mint: string;
+            'Mint Tx': string;
+            Explorer: string;
             Payment: string;
             PaymentDetail: string;
             Timestamp: string;
         }[] = [];
-        verified.forEach(v => {
+        verified.forEach((v) => {
+            const minted = (v.mintStatus ?? '').toLowerCase() === 'minted';
+            const explorer = explorerUrlForMint(v.mintChain, v.mintTxHash);
             rows.push({
                 Status: 'Verified',
                 Identity: v.wallet?.trim() || v.email?.trim() || '—',
                 Name: '—',
                 Email: (v.email ?? '').trim() || '—',
                 Code: v.code,
+                Mint: minted
+                    ? `Minted${v.mintTokenId ? ` #${v.mintTokenId}` : ''} · ${(v.mintChain || 'soroban').toLowerCase()}`
+                    : (v.mintStatus || '—'),
+                'Mint Tx': v.mintTxHash || '',
+                Explorer: explorer || '',
                 Payment: '—',
                 PaymentDetail: '—',
                 Timestamp: new Date(v.checkedInAt).toLocaleString('en-GB'),
             });
         });
-        onlyReg.forEach(r => {
+        onlyReg.forEach((r) => {
             rows.push({
                 Status: 'Registered only',
                 Identity: r.wallet?.trim() || r.email?.trim() || '—',
                 Name: (r.name ?? '').trim() || '—',
                 Email: (r.email ?? '').trim() || '—',
                 Code: '-',
+                Mint: '—',
+                'Mint Tx': '',
+                Explorer: '',
                 Payment: registrationPaymentLabel(r.paymentStatus),
                 PaymentDetail: registrationPaymentDetail(r) || '—',
                 Timestamp: new Date(r.registeredAt).toLocaleString('en-GB'),
@@ -611,10 +948,10 @@ export default function AdminDashboard() {
     return (
         <div className="min-h-screen bg-[#070707] text-white selection:bg-white selection:text-black">
             {/* Header / Nav */}
-            <header className="fixed top-0 left-0 right-0 z-[100] h-16 flex items-center px-6 lg:px-12 border-b border-white/[0.04] bg-black/80 backdrop-blur-3xl">
-                <div className="flex items-center gap-3 mr-8 lg:mr-16">
+            <header className="fixed top-0 left-0 right-0 z-[100] min-h-16 py-2 md:py-0 md:h-16 flex flex-wrap md:flex-nowrap items-center gap-y-2 px-3 sm:px-6 lg:px-12 border-b border-white/[0.04] bg-black/80 backdrop-blur-3xl">
+                <div className="flex items-center gap-2 sm:gap-3 mr-3 sm:mr-6 lg:mr-12 shrink-0">
                     <Link href="/" className="text-[8px] tracking-[0.25em] uppercase text-white/35 hover:text-white font-bold hidden sm:inline">Home</Link>
-                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" className="shrink-0">
+                    <svg width="24" height="24" viewBox="0 0 28 28" fill="none" className="shrink-0 sm:w-7 sm:h-7">
                         <defs>
                             <filter id="admin-glow" x="-40%" y="-40%" width="180%" height="180%">
                                 <feGaussianBlur stdDeviation="0.8" result="blur" />
@@ -634,7 +971,7 @@ export default function AdminDashboard() {
                     </div>
                 </div>
 
-                <nav className="hidden md:flex items-center gap-2">
+                <nav className="hidden md:flex items-center gap-2 min-w-0">
                     {(['overview', 'managers', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
@@ -647,7 +984,7 @@ export default function AdminDashboard() {
                                     setManagerHostFilter('all');
                                 }
                             }}
-                            className={`px-6 py-2 text-[9px] tracking-[0.35em] uppercase font-black transition-all ${tab === t
+                            className={`px-4 lg:px-6 py-2 text-[9px] tracking-[0.28em] lg:tracking-[0.35em] uppercase font-black transition-all ${tab === t
                                 ? 'bg-white text-black'
                                 : 'text-white/30 hover:text-white/70'}`}
                         >
@@ -656,7 +993,7 @@ export default function AdminDashboard() {
                     ))}
                 </nav>
 
-                <div className="md:hidden flex items-center gap-1 overflow-x-auto no-scrollbar">
+                <div className="order-3 md:order-none w-full md:w-auto md:hidden flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5">
                     {(['overview', 'managers', 'attendance', 'events'] as Tab[]).map(t => (
                         <button
                             key={t}
@@ -669,78 +1006,138 @@ export default function AdminDashboard() {
                                     setManagerHostFilter('all');
                                 }
                             }}
-                            className={`px-3 py-1.5 text-[8px] tracking-[0.2em] uppercase font-black transition-all whitespace-nowrap ${tab === t
+                            className={`px-3 py-2 text-[8px] tracking-[0.18em] uppercase font-black transition-all whitespace-nowrap min-h-[36px] ${tab === t
                                 ? 'bg-white text-black'
-                                : 'text-white/30'}`}
+                                : 'text-white/30 border border-white/10'}`}
                         >
                             {t === 'managers' ? 'Hosts' : t}
                         </button>
                     ))}
                 </div>
 
-                <div className="ml-auto flex items-center gap-4 lg:gap-8">
-                    <div className="hidden sm:flex items-center gap-3">
-                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" />
-                        <span className="text-[9px] tracking-[0.25em] uppercase text-white/40 font-bold">Terminal Auth: Active</span>
+                <div className="ml-auto flex items-center gap-2 sm:gap-4 lg:gap-6 shrink-0">
+                    <button
+                        type="button"
+                        onClick={() => void refreshAll()}
+                        disabled={refreshing}
+                        className="text-[8px] sm:text-[9px] tracking-[0.2em] uppercase text-white/40 hover:text-white font-bold border border-white/15 px-2.5 py-1.5 disabled:opacity-40"
+                        title={lastRefreshed ? `Last refresh ${lastRefreshed.toLocaleTimeString()}` : 'Refresh data'}
+                    >
+                        {refreshing ? 'Sync…' : 'Refresh'}
+                    </button>
+                    <div className="hidden sm:flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500" />
+                        <span className="text-[9px] tracking-[0.2em] uppercase text-white/40 font-bold whitespace-nowrap">
+                            Auth active
+                        </span>
                     </div>
-                    <button type="button" onClick={handleLogout} className="text-[9px] tracking-[0.25em] uppercase text-white/30 hover:text-red-400 transition-colors font-bold">Logout</button>
+                    <button type="button" onClick={handleLogout} className="text-[9px] tracking-[0.2em] uppercase text-white/30 hover:text-red-400 transition-colors font-bold">Logout</button>
                 </div>
             </header>
 
-            <div className="pt-24 pb-20 px-6 lg:px-12 max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-12">
-                {/* Sidebar Stats Panel */}
-                <aside className="space-y-12 h-fit sticky top-24">
-                    <div className="space-y-6">
-                        <p className="text-[10px] uppercase tracking-[0.4em] font-black text-white/20">System Summary</p>
-                        <div className="space-y-4">
-                            <motion.div
-                                initial={{ opacity: 0, x: -10 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                className="p-8 border border-white/[0.05] bg-white/[0.02] backdrop-blur-xl relative group overflow-hidden"
-                            >
-                                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                                    <div className="w-16 h-16 border-t font-black border-r border-white" />
-                                </div>
-                                <p className="text-5xl font-medium tracking-tighter mb-1">{attendance.length}</p>
-                                <p className="text-[9px] tracking-[0.3em] uppercase text-white/50 font-bold">Check-in rows</p>
-                            </motion.div>
+            <div className="pt-28 md:pt-24 pb-20 px-3 sm:px-6 lg:px-12 max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[280px_1fr] xl:grid-cols-[320px_1fr] gap-8 lg:gap-12">
+                {/* Sidebar Stats Panel — horizontal scroll strip on mobile */}
+                <aside className="lg:sticky lg:top-24 lg:h-fit space-y-4 lg:space-y-8 min-w-0">
+                    <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] uppercase tracking-[0.35em] font-black text-white/25">System Summary</p>
+                        {lastRefreshed ? (
+                            <span className="text-[8px] font-mono text-white/25 tracking-wider">
+                                {lastRefreshed.toLocaleTimeString()}
+                            </span>
+                        ) : null}
+                    </div>
+                    <div className="flex lg:flex-col gap-3 overflow-x-auto lg:overflow-visible no-scrollbar pb-1 lg:pb-0 -mx-1 px-1">
+                        <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="min-w-[140px] lg:min-w-0 shrink-0 p-5 sm:p-6 lg:p-8 border border-white/[0.06] bg-white/[0.02] relative overflow-hidden"
+                        >
+                            <p className="text-3xl sm:text-4xl lg:text-5xl font-medium tracking-tighter mb-1 tabular-nums">
+                                {attendance.length}
+                            </p>
+                            <p className="text-[8px] sm:text-[9px] tracking-[0.25em] uppercase text-white/50 font-bold">
+                                Check-ins
+                            </p>
+                        </motion.div>
 
-                            <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
-                                <p className="text-2xl font-bold mb-1">{events.length}</p>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Events</p>
+                        <div className="min-w-[120px] lg:min-w-0 shrink-0 p-4 sm:p-5 border border-white/[0.06] bg-white/[0.01]">
+                            <p className="text-xl sm:text-2xl font-bold mb-1 tabular-nums">{platformStats.registrations}</p>
+                            <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Registrations</p>
+                            <p className="text-[8px] font-mono text-emerald-400/85 mt-1.5">
+                                {platformStats.paid} paid
+                                {platformStats.pendingMobile > 0 ? ` · ${platformStats.pendingMobile} awaiting` : ''}
+                            </p>
+                        </div>
+
+                        <div className="min-w-[120px] lg:min-w-0 shrink-0 p-4 sm:p-5 border border-white/[0.06] bg-white/[0.01]">
+                            <p className="text-xl sm:text-2xl font-bold mb-1 tabular-nums">{platformStats.activeEvents}</p>
+                            <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Active events</p>
+                            <p className="text-[8px] font-mono text-white/35 mt-1.5">
+                                {events.length} total
+                                {platformStats.cancelled > 0 ? ` · ${platformStats.cancelled} cancelled` : ''}
+                            </p>
+                        </div>
+
+                        <div className="min-w-[120px] lg:min-w-0 shrink-0 p-4 sm:p-5 border border-white/[0.06] bg-white/[0.01]">
+                            <p className="text-xl sm:text-2xl font-bold mb-1 tabular-nums">{organizerSummaries.length}</p>
+                            <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Event hosts</p>
+                            <p className="text-[8px] font-mono text-white/35 mt-1.5">
+                                W {platformStats.walletHosts} · E {platformStats.emailHosts}
+                            </p>
+                        </div>
+
+                        <div className="min-w-[160px] lg:min-w-0 shrink-0 border border-white/[0.06] bg-white/[0.015] p-4 space-y-2">
+                            <p className="text-[8px] uppercase tracking-[0.25em] font-black text-white/25">Network health</p>
+                            <div className="flex justify-between text-[10px] font-mono">
+                                <span className="text-white/45">Check-in rate</span>
+                                <span className="text-white/85 font-bold tabular-nums">
+                                    {platformStats.checkInRate != null ? `${platformStats.checkInRate}%` : '—'}
+                                </span>
                             </div>
-
-                            <div className="p-6 border border-white/[0.05] bg-white/[0.01]">
-                                <p className="text-2xl font-bold mb-1">{organizerSummaries.length}</p>
-                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/40 font-bold">Event hosts</p>
+                            <div className="flex justify-between text-[10px] font-mono">
+                                <span className="text-white/45">Proofs minted</span>
+                                <span className="text-blue-300/90 font-bold tabular-nums">{platformStats.minted}</span>
                             </div>
-
-                            <div className="border border-white/[0.05] bg-white/[0.015] p-4 space-y-2">
-                                <p className="text-[8px] uppercase tracking-[0.3em] font-black text-white/25">Wallet vs email hosts</p>
-                                <div className="flex justify-between text-[10px] font-mono">
-                                    <span className="text-white/50">Wallet</span>
-                                    <span className="text-white/80 font-bold">
-                                        {organizerSummaries.filter((h) => h.hostType === 'wallet').length}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between text-[10px] font-mono">
-                                    <span className="text-white/50">Email-hosted</span>
-                                    <span className="text-emerald-400/90 font-bold">
-                                        {organizerSummaries.filter((h) => h.hostType === 'email').length}
-                                    </span>
-                                </div>
+                            <div className="flex justify-between text-[10px] font-mono">
+                                <span className="text-white/45">Admin holds</span>
+                                <span className="text-red-300/85 font-bold tabular-nums">{platformStats.adminCancelled}</span>
                             </div>
                         </div>
                     </div>
 
+                    {tab === 'overview' ? (
+                        <div className="hidden lg:grid grid-cols-2 gap-2">
+                            {(
+                                [
+                                    { label: 'Hosts', t: 'managers' as Tab },
+                                    { label: 'Attendance', t: 'attendance' as Tab },
+                                    { label: 'Events', t: 'events' as Tab },
+                                    { label: 'Overview', t: 'overview' as Tab },
+                                ] as const
+                            ).map((q) => (
+                                <button
+                                    key={q.t}
+                                    type="button"
+                                    onClick={() => setTab(q.t)}
+                                    className={`px-3 py-2.5 text-[8px] uppercase tracking-widest font-black border transition-colors ${
+                                        tab === q.t
+                                            ? 'border-white bg-white text-black'
+                                            : 'border-white/15 text-white/45 hover:text-white hover:border-white/30'
+                                    }`}
+                                >
+                                    {q.label}
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
                 </aside>
 
                 {/* Main Dynamic Panel */}
                 <main>
                     {/* Search Bar */}
                     {tab !== 'overview' && (
-                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-12 space-y-4">
-                            <div className="relative group">
+                        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-8 sm:mb-12 space-y-4">
+                            <div className="space-y-3">
                                 <input
                                     type="text"
                                     value={searchQuery}
@@ -750,9 +1147,9 @@ export default function AdminDashboard() {
                                             ? 'Filter hosts by display name, wallet, email id, or event title…'
                                             : `Filter ${tab} data by address, ID, or name…`
                                     }
-                                    className="w-full bg-white/[0.02] border border-white/[0.06] px-8 py-5 text-sm font-mono tracking-widest placeholder:text-white/30 focus:outline-none focus:border-white/20 transition-all font-bold"
+                                    className="w-full bg-white/[0.02] border border-white/[0.06] px-4 sm:px-6 py-3.5 sm:py-5 text-xs sm:text-sm font-mono tracking-wide sm:tracking-widest placeholder:text-white/30 focus:outline-none focus:border-white/20 transition-all font-bold"
                                 />
-                                <div className="absolute right-8 top-1/2 -translate-y-1/2 flex flex-wrap items-center justify-end gap-2 max-w-[65%]">
+                                <div className="flex flex-wrap items-center gap-2">
                                     {tab === 'attendance' && (
                                         <button
                                             type="button"
@@ -852,60 +1249,194 @@ export default function AdminDashboard() {
                     <AnimatePresence mode="wait">
                         {/* OVERVIEW TAB */}
                         {tab === 'overview' && (
-                            <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-16">
-                                <div className="space-y-4">
-                                    <h1 className="text-7xl font-medium tracking-tighter italic">PROTOCOL DASHBOARD.</h1>
-                                    <p className="text-[10px] uppercase tracking-[0.5em] text-white/20 font-black">GATE PROTOCOL Autonomous Verification Node</p>
+                            <motion.div key="overview" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-10 sm:space-y-14">
+                                <div className="space-y-3 sm:space-y-4">
+                                    <h1 className="text-[clamp(2.25rem,8vw,4.5rem)] font-medium tracking-tighter italic leading-[0.95]">
+                                        PROTOCOL DASHBOARD.
+                                    </h1>
+                                    <p className="text-[9px] sm:text-[10px] uppercase tracking-[0.28em] sm:tracking-[0.45em] text-white/25 font-black">
+                                        Gate Protocol · verification node
+                                    </p>
+                                    <div className="flex flex-wrap gap-2 pt-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setTab('events')}
+                                            className="px-3 py-2 text-[8px] font-black uppercase tracking-widest border border-white/15 text-white/55 hover:text-white hover:border-white/35"
+                                        >
+                                            All events →
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setTab('managers')}
+                                            className="px-3 py-2 text-[8px] font-black uppercase tracking-widest border border-white/15 text-white/55 hover:text-white hover:border-white/35"
+                                        >
+                                            Hosts →
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setTab('attendance')}
+                                            className="px-3 py-2 text-[8px] font-black uppercase tracking-widest border border-white/15 text-white/55 hover:text-white hover:border-white/35"
+                                        >
+                                            Attendance →
+                                        </button>
+                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="space-y-6">
-                                        <p className="text-[10px] uppercase tracking-[0.4em] font-black text-white/20">Recent Activity Stream</p>
-                                        <div className="border border-white/[0.04] bg-white/[0.01] divide-y divide-white/[0.04]">
-                                            {attendance.length === 0 ? (
-                                                <div className="p-12 text-center text-white/10 text-[10px] uppercase tracking-widest italic">Stream Idle</div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                                    {[
+                                        { label: 'Paid tickets', value: platformStats.paid, tone: 'text-emerald-400/90' },
+                                        { label: 'Awaiting mobile', value: platformStats.pendingMobile, tone: 'text-amber-400/90' },
+                                        { label: 'Minted proofs', value: platformStats.minted, tone: 'text-blue-300/90' },
+                                        { label: 'Admin cancels', value: platformStats.adminCancelled, tone: 'text-red-300/85' },
+                                    ].map((m) => (
+                                        <div key={m.label} className="border border-white/[0.06] bg-white/[0.015] px-3 py-3 sm:px-4 sm:py-4">
+                                            <p className="text-[7px] sm:text-[8px] uppercase tracking-widest text-white/30 font-bold">{m.label}</p>
+                                            <p className={`text-xl sm:text-2xl font-black tabular-nums mt-1 ${m.tone}`}>{m.value}</p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
+                                    <div className="space-y-4 sm:space-y-5 min-w-0">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-[10px] uppercase tracking-[0.35em] font-black text-white/25">Recent activity</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setTab('attendance')}
+                                                className="text-[8px] uppercase tracking-widest text-white/35 hover:text-white font-bold"
+                                            >
+                                                Full log
+                                            </button>
+                                        </div>
+                                        <div className="border border-white/[0.06] bg-white/[0.01] divide-y divide-white/[0.04]">
+                                            {recentActivity.length === 0 ? (
+                                                <div className="p-10 sm:p-12 text-center text-white/20 text-[10px] uppercase tracking-widest italic">
+                                                    Stream idle
+                                                </div>
                                             ) : (
-                                                [...attendance].reverse().slice(0, 5).map((act, i) => (
-                                                    <div key={i} className="p-6 flex items-center justify-between group hover:bg-white/[0.01] transition-colors">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" />
-                                                            <div>
-                                                                <p className="text-[11px] font-mono text-white/80">{shortIdentity(act.wallet, act.email)}</p>
-                                                                <p className="text-[8px] tracking-[0.2em] uppercase text-white/20 font-bold mt-1">Presence Verified @ {act.code}</p>
+                                                recentActivity.map((act, i) => {
+                                                    const evName = act.eventId
+                                                        ? events.find((e) => e.id.toLowerCase() === act.eventId!.toLowerCase())?.name
+                                                        : null;
+                                                    const minted = (act.mintStatus ?? '').toLowerCase() === 'minted';
+                                                    const mintExplorer = explorerUrlForMint(act.mintChain, act.mintTxHash);
+                                                    const chainLabel = (act.mintChain || 'soroban').toLowerCase();
+                                                    return (
+                                                        <div
+                                                            key={`${act.code}-${act.checkedInAt}-${i}`}
+                                                            className="p-4 sm:p-5 flex items-start sm:items-center justify-between gap-3 group hover:bg-white/[0.015] transition-colors"
+                                                        >
+                                                            <div className="flex items-start gap-3 min-w-0">
+                                                                <div className="w-1.5 h-1.5 mt-1.5 shrink-0 bg-blue-400 rounded-full" />
+                                                                <div className="min-w-0">
+                                                                    <p className="text-[11px] font-mono text-white/85 truncate">
+                                                                        {shortIdentity(act.wallet, act.email)}
+                                                                    </p>
+                                                                    <p className="text-[8px] tracking-[0.16em] uppercase text-white/30 font-bold mt-1 truncate">
+                                                                        Verified @ {act.code}
+                                                                        {evName ? ` · ${evName}` : ''}
+                                                                    </p>
+                                                                    {minted ? (
+                                                                        <p className="text-[8px] font-mono text-blue-300/80 mt-1">
+                                                                            Minted{act.mintTokenId ? ` #${act.mintTokenId}` : ''}
+                                                                            {' · '}
+                                                                            {mintExplorer ? (
+                                                                                <a
+                                                                                    href={mintExplorer}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="underline underline-offset-2 decoration-blue-400/50 hover:text-blue-200 hover:decoration-blue-200"
+                                                                                    title="Verify mint on explorer"
+                                                                                >
+                                                                                    {chainLabel}
+                                                                                </a>
+                                                                            ) : (
+                                                                                <span>{chainLabel}</span>
+                                                                            )}
+                                                                            {mintExplorer ? (
+                                                                                <>
+                                                                                    {' · '}
+                                                                                    <a
+                                                                                        href={mintExplorer}
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                        className="text-white/45 hover:text-white underline underline-offset-2"
+                                                                                    >
+                                                                                        verify tx
+                                                                                    </a>
+                                                                                </>
+                                                                            ) : null}
+                                                                        </p>
+                                                                    ) : null}
+                                                                </div>
                                                             </div>
+                                                            <span className="text-[9px] font-mono text-white/25 shrink-0 tabular-nums">
+                                                                {new Date(act.checkedInAt).toLocaleString('en-GB', {
+                                                                    day: '2-digit',
+                                                                    month: 'short',
+                                                                    hour: '2-digit',
+                                                                    minute: '2-digit',
+                                                                })}
+                                                            </span>
                                                         </div>
-                                                        <span className="text-[9px] font-mono text-white/10">{new Date(act.checkedInAt).toLocaleTimeString()}</span>
-                                                    </div>
-                                                ))
+                                                    );
+                                                })
                                             )}
                                         </div>
                                     </div>
 
-                                    <div className="space-y-6">
-                                        <p className="text-[10px] uppercase tracking-[0.4em] font-black text-white/20">Event Pool Density</p>
-                                        <div className="border border-white/[0.04] bg-white/[0.01] p-8 space-y-8">
-                                            {events.slice(0, 3).map(ev => {
-                                                const cap = ev.maxAttendees && ev.maxAttendees > 0 ? ev.maxAttendees : 100;
+                                    <div className="space-y-4 sm:space-y-5 min-w-0">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <p className="text-[10px] uppercase tracking-[0.35em] font-black text-white/25">Event pool density</p>
+                                            <button
+                                                type="button"
+                                                onClick={() => setTab('events')}
+                                                className="text-[8px] uppercase tracking-widest text-white/35 hover:text-white font-bold"
+                                            >
+                                                Manage
+                                            </button>
+                                        </div>
+                                        <div className="border border-white/[0.06] bg-white/[0.01] p-5 sm:p-7 space-y-6">
+                                            {densestEvents.map((ev) => {
+                                                const reg = ev.registrationCount ?? ev.attendeeCount;
+                                                const cap = ev.maxAttendees && ev.maxAttendees > 0 ? ev.maxAttendees : Math.max(reg, 1);
                                                 const pct = Math.min((ev.attendeeCount / cap) * 100, 100);
                                                 return (
-                                                <div key={ev.id} className="space-y-3">
-                                                    <div className="flex justify-between items-end">
-                                                        <p className="text-xs font-bold tracking-tight uppercase">{ev.name}</p>
-                                                        <p className="text-[10px] font-mono text-white/40">
-                                                            {ev.attendeeCount}
-                                                            {ev.maxAttendees != null && ev.maxAttendees > 0 ? ` / ${ev.maxAttendees}` : ' verified'}
-                                                        </p>
-                                                    </div>
-                                                    <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
-                                                        <motion.div
-                                                            initial={{ width: 0 }}
-                                                            animate={{ width: `${pct}%` }}
-                                                            className="absolute inset-y-0 left-0 bg-white"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            );})}
-                                            {events.length === 0 && <p className="text-[10px] text-white/10 italic text-center py-12">No active pools</p>}
+                                                    <button
+                                                        key={ev.id}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            openEventRoster(ev);
+                                                            setTab('events');
+                                                        }}
+                                                        className="w-full space-y-2.5 text-left group"
+                                                    >
+                                                        <div className="flex justify-between items-end gap-3">
+                                                            <p className="text-xs font-bold tracking-tight uppercase truncate group-hover:text-white text-white/85">
+                                                                {ev.name}
+                                                            </p>
+                                                            <p className="text-[10px] font-mono text-white/45 shrink-0 tabular-nums">
+                                                                {ev.attendeeCount}
+                                                                {ev.maxAttendees != null && ev.maxAttendees > 0
+                                                                    ? ` / ${ev.maxAttendees}`
+                                                                    : ' verified'}
+                                                                {reg > ev.attendeeCount ? ` · ${reg} reg` : ''}
+                                                            </p>
+                                                        </div>
+                                                        <div className="h-[3px] w-full bg-white/10 relative overflow-hidden">
+                                                            <motion.div
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${pct}%` }}
+                                                                transition={{ duration: 0.55 }}
+                                                                className="absolute inset-y-0 left-0 bg-blue-400/90"
+                                                            />
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                            {densestEvents.length === 0 && (
+                                                <p className="text-[10px] text-white/20 italic text-center py-10">No active pools</p>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -969,7 +1500,7 @@ export default function AdminDashboard() {
                                                         </span>
                                                     </p>
                                                 </div>
-                                                <div className="flex flex-wrap gap-6 shrink-0 text-[10px] font-mono text-white/50">
+                                                <div className="flex flex-wrap gap-3 sm:gap-6 shrink-0 text-[10px] font-mono text-white/50 items-center">
                                                     <div>
                                                         <p className="text-[8px] uppercase tracking-wider text-white/25 mb-0.5">Events</p>
                                                         <p className="text-white font-bold">{row.events.length}</p>
@@ -982,6 +1513,18 @@ export default function AdminDashboard() {
                                                         <p className="text-[8px] uppercase tracking-wider text-white/25 mb-0.5">Check-ins</p>
                                                         <p className="text-blue-400/90 font-bold">{row.verifiedCheckins}</p>
                                                     </div>
+                                                    {row.events[0] ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                openContactHost(row.events[0]);
+                                                            }}
+                                                            className="self-center px-3 py-2 border border-blue-400/35 text-blue-200/90 text-[8px] font-black uppercase tracking-widest hover:bg-blue-500/10"
+                                                        >
+                                                            Contact
+                                                        </button>
+                                                    ) : null}
                                                     <span className="self-center px-3 py-2 border border-white/15 text-[8px] font-black uppercase tracking-widest text-white/50">
                                                         Open →
                                                     </span>
@@ -996,11 +1539,13 @@ export default function AdminDashboard() {
                         {/* ATTENDANCE TAB */}
                         {tab === 'attendance' && (
                             <motion.div key="attendance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-8">
-                                <div className="border border-white/[0.06] overflow-hidden">
-                                    <div className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-4 border-b border-white/[0.08] bg-white/[0.03]">
+                                <div className="border border-white/[0.06] overflow-x-auto">
+                                    <div className="min-w-[920px]">
+                                    <div className="grid grid-cols-[1fr_140px_120px_200px_140px] px-4 sm:px-8 py-4 border-b border-white/[0.08] bg-white/[0.03]">
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Wallet / email</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Event / Source</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Auth Code</span>
+                                        <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Mint / verify</span>
                                         <span className="text-[9px] tracking-[0.4em] uppercase text-white/40 font-black">Timestamp</span>
                                     </div>
                                     <div className="divide-y divide-white/[0.04]">
@@ -1057,24 +1602,54 @@ export default function AdminDashboard() {
                                                                     transition={{ duration: 0.2 }}
                                                                     className="overflow-hidden"
                                                                 >
+                                                                    {sortedRecords.length > 0 && (
+                                                                        <div className="px-8 py-2 bg-blue-500/5 border-t border-blue-500/10 flex items-center gap-2">
+                                                                            <span className="text-[9px] tracking-[0.3em] uppercase text-blue-300/90 font-black">Verified check-ins</span>
+                                                                            <span className="text-[9px] font-mono text-blue-300/50">{sortedRecords.length}</span>
+                                                                        </div>
+                                                                    )}
                                                                     {sortedRecords.map((record, i) => (
                                                                         <div
                                                                             key={`${eventId}-v-${i}`}
-                                                                            className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-5 items-center hover:bg-white/[0.01] transition-colors group border-t border-white/[0.02]"
+                                                                            role="button"
+                                                                            tabIndex={0}
+                                                                            onClick={() => {
+                                                                                if (!ev) return;
+                                                                                openEventRoster(ev);
+                                                                                setRosterPerson({ kind: 'verified', row: record });
+                                                                            }}
+                                                                            onKeyDown={(e) => {
+                                                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                                                    e.preventDefault();
+                                                                                    if (!ev) return;
+                                                                                    openEventRoster(ev);
+                                                                                    setRosterPerson({ kind: 'verified', row: record });
+                                                                                }
+                                                                            }}
+                                                                            className="w-full grid grid-cols-[1fr_140px_120px_200px_140px] px-8 py-5 items-center hover:bg-white/[0.03] transition-colors group border-t border-white/[0.02] text-left cursor-pointer"
                                                                         >
                                                                             <span className="font-mono text-xs text-white/60 group-hover:text-white transition-colors">
                                                                                 {shortIdentity(record.wallet, record.email)}
                                                                             </span>
                                                                             <span className="text-[10px] uppercase tracking-wider text-white/40">
-                                                                                {record.eventId
-                                                                                    ? (events.find(e => e.id === record.eventId)?.name || 'Unscoped')
-                                                                                    : 'Legacy_Entry'}
+                                                                                {ev?.name ||
+                                                                                    (record.eventId
+                                                                                        ? events.find(
+                                                                                              (e) =>
+                                                                                                  e.id.toLowerCase() ===
+                                                                                                  record.eventId!.toLowerCase()
+                                                                                          )?.name || 'Unscoped'
+                                                                                        : 'Legacy_Entry')}
                                                                             </span>
                                                                             <span className="font-mono text-sm tracking-[0.2em] text-blue-400 font-bold">{record.code}</span>
-                                                                            <span className="text-[10px] text-white/20 font-mono">
+                                                                            <span onClick={(e) => e.stopPropagation()}>
+                                                                                {renderMintVerify(record)}
+                                                                            </span>
+                                                                            <span className="text-[10px] text-white/20 font-mono flex items-center justify-between gap-2">
                                                                                 {new Date(record.checkedInAt).toLocaleString('en-GB', {
                                                                                     day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
                                                                                 })}
+                                                                                <span className="text-[8px] uppercase tracking-widest text-white/25 group-hover:text-white/50">Details</span>
                                                                             </span>
                                                                         </div>
                                                                     ))}
@@ -1087,7 +1662,22 @@ export default function AdminDashboard() {
                                                                             {registeredOnly.map((reg, i) => (
                                                                                 <div
                                                                                     key={`${eventId}-r-${i}`}
-                                                                                    className="grid grid-cols-[1fr_160px_160px_160px] px-8 py-4 items-center hover:bg-white/[0.01] transition-colors group border-t border-white/[0.02]"
+                                                                                    role="button"
+                                                                                    tabIndex={0}
+                                                                                    onClick={() => {
+                                                                                        if (!ev) return;
+                                                                                        openEventRoster(ev);
+                                                                                        setRosterPerson({ kind: 'pending', row: reg });
+                                                                                    }}
+                                                                                    onKeyDown={(e) => {
+                                                                                        if (e.key === 'Enter' || e.key === ' ') {
+                                                                                            e.preventDefault();
+                                                                                            if (!ev) return;
+                                                                                            openEventRoster(ev);
+                                                                                            setRosterPerson({ kind: 'pending', row: reg });
+                                                                                        }
+                                                                                    }}
+                                                                                    className="grid grid-cols-[1fr_140px_120px_200px_140px] px-8 py-4 items-center hover:bg-white/[0.03] transition-colors group border-t border-white/[0.02] cursor-pointer"
                                                                                 >
                                                                                     <span className="font-mono text-xs text-white/50 group-hover:text-white/70 transition-colors">
                                                                                         {shortIdentity(reg.wallet, reg.email)}
@@ -1109,10 +1699,12 @@ export default function AdminDashboard() {
                                                                                                   </>
                                                                                               )}
                                                                                     </span>
-                                                                                    <span className="text-[10px] text-white/20 font-mono">
+                                                                                    <span className="text-white/20 text-[9px]">—</span>
+                                                                                    <span className="text-[10px] text-white/20 font-mono flex items-center justify-between gap-2">
                                                                                         Registered {new Date(reg.registeredAt).toLocaleString('en-GB', {
                                                                                             day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
                                                                                         })}
+                                                                                        <span className="text-[8px] uppercase tracking-widest text-white/25 group-hover:text-white/50">Details</span>
                                                                                     </span>
                                                                                 </div>
                                                                             ))}
@@ -1125,6 +1717,7 @@ export default function AdminDashboard() {
                                                 );
                                             })
                                         )}
+                                    </div>
                                     </div>
                                 </div>
                             </motion.div>
@@ -1142,11 +1735,11 @@ export default function AdminDashboard() {
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             transition={{ delay: i * 0.05 }}
-                                            onClick={() => setSelectedEventDetail(ev)}
+                                            onClick={() => openEventRoster(ev)}
                                             onKeyDown={e => {
                                                 if (e.key === 'Enter' || e.key === ' ') {
                                                     e.preventDefault();
-                                                    setSelectedEventDetail(ev);
+                                                    openEventRoster(ev);
                                                 }
                                             }}
                                             className="px-4 py-3 border border-white/[0.06] bg-white/[0.01] group hover:bg-white/[0.06] transition-all flex items-center justify-between gap-4 cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-white/30"
@@ -1209,6 +1802,10 @@ export default function AdminDashboard() {
                                                     >
                                                         {cancelBusyId === ev.id ? '…' : 'Restore'}
                                                     </button>
+                                                ) : isPast(ev.date, ev.endDate) ? (
+                                                    <span className="px-3 py-1.5 border border-white/10 text-white/30 text-[8px] font-black tracking-[0.25em] uppercase whitespace-nowrap">
+                                                        Past — no cancel
+                                                    </span>
                                                 ) : (
                                                     <button
                                                         type="button"
@@ -1222,6 +1819,16 @@ export default function AdminDashboard() {
                                                         {cancelBusyId === ev.id ? '…' : 'Cancel'}
                                                     </button>
                                                 )}
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        openContactHost(ev);
+                                                    }}
+                                                    className="px-3 py-1.5 border border-blue-400/35 text-blue-200/90 hover:bg-blue-500/10 text-[8px] font-black tracking-[0.25em] uppercase transition-all whitespace-nowrap"
+                                                >
+                                                    Contact
+                                                </button>
                                                 <button
                                                     type="button"
                                                     onClick={e => {
@@ -1254,7 +1861,14 @@ export default function AdminDashboard() {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         className="fixed inset-0 z-[290] bg-black/90 backdrop-blur-3xl flex items-center justify-center p-4 sm:p-8"
-                        onClick={e => e.target === e.currentTarget && setSelectedEventDetail(null)}
+                        onClick={e => {
+                            if (e.target === e.currentTarget) {
+                                setSelectedEventDetail(null);
+                                setRosterPerson(null);
+                                setRosterQuery('');
+                                setRosterFilter('');
+                            }
+                        }}
                     >
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
@@ -1308,6 +1922,10 @@ export default function AdminDashboard() {
                                         >
                                             Restore event
                                         </button>
+                                    ) : isPast(selectedEventDetail.date, selectedEventDetail.endDate) ? (
+                                        <span className="px-3 py-2 border border-white/10 text-white/35 text-[8px] font-black tracking-[0.2em] uppercase">
+                                            Past — cannot cancel
+                                        </span>
                                     ) : (
                                         <button
                                             type="button"
@@ -1318,6 +1936,13 @@ export default function AdminDashboard() {
                                             Cancel (misconduct)
                                         </button>
                                     )}
+                                    <button
+                                        type="button"
+                                        onClick={() => openContactHost(selectedEventDetail)}
+                                        className="px-3 py-2 border border-blue-400/40 text-blue-200 text-[8px] font-black tracking-[0.2em] uppercase hover:bg-blue-500/10"
+                                    >
+                                        Contact host
+                                    </button>
                                     <button
                                         type="button"
                                         onClick={() => exportEventRoster(selectedEventDetail)}
@@ -1336,7 +1961,12 @@ export default function AdminDashboard() {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setSelectedEventDetail(null)}
+                                        onClick={() => {
+                                            setSelectedEventDetail(null);
+                                            setRosterPerson(null);
+                                            setRosterQuery('');
+                                            setRosterFilter('');
+                                        }}
                                         className="px-3 py-2 text-[8px] font-black tracking-[0.2em] uppercase text-white/40 hover:text-white"
                                     >
                                         Close
@@ -1344,45 +1974,223 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
 
-                            <div className="shrink-0 px-5 sm:px-6 py-3 border-b border-white/[0.04] flex flex-wrap gap-3 text-[9px] font-mono text-white/50">
-                                <span className="text-white/80 font-bold">
-                                    {registrations.filter(r => (r.eventId ?? '').toLowerCase() === selectedEventDetail.id.toLowerCase()).length} registered
-                                </span>
-                                <span>·</span>
-                                <span>{getVerifiedForEvent(selectedEventDetail.id).length} verified</span>
-                                <span>·</span>
-                                <span className="text-amber-400/90">{getRegisteredOnlyForEvent(selectedEventDetail.id).length} pending check-in</span>
-                                {selectedEventDetail.maxAttendees != null && selectedEventDetail.maxAttendees > 0 && (
-                                    <>
-                                        <span>·</span>
-                                        <span>Cap {selectedEventDetail.maxAttendees}</span>
-                                    </>
-                                )}
-                                {formatEventTicketSummary(selectedEventDetail) !== 'Free' ? (
-                                    <>
-                                        <span>·</span>
-                                        <span className="text-cyan-400/85">
-                                            {formatEventTicketSummary(selectedEventDetail)}
-                                        </span>
-                                    </>
+                            <div className="shrink-0 px-5 sm:px-6 py-3 border-b border-white/[0.04] space-y-3">
+                                <div className="flex flex-wrap gap-3 text-[9px] font-mono text-white/50">
+                                    <span className="text-white/80 font-bold">
+                                        {registrations.filter(r => (r.eventId ?? '').toLowerCase() === selectedEventDetail.id.toLowerCase()).length} registered
+                                    </span>
+                                    <span>·</span>
+                                    <span>{rosterVerifiedAll.length} verified</span>
+                                    <span>·</span>
+                                    <span className="text-amber-400/90">{rosterPendingAll.length} pending check-in</span>
+                                    {selectedEventDetail.maxAttendees != null && selectedEventDetail.maxAttendees > 0 && (
+                                        <>
+                                            <span>·</span>
+                                            <span>Cap {selectedEventDetail.maxAttendees}</span>
+                                        </>
+                                    )}
+                                    {formatEventTicketSummary(selectedEventDetail) !== 'Free' ? (
+                                        <>
+                                            <span>·</span>
+                                            <span className="text-cyan-400/85">
+                                                {formatEventTicketSummary(selectedEventDetail)}
+                                            </span>
+                                        </>
+                                    ) : null}
+                                </div>
+                                <form
+                                    className="flex flex-col sm:flex-row gap-2"
+                                    onSubmit={(e) => {
+                                        e.preventDefault();
+                                        applyRosterSearch();
+                                    }}
+                                >
+                                    <input
+                                        type="search"
+                                        value={rosterQuery}
+                                        onChange={(e) => setRosterQuery(e.target.value)}
+                                        placeholder="Search user by email, wallet, code, or mint tx…"
+                                        className="flex-1 min-w-0 bg-white/[0.03] border border-white/10 px-3 py-2.5 text-[11px] font-mono text-white placeholder:text-white/25 focus:outline-none focus:border-blue-400/40"
+                                    />
+                                    <div className="flex gap-2 shrink-0">
+                                        <button
+                                            type="submit"
+                                            className="px-4 py-2.5 bg-white text-black text-[8px] font-black tracking-[0.2em] uppercase hover:bg-neutral-200"
+                                        >
+                                            Search
+                                        </button>
+                                        {rosterFilter ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setRosterQuery('');
+                                                    setRosterFilter('');
+                                                    setRosterPerson(null);
+                                                }}
+                                                className="px-3 py-2.5 border border-white/15 text-[8px] font-black tracking-[0.2em] uppercase text-white/50 hover:text-white"
+                                            >
+                                                Clear
+                                            </button>
+                                        ) : null}
+                                    </div>
+                                </form>
+                                {rosterFilter ? (
+                                    <p className="text-[9px] font-mono text-white/35">
+                                        Showing {rosterVerified.length + rosterPending.length} match
+                                        {rosterVerified.length + rosterPending.length === 1 ? '' : 'es'} for “{rosterFilter}”
+                                    </p>
                                 ) : null}
                             </div>
 
                             <div className="flex-1 min-h-0 overflow-y-auto">
                                 <div className="p-5 sm:p-6 space-y-8 pb-10">
+                                    {rosterPerson ? (
+                                        <section className="border border-blue-400/25 bg-blue-500/[0.04] p-4 sm:p-5 space-y-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="text-[9px] tracking-[0.35em] uppercase font-black text-blue-300/90 mb-1">User details</p>
+                                                    <p className="text-[10px] font-mono text-white/40">
+                                                        {rosterPerson.kind === 'verified' ? 'Verified check-in' : 'Registered — pending check-in'}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRosterPerson(null)}
+                                                    className="text-[8px] font-black tracking-[0.2em] uppercase text-white/40 hover:text-white"
+                                                >
+                                                    Close details
+                                                </button>
+                                            </div>
+                                            {(() => {
+                                                const verified = rosterPerson.kind === 'verified' ? rosterPerson.row : null;
+                                                const pending = rosterPerson.kind === 'pending' ? rosterPerson.row : null;
+                                                const linkedReg = verified
+                                                    ? findRegistrationForAttendance(selectedEventDetail.id, verified)
+                                                    : pending;
+                                                const mintExplorer = verified
+                                                    ? explorerUrlForMint(verified.mintChain, verified.mintTxHash)
+                                                    : null;
+                                                return (
+                                                    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-[10px] font-mono">
+                                                        <div className="sm:col-span-2">
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Email</dt>
+                                                            <dd className="text-white/85 break-all">
+                                                                {(verified?.email || linkedReg?.email || '—').trim() || '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="sm:col-span-2">
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Wallet</dt>
+                                                            <dd className="text-white/85 break-all">
+                                                                {(verified?.wallet || linkedReg?.wallet || '—').trim() || '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Name</dt>
+                                                            <dd className="text-white/70">{linkedReg?.name?.trim() || '—'}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Auth code</dt>
+                                                            <dd className="text-blue-300 font-bold tracking-wider">{verified?.code || '—'}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Registered</dt>
+                                                            <dd className="text-white/60">
+                                                                {linkedReg
+                                                                    ? new Date(linkedReg.registeredAt).toLocaleString('en-GB')
+                                                                    : '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Checked in</dt>
+                                                            <dd className="text-white/60">
+                                                                {verified
+                                                                    ? new Date(verified.checkedInAt).toLocaleString('en-GB')
+                                                                    : '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Payment</dt>
+                                                            <dd className="text-white/70">
+                                                                {linkedReg
+                                                                    ? registrationPaymentLabel(linkedReg.paymentStatus)
+                                                                    : '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30 mb-0.5">Payment detail</dt>
+                                                            <dd className="text-white/60 break-all">
+                                                                {linkedReg ? registrationPaymentDetail(linkedReg) || '—' : '—'}
+                                                            </dd>
+                                                        </div>
+                                                        <div className="sm:col-span-2 border-t border-white/[0.06] pt-3 mt-1 space-y-2">
+                                                            <dt className="text-[8px] uppercase tracking-wider text-white/30">Mint / verify</dt>
+                                                            <dd className="space-y-2">
+                                                                {verified ? (
+                                                                    <>
+                                                                        <div>{renderMintVerify(verified)}</div>
+                                                                        <p className="text-white/45 break-all">
+                                                                            Chain: {(verified.mintChain || '—').toLowerCase()}
+                                                                            {verified.mintTokenId ? ` · Token #${verified.mintTokenId}` : ''}
+                                                                        </p>
+                                                                        <p className="text-white/45 break-all">
+                                                                            Tx: {verified.mintTxHash || '—'}
+                                                                        </p>
+                                                                        {mintExplorer ? (
+                                                                            <a
+                                                                                href={mintExplorer}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="inline-block text-blue-300 underline underline-offset-2 hover:text-blue-200"
+                                                                            >
+                                                                                Open on explorer →
+                                                                            </a>
+                                                                        ) : null}
+                                                                    </>
+                                                                ) : (
+                                                                    <span className="text-white/30">Not minted — pending check-in</span>
+                                                                )}
+                                                            </dd>
+                                                        </div>
+                                                    </dl>
+                                                );
+                                            })()}
+                                        </section>
+                                    ) : null}
+
                                     <section>
-                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">Verified check-ins</h3>
-                                        {getVerifiedForEvent(selectedEventDetail.id).length === 0 ? (
+                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">
+                                            Verified check-ins
+                                            {rosterFilter ? (
+                                                <span className="ml-2 text-white/25 font-mono normal-case tracking-normal">
+                                                    {rosterVerified.length}/{rosterVerifiedAll.length}
+                                                </span>
+                                            ) : null}
+                                        </h3>
+                                        {rosterVerifiedAll.length === 0 ? (
                                             <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">No verified entries yet</p>
+                                        ) : rosterVerified.length === 0 ? (
+                                            <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">No verified matches for this search</p>
                                         ) : (
                                             <ul className="border border-white/[0.06] divide-y divide-white/[0.04]">
-                                                {getVerifiedForEvent(selectedEventDetail.id).map((row, idx) => (
-                                                    <li key={`${row.code}-${idx}`} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[10px] font-mono hover:bg-white/[0.02]">
-                                                        <span className="text-white/80">{shortIdentity(row.wallet, row.email)}</span>
-                                                        <span className="text-blue-400/90 font-bold tracking-wider">{row.code}</span>
-                                                        <span className="text-white/30">
-                                                            {new Date(row.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                                                        </span>
+                                                {rosterVerified.map((row, idx) => (
+                                                    <li key={`${row.code}-${idx}`}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setRosterPerson({ kind: 'verified', row })}
+                                                            className="w-full text-left px-4 py-3 flex flex-col gap-2 text-[10px] font-mono hover:bg-white/[0.04] transition-colors"
+                                                        >
+                                                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                                                                <span className="text-white/80">{shortIdentity(row.wallet, row.email)}</span>
+                                                                <span className="text-blue-400/90 font-bold tracking-wider">{row.code}</span>
+                                                                <span className="text-white/30">
+                                                                    {new Date(row.checkedInAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div>{renderMintVerify(row)}</div>
+                                                                <span className="text-[8px] uppercase tracking-widest text-white/30 shrink-0">Details →</span>
+                                                            </div>
+                                                        </button>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -1390,46 +2198,64 @@ export default function AdminDashboard() {
                                     </section>
 
                                     <section>
-                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">Registered — not verified</h3>
-                                        {getRegisteredOnlyForEvent(selectedEventDetail.id).length === 0 ? (
+                                        <h3 className="text-[9px] tracking-[0.35em] uppercase font-black text-white/30 mb-3">
+                                            Registered — not verified
+                                            {rosterFilter ? (
+                                                <span className="ml-2 text-white/25 font-mono normal-case tracking-normal">
+                                                    {rosterPending.length}/{rosterPendingAll.length}
+                                                </span>
+                                            ) : null}
+                                        </h3>
+                                        {rosterPendingAll.length === 0 ? (
                                             <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">Everyone registered has checked in (or no registrations)</p>
+                                        ) : rosterPending.length === 0 ? (
+                                            <p className="text-[10px] text-white/20 italic py-6 border border-dashed border-white/10 text-center">No pending matches for this search</p>
                                         ) : (
                                             <ul className="border border-white/[0.06] divide-y divide-white/[0.04]">
-                                                {getRegisteredOnlyForEvent(selectedEventDetail.id).map((reg, idx) => (
-                                                    <li key={`${reg.email ?? ''}-${reg.wallet ?? ''}-${idx}`} className="px-4 py-3 flex flex-col gap-1 text-[10px] font-mono hover:bg-white/[0.02]">
-                                                        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                                                            <span className="text-white/80">{shortIdentity(reg.wallet, reg.email)}</span>
-                                                            {reg.name?.trim() && <span className="text-white/50">{reg.name}</span>}
-                                                        </div>
-                                                        {(reg.email?.trim()) && <span className="text-white/35 text-[9px]">{reg.email}</span>}
-                                                        {isPaidRegistration(reg.paymentStatus) && (
-                                                            <div className="flex flex-wrap items-center gap-2 pt-1">
-                                                                <span
-                                                                    className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 border ${
-                                                                        (reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto'
-                                                                            ? 'border-cyan-500/35 text-cyan-300 bg-cyan-500/10'
-                                                                            : 'border-emerald-500/35 text-emerald-300 bg-emerald-500/10'
-                                                                    }`}
-                                                                >
-                                                                    {registrationPaymentLabel(reg.paymentStatus)}
-                                                                </span>
-                                                                {(reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto' &&
-                                                                    reg.paymentTxHash?.trim() && (
-                                                                        <span className="text-[9px] text-white/40" title={reg.paymentTxHash}>
-                                                                            Tx {shortHash(reg.paymentTxHash)}
-                                                                        </span>
-                                                                    )}
-                                                                {(reg.paymentStatus ?? '').toLowerCase() === 'paid_mobile' &&
-                                                                    reg.paymentReference?.trim() && (
-                                                                        <span className="text-[9px] text-white/40 truncate max-w-full" title={reg.paymentReference}>
-                                                                            Ref {reg.paymentReference}
-                                                                        </span>
-                                                                    )}
+                                                {rosterPending.map((reg, idx) => (
+                                                    <li key={`${reg.email ?? ''}-${reg.wallet ?? ''}-${idx}`}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setRosterPerson({ kind: 'pending', row: reg })}
+                                                            className="w-full text-left px-4 py-3 flex flex-col gap-1 text-[10px] font-mono hover:bg-white/[0.04] transition-colors"
+                                                        >
+                                                            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                                                                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                                                    <span className="text-white/80">{shortIdentity(reg.wallet, reg.email)}</span>
+                                                                    {reg.name?.trim() && <span className="text-white/50">{reg.name}</span>}
+                                                                </div>
+                                                                <span className="text-[8px] uppercase tracking-widest text-white/30 shrink-0">Details →</span>
                                                             </div>
-                                                        )}
-                                                        <span className="text-white/25 text-[9px]">
-                                                            Registered {new Date(reg.registeredAt).toLocaleString('en-GB')}
-                                                        </span>
+                                                            {(reg.email?.trim()) && <span className="text-white/35 text-[9px]">{reg.email}</span>}
+                                                            {isPaidRegistration(reg.paymentStatus) && (
+                                                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                                    <span
+                                                                        className={`text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 border ${
+                                                                            (reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto'
+                                                                                ? 'border-cyan-500/35 text-cyan-300 bg-cyan-500/10'
+                                                                                : 'border-emerald-500/35 text-emerald-300 bg-emerald-500/10'
+                                                                        }`}
+                                                                    >
+                                                                        {registrationPaymentLabel(reg.paymentStatus)}
+                                                                    </span>
+                                                                    {(reg.paymentStatus ?? '').toLowerCase() === 'paid_crypto' &&
+                                                                        reg.paymentTxHash?.trim() && (
+                                                                            <span className="text-[9px] text-white/40" title={reg.paymentTxHash}>
+                                                                                Tx {shortHash(reg.paymentTxHash)}
+                                                                            </span>
+                                                                        )}
+                                                                    {(reg.paymentStatus ?? '').toLowerCase() === 'paid_mobile' &&
+                                                                        reg.paymentReference?.trim() && (
+                                                                            <span className="text-[9px] text-white/40 truncate max-w-full" title={reg.paymentReference}>
+                                                                                Ref {reg.paymentReference}
+                                                                            </span>
+                                                                        )}
+                                                                </div>
+                                                            )}
+                                                            <span className="text-white/25 text-[9px]">
+                                                                Registered {new Date(reg.registeredAt).toLocaleString('en-GB')}
+                                                            </span>
+                                                        </button>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -1511,6 +2337,129 @@ export default function AdminDashboard() {
                                         Copy Fragment
                                     </button>
                                 </div>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Contact host */}
+            <AnimatePresence>
+                {contactEvent && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[310] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 sm:p-8"
+                        onClick={(e) => e.target === e.currentTarget && setContactEvent(null)}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 16 }}
+                            className="w-full max-w-lg border border-white/10 bg-[#0a0a0a] max-h-[92vh] overflow-y-auto"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="p-5 sm:p-6 border-b border-white/[0.06] flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-[9px] tracking-[0.4em] uppercase text-blue-300/90 font-black">
+                                        Contact host
+                                    </p>
+                                    <h2 className="text-lg font-bold tracking-tight mt-1 truncate">
+                                        {contactEvent.name}
+                                    </h2>
+                                    <p className="text-[10px] font-mono text-white/40 mt-1 truncate">
+                                        {formatOrganizerShort(contactEvent)}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setContactEvent(null)}
+                                    className="text-[9px] font-black uppercase tracking-widest text-white/35 hover:text-white shrink-0"
+                                >
+                                    Close
+                                </button>
+                            </div>
+
+                            <div className="p-5 sm:p-6 space-y-4">
+                                <div className="space-y-2">
+                                    <label className="block text-[8px] uppercase tracking-[0.3em] text-white/35 font-bold">
+                                        Host email
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={contactToEmail}
+                                        onChange={(e) => setContactToEmail(e.target.value)}
+                                        placeholder={
+                                            getOrganizerEmailFromId(contactEvent.organizer)
+                                                ? undefined
+                                                : 'No email on file — enter contact…'
+                                        }
+                                        readOnly={!!getOrganizerEmailFromId(contactEvent.organizer)}
+                                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm font-mono placeholder:text-white/25 focus:outline-none focus:border-blue-400/40 read-only:opacity-70"
+                                    />
+                                    {!getOrganizerEmailFromId(contactEvent.organizer) ? (
+                                        <p className="text-[9px] text-amber-400/80 leading-relaxed">
+                                            Wallet host — no email stored on the event. Enter an address if you have
+                                            one, or use the wallet id below offline.
+                                        </p>
+                                    ) : (
+                                        <a
+                                            href={`mailto:${getOrganizerEmailFromId(contactEvent.organizer)}?subject=${encodeURIComponent(contactSubject || `Regarding ${contactEvent.name}`)}`}
+                                            className="inline-block text-[9px] uppercase tracking-widest text-blue-300/90 hover:text-blue-200 font-bold"
+                                        >
+                                            Open in mail app →
+                                        </a>
+                                    )}
+                                    {!isEmailOrganizerId(contactEvent.organizer) ? (
+                                        <p className="text-[9px] font-mono text-white/30 break-all">
+                                            Wallet: {contactEvent.organizer}
+                                        </p>
+                                    ) : null}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="block text-[8px] uppercase tracking-[0.3em] text-white/35 font-bold">
+                                        Subject
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={contactSubject}
+                                        onChange={(e) => setContactSubject(e.target.value)}
+                                        maxLength={160}
+                                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm focus:outline-none focus:border-blue-400/40"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="block text-[8px] uppercase tracking-[0.3em] text-white/35 font-bold">
+                                        Message
+                                    </label>
+                                    <textarea
+                                        value={contactMessage}
+                                        onChange={(e) => setContactMessage(e.target.value)}
+                                        rows={6}
+                                        maxLength={5000}
+                                        placeholder="Write your message to the host…"
+                                        className="w-full bg-white/[0.04] border border-white/10 px-3 py-2.5 text-white text-sm leading-relaxed resize-y min-h-[140px] focus:outline-none focus:border-blue-400/40 placeholder:text-white/25"
+                                    />
+                                </div>
+
+                                {contactError ? (
+                                    <p className="text-[10px] text-red-400 font-mono">{contactError}</p>
+                                ) : null}
+                                {contactOk ? (
+                                    <p className="text-[10px] text-emerald-400 font-mono">{contactOk}</p>
+                                ) : null}
+
+                                <button
+                                    type="button"
+                                    disabled={contactBusy || !contactToEmail.trim() || contactMessage.trim().length < 10}
+                                    onClick={() => void sendContactHost()}
+                                    className="w-full min-h-[48px] bg-white text-black text-[10px] font-black uppercase tracking-widest hover:bg-neutral-200 disabled:opacity-40"
+                                >
+                                    {contactBusy ? 'Sending…' : 'Send email to host'}
+                                </button>
                             </div>
                         </motion.div>
                     </motion.div>

@@ -854,6 +854,88 @@ export async function sendAttendeeTicketCodeEmail(opts: {
     return { ok: true };
 }
 
+/** Platform admin message to an event host. */
+export async function sendAdminHostContactEmail(opts: {
+    to: string;
+    hostName: string;
+    eventName: string;
+    eventId: string;
+    subject: string;
+    message: string;
+}): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+    const key = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+    const { to, hostName, eventName, eventId, subject, message } = opts;
+    const origin = appOrigin();
+    const eventLink = `${origin}/?event=${encodeURIComponent(eventId)}`;
+    const hostDashboard = `${origin}/organizer`;
+    const safeSubject = subject.trim().slice(0, 160);
+    const safeMessage = message.trim().slice(0, 5000);
+    const greeting = hostName.trim() || 'host';
+
+    const text = [
+        `Hi ${greeting},`,
+        '',
+        `Message from Gate Protocol admin about “${eventName}”:`,
+        '',
+        safeMessage,
+        '',
+        `Event page: ${eventLink}`,
+        `Host dashboard: ${hostDashboard}`,
+        '',
+        `— ${brandName()} Admin`,
+    ].join('\n');
+
+    const preheader = `Admin message about ${eventName}`;
+    const inner = `
+<p style="margin:0 0 8px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:17px;line-height:1.55;color:${C.text};">
+  Hi <strong style="color:${C.white};">${escapeHtml(greeting)}</strong>,
+</p>
+<p style="margin:0 0 20px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.55;color:${C.muted};">
+  Message from Gate Protocol admin about
+  <strong style="color:${C.white};">${escapeHtml(eventName)}</strong>:
+</p>
+<div style="margin:0 0 24px;padding:16px 18px;border:1px solid ${C.cardBorder};background:${C.codeBg};">
+  <p style="margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:${C.text};white-space:pre-wrap;">${escapeHtml(safeMessage)}</p>
+</div>
+${bulletproofButtonHref(eventLink, 'Open event page')}
+<p style="margin:16px 0 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;line-height:1.55;color:${C.muted};">
+  Host dashboard:
+  <a href="${escapeHtml(hostDashboard)}" style="color:${C.accent};text-decoration:underline;">${escapeHtml(hostDashboard)}</a>
+</p>`;
+
+    const html = emailShell({ preheader, innerHtml: inner });
+
+    if (!key) {
+        console.warn('[email] RESEND_API_KEY not set; skipping admin→host email to', to);
+        return { ok: false, skipped: true };
+    }
+
+    const res = await fetch(RESEND_URL, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            from,
+            to: [to],
+            subject: `[Gate Protocol] ${safeSubject}`,
+            html,
+            text,
+            reply_to: process.env.ADMIN_CONTACT_REPLY_TO?.trim() || undefined,
+        }),
+    });
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        const err = typeof body?.message === 'string' ? body.message : JSON.stringify(body);
+        console.error('[email] Resend error (admin→host):', res.status, err);
+        return { ok: false, error: err };
+    }
+    return { ok: true };
+}
+
 /** One-time code for organizer email sign-up / sign-in. */
 export async function sendOrganizerSignInCodeEmail(opts: {
     to: string;

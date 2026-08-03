@@ -3,6 +3,7 @@ import { verifyAdminCookieFromStore } from '@/lib/admin-auth';
 import { getEvents, updateEventById } from '@/lib/events';
 import { getRegistrations } from '@/lib/registrations';
 import { findEventByIdCaseInsensitive } from '@/lib/organizer-access';
+import { isPast } from '@/lib/event-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,7 @@ export async function GET() {
     }
 }
 
-/** Admin soft-cancel / restore (any event; for misconduct). */
+/** Admin soft-cancel / restore (upcoming or ongoing only — past events cannot be cancelled). */
 export async function PATCH(request: Request) {
     if (!(await verifyAdminCookieFromStore())) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -61,6 +62,12 @@ export async function PATCH(request: Request) {
                 : null;
 
         if (body.cancelled) {
+            if (isPast(event.date, event.endDate)) {
+                return NextResponse.json(
+                    { error: 'Past events cannot be cancelled, even by admins.' },
+                    { status: 400 }
+                );
+            }
             if (event.cancelledAt) {
                 return NextResponse.json({ error: 'Event is already cancelled.' }, { status: 400 });
             }
