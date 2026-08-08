@@ -21,8 +21,8 @@ declare global {
  * Avoid listing many WalletConnect-backed wallets — each calls Core.init() and under
  * Turbopack HMR that surfaces as `unhandledRejection: undefined` / Runtime Error "undefined".
  *
- * Base EVM: Coinbase Wallet + browser injected (MetaMask, etc.).
- * Stellar Freighter: ConnectWalletButton (separate).
+ * Base EVM retained for legacy host SIWE / USDC paths only.
+ * Connect Wallet UI is Stellar Freighter (ConnectWalletButton).
  */
 function getWagmiConfig(): Config {
     if (globalThis.__gatefyWagmiConfig) return globalThis.__gatefyWagmiConfig;

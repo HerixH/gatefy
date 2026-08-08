@@ -1,15 +1,17 @@
 /**
  * Ticket payment rules shared by API and UI. No Node/fs — safe for client bundles.
+ * Rails: Stellar USDC and Stepay (Base crypto optional for legacy; mobile money removed).
  */
 
 export type TicketPaymentFields = {
     isBlockchain?: boolean;
     ticketPriceUsdc?: number;
     ticketAcceptUsdc?: boolean;
+    /** @deprecated Mobile money removed — ignored. */
     ticketAcceptMobileMoney?: boolean;
     /** USDC on Stellar (Horizon-verified). Opt-in; default off for existing events. */
     ticketAcceptStellar?: boolean;
-    /** Pay with Stepay checkout (mobile money → USDC). Opt-in. */
+    /** Pay with Stepay checkout. Opt-in. */
     ticketAcceptStepay?: boolean;
 };
 
@@ -17,8 +19,11 @@ export function eventAcceptsUsdc(ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc
     return ev.ticketAcceptUsdc !== false;
 }
 
-export function eventAcceptsMobileMoney(ev: Pick<TicketPaymentFields, 'ticketAcceptMobileMoney'>): boolean {
-    return ev.ticketAcceptMobileMoney !== false;
+/** Always false — mobile money rail removed; use Stellar / Stepay. */
+export function eventAcceptsMobileMoney(
+    _ev: Pick<TicketPaymentFields, 'ticketAcceptMobileMoney'>
+): boolean {
+    return false;
 }
 
 export function eventAcceptsStellar(ev: Pick<TicketPaymentFields, 'ticketAcceptStellar'>): boolean {
@@ -38,28 +43,25 @@ export function validateEventPaymentConfig(
     if (!(Number.isFinite(price) && price > 0)) return { ok: true };
 
     const usdcOk = event.ticketAcceptUsdc !== false;
-    const mobOk = event.ticketAcceptMobileMoney !== false;
     const stellarOk = event.ticketAcceptStellar === true;
     const stepayOk = event.ticketAcceptStepay === true;
-    if (!usdcOk && !mobOk && !stellarOk && !stepayOk) {
+    if (!usdcOk && !stellarOk && !stepayOk) {
         return {
             ok: false,
-            error: 'Paid events must accept at least one payment method (Base, Stellar, Stepay, or mobile money).',
+            error: 'Paid events must accept at least one payment method (Stellar, Stepay, or Base).',
         };
     }
     const bc = event.isBlockchain !== false;
     if (bc && !usdcOk && !stellarOk && !stepayOk) {
         return {
             ok: false,
-            error:
-                'Wallet-based paid tickets need crypto on Base, Stellar, and/or Stepay. Enable a rail or set the ticket free.',
+            error: 'Wallet-based paid tickets need Stellar, Stepay, and/or Base. Enable a rail or set the ticket free.',
         };
     }
-    if (!bc && !mobOk && !stellarOk && !stepayOk) {
+    if (!bc && !stellarOk && !stepayOk) {
         return {
             ok: false,
-            error:
-                'Email-only paid tickets need mobile money, Stellar, and/or Stepay. Enable a payment rail or choose a free ticket.',
+            error: 'Email-only paid tickets need Stellar and/or Stepay. Enable a payment rail or choose a free ticket.',
         };
     }
     return { ok: true };
@@ -83,7 +85,6 @@ export function formatEventTicketSummary(
     if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
     if (eventAcceptsStellar(ev)) rails.push('Stellar');
     if (eventAcceptsStepay(ev)) rails.push('Stepay');
-    if (eventAcceptsMobileMoney(ev)) rails.push('Mobile');
     return rails.length ? `Ticket ${price} · ${rails.join(' · ')}` : `Ticket ${price}`;
 }
 
@@ -100,9 +101,9 @@ export function registrationPaymentLabel(status?: string | null): string {
     const st = (status ?? '').trim().toLowerCase();
     if (st === 'paid_crypto') return 'Crypto (Base)';
     if (st === 'paid_stellar') return 'Crypto (Stellar / Stepay)';
-    if (st === 'paid_mobile') return 'Mobile money';
-    if (st === 'pending_mobile') return 'Mobile money (awaiting host)';
-    if (st === 'rejected_mobile') return 'Mobile money rejected';
+    if (st === 'paid_mobile') return 'Legacy payment';
+    if (st === 'pending_mobile') return 'Legacy payment (unpaid)';
+    if (st === 'rejected_mobile') return 'Legacy payment (rejected)';
     if (st && st !== 'none') return st;
     return 'Unpaid';
 }

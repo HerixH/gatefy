@@ -185,7 +185,7 @@ export function CreateEventWizard({
                       isBlockchain: form.isBlockchain,
                       ticketPriceUsdc: paidTicket,
                       ticketAcceptUsdc: form.ticketAcceptUsdc,
-                      ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+                      ticketAcceptMobileMoney: false,
                       ticketAcceptStellar: form.ticketAcceptStellar === true,
                       ticketAcceptStepay: form.ticketAcceptStepay === true,
                   })
@@ -228,27 +228,22 @@ export function CreateEventWizard({
             return null;
         }
         if (id === 'tickets') {
-            if (paidTicket > 0 && form.ticketAcceptMobileMoney && !form.mobileMoneyInstructions.trim()) {
-                return 'Add mobile money instructions for paid mobile checkout.';
-            }
             if (
                 paidTicket > 0 &&
                 form.isBlockchain &&
                 !form.ticketAcceptUsdc &&
-                !form.ticketAcceptMobileMoney &&
                 form.ticketAcceptStellar !== true &&
                 form.ticketAcceptStepay !== true
             ) {
-                return 'Enable at least one payment rail for a paid ticket.';
+                return 'Enable Stellar, Stepay, and/or Base for a paid ticket.';
             }
             if (
                 paidTicket > 0 &&
                 !form.isBlockchain &&
-                !form.ticketAcceptMobileMoney &&
                 form.ticketAcceptStellar !== true &&
                 form.ticketAcceptStepay !== true
             ) {
-                return 'Enable mobile money, Stellar, and/or Stepay for email signup paid tickets.';
+                return 'Enable Stellar and/or Stepay for email signup paid tickets.';
             }
             return null;
         }
@@ -549,7 +544,7 @@ export function CreateEventWizard({
                                                 onClick={() => hostAuth.onConnectWallet?.()}
                                                 className="w-full py-2.5 border border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 hover:text-white hover:border-white/30"
                                             >
-                                                Or connect wallet instead
+                                                Or connect Freighter (Stellar)
                                             </button>
                                         )}
                                     </div>
@@ -650,48 +645,11 @@ export function CreateEventWizard({
                                         className={`${inputCls} [color-scheme:dark]`}
                                     />
                                 </div>
-                                <div className="space-y-2">
-                                    <label className="text-[9px] tracking-[0.3em] uppercase text-white/40 font-bold block">
-                                        Mobile money instructions
-                                        {paidTicket > 0 && form.ticketAcceptMobileMoney ? ' *' : ' (optional)'}
-                                    </label>
-                                    <textarea
-                                        value={form.mobileMoneyInstructions}
-                                        onChange={(e) =>
-                                            setForm((f) => ({
-                                                ...f,
-                                                mobileMoneyInstructions: e.target.value,
-                                            }))
-                                        }
-                                        placeholder="MTN / Airtel MoMo: number, amount, what reference to paste…"
-                                        rows={4}
-                                        className={`${inputCls} resize-none`}
-                                    />
-                                </div>
                                 {paidTicket > 0 ? (
-                                    <div className="space-y-3 p-4 border border-cyan-500/20 bg-cyan-500/[0.05]">
-                                        <p className="text-[9px] tracking-[0.25em] uppercase text-cyan-400/95 font-black">
+                                    <div className="space-y-3 p-4 border border-violet-500/20 bg-violet-500/[0.05]">
+                                        <p className="text-[9px] tracking-[0.25em] uppercase text-violet-300/95 font-black">
                                             Checkout rails
                                         </p>
-                                        {form.isBlockchain ? (
-                                            <label className="flex items-start gap-3 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={form.ticketAcceptUsdc}
-                                                    onChange={(e) =>
-                                                        setForm((f) => ({
-                                                            ...f,
-                                                            ticketAcceptUsdc: e.target.checked,
-                                                        }))
-                                                    }
-                                                    className="mt-1 accent-white"
-                                                />
-                                                <span className="text-[10px] text-white/70">
-                                                    <span className="text-white font-bold">Base</span> — crypto for
-                                                    wallet signup
-                                                </span>
-                                            </label>
-                                        ) : null}
                                         <label className="flex items-start gap-3 cursor-pointer">
                                             <input
                                                 type="checkbox"
@@ -700,13 +658,14 @@ export function CreateEventWizard({
                                                     setForm((f) => ({
                                                         ...f,
                                                         ticketAcceptStellar: e.target.checked,
+                                                        ticketAcceptMobileMoney: false,
                                                     }))
                                                 }
                                                 className="mt-1 accent-violet-400"
                                             />
                                             <span className="text-[10px] text-white/70">
-                                                <span className="text-violet-300 font-bold">Stellar</span> — crypto
-                                                on Stellar
+                                                <span className="text-violet-300 font-bold">Stellar</span> — USDC on
+                                                Stellar (Freighter)
                                             </span>
                                         </label>
                                         <label className="flex items-start gap-3 cursor-pointer">
@@ -717,30 +676,14 @@ export function CreateEventWizard({
                                                     setForm((f) => ({
                                                         ...f,
                                                         ticketAcceptStepay: e.target.checked,
+                                                        ticketAcceptMobileMoney: false,
                                                     }))
                                                 }
                                                 className="mt-1 accent-emerald-400"
                                             />
                                             <span className="text-[10px] text-white/70">
                                                 <span className="text-emerald-300 font-bold">Stepay</span> — in-app
-                                                pay (mobile money → USDC)
-                                            </span>
-                                        </label>
-                                        <label className="flex items-start gap-3 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={form.ticketAcceptMobileMoney}
-                                                onChange={(e) =>
-                                                    setForm((f) => ({
-                                                        ...f,
-                                                        ticketAcceptMobileMoney: e.target.checked,
-                                                    }))
-                                                }
-                                                className="mt-1 accent-emerald-500"
-                                            />
-                                            <span className="text-[10px] text-white/70">
-                                                <span className="text-emerald-400 font-bold">Mobile money</span> —
-                                                local pay + reference
+                                                checkout via stepay.pro
                                             </span>
                                         </label>
                                     </div>

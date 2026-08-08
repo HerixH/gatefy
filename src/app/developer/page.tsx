@@ -1,50 +1,9 @@
 'use client';
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { PageFooter } from '@/components/PageFooter';
 
-const platforms = [
-    {
-        name: 'GATE PROTOCOL',
-        tag: 'Live',
-        desc: 'Decentralised attendance verification — QR-based proof-of-presence powered by on-chain NFTs. Built for events, conferences, and any gathering that deserves a permanent record.',
-        stack: ['Next.js', 'Solidity', 'Wagmi', 'Base'],
-        status: 'live',
-    },
-];
-
-
-
-const skills = [
-    { category: 'Smart Contracts', items: ['Solidity', 'ERC-721', 'ERC-20', 'Hardhat', 'Foundry'] },
-    { category: 'Frontend Web3', items: ['Next.js', 'Wagmi v2', 'RainbowKit', 'Viem', 'TypeScript'] },
-    { category: 'Infrastructure', items: ['Base', 'Ethereum', 'IPFS', 'Supabase', 'The Graph'] },
-    { category: 'Design & UX', items: ['Tailwind CSS', 'Framer Motion', 'Figma', 'Web3 UX'] },
-];
-
-const statusColor: Record<string, string> = {
-    live: 'rgba(34,197,94,0.8)',
-    dev: 'rgba(59,130,246,0.8)',
-    research: 'rgba(168,85,247,0.7)',
-};
-
-const truncateAddress = (addr: string) => {
-    if (!addr || addr.length < 14) return addr;
-    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-};
-
 export default function Developer() {
-    const [copied, setCopied] = useState(false);
-    const [revealed, setRevealed] = useState(false);
-    const WALLET = process.env.NEXT_PUBLIC_TIP_WALLET || '0xYOUR_WALLET_ADDRESS_HERE';
-    const displayAddress = revealed ? WALLET : truncateAddress(WALLET);
-
-    const copyWallet = () => {
-        navigator.clipboard.writeText(WALLET);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
     return (
         <div className="min-h-screen bg-background text-foreground grid-bg selection:bg-white selection:text-black flex flex-col overflow-x-hidden">
             {/* Nav — match About / main app */}
@@ -114,30 +73,6 @@ export default function Developer() {
                         <p className="text-white/40 text-sm font-light leading-relaxed mb-7">
                             If my work has brought value to you, consider supporting the build. Every contribution — big or small — helps push the onchain world forward.
                         </p>
-
-                        {/* Wallet tip */}
-                        <div className="mb-6">
-                            <p className="text-[9px] tracking-[0.3em] uppercase text-white/20 font-bold mb-3">Tip in Crypto · Base / ETH</p>
-                            <button
-                                onClick={copyWallet}
-                                onMouseEnter={() => setRevealed(true)}
-                                onMouseLeave={() => setRevealed(false)}
-                                onFocus={() => setRevealed(true)}
-                                onBlur={() => setRevealed(false)}
-                                className="w-full flex items-center gap-3 border border-white/10 bg-white/[0.02] px-4 py-3 hover:border-white/20 hover:bg-white/[0.04] transition-all text-left group select-none"
-                            >
-                                <div className="w-1.5 h-1.5 rounded-full bg-white/60 shrink-0" />
-                                <span className="text-[11px] font-mono text-white/50 tracking-wider break-all group-hover:text-white/70 transition-colors flex-1">{displayAddress}</span>
-                                <AnimatePresence mode="wait">
-                                    {copied ? (
-                                        <motion.span key="copied" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="text-[8px] font-bold tracking-[0.3em] uppercase shrink-0 text-green-400">Copied!</motion.span>
-                                    ) : (
-                                        <motion.span key="copy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[8px] font-bold tracking-[0.3em] uppercase text-white/20 shrink-0 group-hover:text-white/50">Copy</motion.span>
-                                    )}
-                                </AnimatePresence>
-                            </button>
-                            <p className="text-[8px] font-mono tracking-widest text-white/15 uppercase mt-2">Hover to reveal · Click to copy full address</p>
-                        </div>
 
                         {/* Social row */}
                         <div className="flex flex-wrap gap-3">

@@ -105,17 +105,11 @@ export function validateCreateEventForm(
             isBlockchain: form.isBlockchain,
             ticketPriceUsdc: tp,
             ticketAcceptUsdc: form.ticketAcceptUsdc,
-            ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+            ticketAcceptMobileMoney: false,
             ticketAcceptStellar: form.ticketAcceptStellar,
             ticketAcceptStepay: form.ticketAcceptStepay,
         });
         if (!pv.ok) return { ok: false, error: pv.error };
-        if (form.ticketAcceptMobileMoney && !form.mobileMoneyInstructions.trim()) {
-            return {
-                ok: false,
-                error: 'Add mobile money instructions so buyers know how to pay.',
-            };
-        }
     }
 
     if (form.isVip && !form.vipTokenAddress.trim()) {

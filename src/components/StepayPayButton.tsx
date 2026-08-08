@@ -17,7 +17,7 @@ type Props = {
 };
 
 /**
- * Starts a Stepay checkout (mobile money → USDC). Docs: https://stepay.pro/developers
+ * Starts a Stepay checkout. Docs: https://stepay.pro/developers
  */
 export function StepayPayButton({
     eventId,
@@ -114,8 +114,7 @@ export function StepayPayButton({
                 >
                     Stepay
                 </a>
-                — mobile money top-up or Stepay wallet. You return here after payment; registration
-                completes automatically.
+                . You return here after payment; registration completes automatically.
             </p>
             {error ? (
                 <p className="text-[9px] text-red-400 font-bold uppercase tracking-widest">{error}</p>

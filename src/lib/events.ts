@@ -186,7 +186,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         createdAt,
         attendeeCount: 0,
         ticketAcceptUsdc: data.ticketAcceptUsdc !== false,
-        ticketAcceptMobileMoney: data.ticketAcceptMobileMoney !== false,
+        ticketAcceptMobileMoney: false,
         ticketAcceptStellar: data.ticketAcceptStellar === true,
         ticketAcceptStepay: data.ticketAcceptStepay === true,
     };

@@ -389,7 +389,6 @@ function OrganizerDashboardInner() {
                     </Link>
                     <span className="text-[8px] tracking-[0.2em] uppercase text-blue-300/90 font-bold">Your events</span>
                 </nav>
-                {/* Base (RainbowKit) + Freighter — not Coinbase-only ConnectButton */}
                 <div className="shrink-0 max-w-[55%] sm:max-w-none">
                     <ConnectWalletButton
                         compact
@@ -460,12 +459,13 @@ function OrganizerDashboardInner() {
                                     Prove control of your wallet or email. Typing an email alone is no longer enough.
                                 </p>
                             </div>
-                            <div className="space-y-3 p-4 border border-blue-500/20 bg-blue-500/[0.04]">
-                                <p className="text-[9px] uppercase tracking-widest text-blue-300/90 font-black">Wallet</p>
+                            <div className="space-y-3 p-4 border border-violet-500/20 bg-violet-500/[0.04]">
+                                <p className="text-[9px] uppercase tracking-widest text-violet-300/90 font-black">
+                                    Stellar wallet
+                                </p>
                                 <p className="text-[10px] text-white/50 leading-relaxed">
-                                    Connect <strong className="text-white/70">Base</strong> (Coinbase Wallet, MetaMask,
-                                    …) or <strong className="text-white/70">Freighter</strong> (Stellar). Host verify
-                                    signature uses Base; Freighter is for Stellar rails.
+                                    Connect <strong className="text-white/70">Freighter</strong> for Stellar payments
+                                    and minting. Host sign-in uses the email code below.
                                 </p>
                                 <ConnectWalletButton
                                     fullWidth
@@ -479,39 +479,6 @@ function OrganizerDashboardInner() {
                                         Freighter · {stellarAddress.slice(0, 6)}…{stellarAddress.slice(-6)}
                                     </p>
                                 ) : null}
-                                {isConnected && address ? (
-                                    <button
-                                        type="button"
-                                        disabled={authBusy}
-                                        onClick={async () => {
-                                            setAuthBusy(true);
-                                            try {
-                                                const ch = await requestWalletChallenge(address);
-                                                if (!ch.ok) {
-                                                    showToast(ch.error);
-                                                    return;
-                                                }
-                                                const signature = await signMessageAsync({ message: ch.message });
-                                                const v = await verifyWalletSignature(address, signature);
-                                                if (!v.ok) showToast(v.error);
-                                                else showToast('Wallet verified. Loading your events…');
-                                            } catch {
-                                                showToast('Signature cancelled or failed.');
-                                            } finally {
-                                                setAuthBusy(false);
-                                            }
-                                        }}
-                                        className="w-full min-h-[44px] py-3 border border-white/20 text-white text-[9px] font-black uppercase tracking-widest hover:bg-white/5 disabled:opacity-50"
-                                    >
-                                        {authBusy
-                                            ? 'Waiting for signature…'
-                                            : `Sign to verify host · ${address.slice(0, 6)}…${address.slice(-4)}`}
-                                    </button>
-                                ) : (
-                                    <p className="text-[9px] text-white/35 leading-relaxed">
-                                        After connecting Base, tap Sign to verify host. Or use email code below.
-                                    </p>
-                                )}
                             </div>
                             <div className="flex items-center gap-3 text-[8px] uppercase tracking-widest text-white/25 font-bold">
                                 <span className="flex-1 h-px bg-white/10" />
@@ -983,41 +950,12 @@ function OrganizerDashboardInner() {
                                                 </div>
                                             ) : null}
 
-                                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                                            selectedEvent.mobileMoneyInstructions?.trim() ? (
-                                                <div className="p-3 border border-emerald-500/20 bg-emerald-500/[0.04] space-y-2">
-                                                    <p className="text-[8px] uppercase tracking-widest text-emerald-400/90 font-black">
-                                                        Mobile money instructions (shown to buyers)
-                                                    </p>
-                                                    <p className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed">
-                                                        {selectedEvent.mobileMoneyInstructions}
-                                                    </p>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            navigator.clipboard.writeText(
-                                                                selectedEvent.mobileMoneyInstructions ?? ''
-                                                            );
-                                                            showToast('Instructions copied');
-                                                        }}
-                                                        className="text-[8px] uppercase tracking-widest text-white/45 hover:text-white"
-                                                    >
-                                                        Copy instructions
-                                                    </button>
-                                                </div>
-                                            ) : null}
-
                                             {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
                                                 <p className="text-[8px] font-mono text-white/30">
                                                     Rails:{' '}
                                                     {[
-                                                        selectedEvent.isBlockchain !== false &&
-                                                        eventAcceptsUsdc(selectedEvent)
-                                                            ? 'USDC'
-                                                            : null,
                                                         eventAcceptsStellar(selectedEvent) ? 'Stellar' : null,
                                                         eventAcceptsStepay(selectedEvent) ? 'Stepay' : null,
-                                                        eventAcceptsMobileMoney(selectedEvent) ? 'Mobile' : null,
                                                     ]
                                                         .filter(Boolean)
                                                         .join(' · ') || 'none'}

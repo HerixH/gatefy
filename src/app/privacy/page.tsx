@@ -91,7 +91,7 @@ export default function Privacy() {
                     </div>
 
                     <div className="mt-12 pt-8 border-t border-white/5">
-                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 GATE PROTOCOL. Built on blockchain.</p>
+                        <p className="text-[10px] font-mono tracking-widest text-white/20 uppercase">© 2026 GATE PROTOCOL. Built on Stellar.</p>
                     </div>
 
                 </motion.div>

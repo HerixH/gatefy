@@ -42,7 +42,7 @@ export function PageFooter() {
 
             <div className="border-t border-white/[0.03] px-5 py-3 text-center">
                 <span className="block text-[7px] font-mono tracking-[0.16em] sm:tracking-[0.28em] text-white/20 uppercase leading-relaxed">
-                    © 2026 GATE PROTOCOL. Built on blockchain.
+                    © 2026 GATE PROTOCOL. Built on Stellar.
                 </span>
             </div>
         </footer>

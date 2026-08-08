@@ -72,13 +72,12 @@ export async function POST(request: Request) {
             if (Number.isFinite(n) && n > 0) ticketPrice = n;
         }
         const acceptUsdc = ticketAcceptUsdc !== false;
-        const acceptMobile = ticketAcceptMobileMoney !== false;
+        const acceptMobile = false; // Mobile money removed — Stellar / Stepay
         const acceptStellar = ticketAcceptStellar === true;
         const acceptStepay = ticketAcceptStepay === true;
-        const mmInstr =
-            typeof mobileMoneyInstructions === 'string' && mobileMoneyInstructions.trim()
-                ? mobileMoneyInstructions.trim()
-                : undefined;
+        const mmInstr = undefined;
+        void ticketAcceptMobileMoney;
+        void mobileMoneyInstructions;
         if (!name || !date) {
             return NextResponse.json({ error: 'Name and date are required' }, { status: 400 });
         }
@@ -293,8 +292,8 @@ export async function PATCH(request: Request) {
         if ('ticketAcceptUsdc' in body && typeof body.ticketAcceptUsdc === 'boolean') {
             patch.ticketAcceptUsdc = body.ticketAcceptUsdc;
         }
-        if ('ticketAcceptMobileMoney' in body && typeof body.ticketAcceptMobileMoney === 'boolean') {
-            patch.ticketAcceptMobileMoney = body.ticketAcceptMobileMoney;
+        if ('ticketAcceptMobileMoney' in body) {
+            patch.ticketAcceptMobileMoney = false;
         }
         if ('ticketAcceptStellar' in body && typeof body.ticketAcceptStellar === 'boolean') {
             patch.ticketAcceptStellar = body.ticketAcceptStellar;
@@ -354,9 +353,7 @@ export async function PATCH(request: Request) {
         const mergedUsdc =
             patch.ticketAcceptUsdc !== undefined ? patch.ticketAcceptUsdc : event.ticketAcceptUsdc !== false;
         const mergedMob =
-            patch.ticketAcceptMobileMoney !== undefined
-                ? patch.ticketAcceptMobileMoney
-                : event.ticketAcceptMobileMoney !== false;
+            false;
         const mergedStellar =
             patch.ticketAcceptStellar !== undefined
                 ? patch.ticketAcceptStellar

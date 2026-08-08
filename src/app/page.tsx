@@ -1,6 +1,5 @@
 'use client';
 
-import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
@@ -18,7 +17,8 @@ import { StepayPayButton } from '@/components/StepayPayButton';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
 import { EventLocationField } from '@/components/EventLocationField';
 import { EventsNearMe } from '@/components/EventsNearMe';
-import { readStellarAddress } from '@/lib/stellar-session';
+import { connectFreighter } from '@/lib/stellar-freighter-pay';
+import { readStellarAddress, writeStellarAddress } from '@/lib/stellar-session';
 import {
   isEventOrganizer,
   formatOrganizerShort,
@@ -128,7 +128,7 @@ interface Event {
   mobileMoneyInstructions?: string;
   /** Paid wallet flow: accept USDC (default on). */
   ticketAcceptUsdc?: boolean;
-  /** Paid flow: accept mobile-money reference (default on). */
+  /** @deprecated Mobile money removed — ignored for checkout. */
   ticketAcceptMobileMoney?: boolean;
   /** Paid flow: accept Stellar USDC (opt-in). */
   ticketAcceptStellar?: boolean;
@@ -138,7 +138,6 @@ interface Event {
 
 function HomeContent() {
   const { address, isConnected } = useAccount();
-  const { openConnectModal } = useConnectModal();
   const { signMessageAsync } = useSignMessage();
   const {
     organizerSessionEmail,
@@ -155,6 +154,11 @@ function HomeContent() {
   const [hostAuthBusy, setHostAuthBusy] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [hostSignInOpen, setHostSignInOpen] = useState(false);
+  const [stellarAddress, setStellarAddress] = useState<string | null>(null);
+
+  useEffect(() => {
+    setStellarAddress(readStellarAddress());
+  }, []);
 
   const [showScanner, setShowScanner] = useState(false);
   const [minted, setMinted] = useState(false);
@@ -484,18 +488,9 @@ function HomeContent() {
 
   const mintProofForSelectedEvent = async () => {
     if (!selectedEvent) return;
-    const stellar = readStellarAddress();
-    if (mintConfig.soroban && !mintConfig.base && !stellar) {
+    const stellar = stellarAddress || readStellarAddress();
+    if (!stellar) {
       showWalletToast('Connect Freighter first.');
-      return;
-    }
-    if (mintConfig.base && !mintConfig.soroban && !address) {
-      showWalletToast('Connect Base wallet first.');
-      openConnectModal?.();
-      return;
-    }
-    if (mintConfig.soroban && mintConfig.base && !stellar && !address) {
-      showWalletToast('Connect Freighter and/or Base wallet first.');
       return;
     }
     const email = eventRegProfile?.email || readRegCache(selectedEvent.id)?.email;
@@ -831,7 +826,7 @@ function HomeContent() {
     ticketPriceUsdc: '' as string,
     mobileMoneyInstructions: '' as string,
     ticketAcceptUsdc: true,
-    ticketAcceptMobileMoney: true,
+    ticketAcceptMobileMoney: false,
     ticketAcceptStellar: false,
     ticketAcceptStepay: false,
   });
@@ -858,7 +853,7 @@ function HomeContent() {
     ticketPriceUsdc: '' as string,
     mobileMoneyInstructions: '' as string,
     ticketAcceptUsdc: true,
-    ticketAcceptMobileMoney: true,
+    ticketAcceptMobileMoney: false,
     bannerUrl: '',
   });
   const [manageBannerUploading, setManageBannerUploading] = useState(false);
@@ -904,10 +899,23 @@ function HomeContent() {
     setTimeout(() => setWalletToast(null), 4000);
   };
 
+  const connectFreighterWallet = async () => {
+    const r = await connectFreighter();
+    if (!r.ok) {
+      showWalletToast(r.error);
+      return;
+    }
+    writeStellarAddress(r.address);
+    setStellarAddress(r.address);
+    showWalletToast('Freighter connected');
+  };
+
   const signInHostWallet = async () => {
     if (!address) {
-      openConnectModal?.();
-      return { ok: false as const, error: 'Connect a wallet first.' };
+      return {
+        ok: false as const,
+        error: 'Host wallet verify needs a Base wallet. Use email code, or connect Freighter for Stellar rails.',
+      };
     }
     setHostAuthBusy(true);
     try {
@@ -1122,15 +1130,12 @@ function HomeContent() {
         const n = parseFloat(t);
         if (Number.isFinite(n) && n > 0) payload.ticketPriceUsdc = n;
       }
-      const mm = form.mobileMoneyInstructions.trim();
-      if (mm) payload.mobileMoneyInstructions = mm;
-
       const ticketAmt = typeof payload.ticketPriceUsdc === 'number' ? payload.ticketPriceUsdc : undefined;
       const pv = validateEventPaymentConfig({
         isBlockchain: form.isBlockchain,
         ticketPriceUsdc: ticketAmt,
         ticketAcceptUsdc: form.ticketAcceptUsdc,
-        ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+        ticketAcceptMobileMoney: false,
         ticketAcceptStellar: form.ticketAcceptStellar === true,
         ticketAcceptStepay: form.ticketAcceptStepay === true,
       });
@@ -1140,7 +1145,7 @@ function HomeContent() {
         return;
       }
       payload.ticketAcceptUsdc = form.ticketAcceptUsdc;
-      payload.ticketAcceptMobileMoney = form.ticketAcceptMobileMoney;
+      payload.ticketAcceptMobileMoney = false;
       payload.ticketAcceptStellar = form.ticketAcceptStellar === true;
       payload.ticketAcceptStepay = form.ticketAcceptStepay === true;
       if (address) {
@@ -1174,7 +1179,7 @@ function HomeContent() {
           ticketPriceUsdc: '',
           mobileMoneyInstructions: '',
           ticketAcceptUsdc: true,
-          ticketAcceptMobileMoney: true,
+          ticketAcceptMobileMoney: false,
           ticketAcceptStellar: false,
           ticketAcceptStepay: false,
         });
@@ -1257,7 +1262,9 @@ function HomeContent() {
         isBlockchain: mergedBlockchain,
         ticketPriceUsdc: ticketAmount ?? undefined,
         ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
-        ticketAcceptMobileMoney: manageForm.ticketAcceptMobileMoney,
+        ticketAcceptMobileMoney: false,
+        ticketAcceptStellar: manageForm.ticketAcceptStellar,
+        ticketAcceptStepay: manageForm.ticketAcceptStepay,
       });
       if (!payCheck.ok) {
         setManageError(payCheck.error);
@@ -1276,9 +1283,11 @@ function HomeContent() {
         location: manageForm.location.trim(),
         maxAttendees: maxPatch,
         ticketPriceUsdc: ticketAmount,
-        mobileMoneyInstructions: manageForm.mobileMoneyInstructions.trim() || null,
+        mobileMoneyInstructions: null,
         ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
-        ticketAcceptMobileMoney: manageForm.ticketAcceptMobileMoney,
+        ticketAcceptMobileMoney: false,
+        ticketAcceptStellar: manageForm.ticketAcceptStellar,
+        ticketAcceptStepay: manageForm.ticketAcceptStepay,
         bannerUrl: manageForm.bannerUrl.trim() || null,
       };
 
@@ -2144,8 +2153,10 @@ function HomeContent() {
   const handleRegisterBlockchain = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEvent) return;
-    if (!address) {
-      showWalletToast('Connect your wallet to register — use the button in the top right.');
+    const stellar = stellarAddress || readStellarAddress();
+    const registerWallet = address || stellar;
+    if (!registerWallet) {
+      showWalletToast('Connect Freighter to register — use Connect Wallet in the top right.');
       return;
     }
     const nameTrim = blockchainSignupName.trim();
@@ -2161,19 +2172,24 @@ function HomeContent() {
     const price = selectedEvent.ticketPriceUsdc ?? 0;
     const useUsdc =
       price > 0 && eventAcceptsUsdc(selectedEvent) && blockchainPayMode === 'usdc';
-    const useMobile =
-      price > 0 && eventAcceptsMobileMoney(selectedEvent) && blockchainPayMode === 'mobile';
+    const useStellar = price > 0 && eventAcceptsStellar(selectedEvent);
+    const useStepay = price > 0 && eventAcceptsStepay(selectedEvent) && stepayEnabled;
 
-    if (price > 0 && !useUsdc && !useMobile) {
+    if (price > 0 && !useUsdc && !useStellar && !useStepay) {
       showWalletToast('No payment method is enabled for this ticket. Contact the organizer.');
       return;
     }
-    if (useMobile) {
-      const ref = blockchainPayRef.trim();
-      if (ref.length < 4) {
-        showWalletToast('Enter your mobile-money payment reference after paying.');
-        return;
-      }
+    if (useStepay && !useStellar && !useUsdc) {
+      showWalletToast('Use Pay with Stepay to complete payment.');
+      return;
+    }
+    if (useUsdc && !address) {
+      showWalletToast('Base USDC needs a Base wallet. Use Stellar or Stepay if the host enabled them.');
+      return;
+    }
+    if (useStellar && !stellar) {
+      showWalletToast('Connect Freighter to pay on Stellar.');
+      return;
     }
     setRegistering(true);
     try {
@@ -2197,13 +2213,11 @@ function HomeContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           eventId: selectedEvent.id,
-          wallet: address,
+          wallet: registerWallet,
+          ...(stellar ? { stellarAddress: stellar } : {}),
           email: emailTrim,
           name: nameTrim,
-          ...(paymentTxHash ? { paymentTxHash } : {}),
-          ...(useMobile && blockchainPayRef.trim()
-            ? { mobileMoneyReference: blockchainPayRef.trim() }
-            : {}),
+          ...(paymentTxHash ? { paymentTxHash, paymentRail: 'base' } : {}),
         }),
       });
       const data = await res.json();
@@ -2270,19 +2284,16 @@ function HomeContent() {
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
     if (price > 0) {
-      if (eventAcceptsMobileMoney(selectedEvent)) {
-        const ref = normalPayRef.trim();
-        if (ref.length < 4) {
-          showWalletToast('Enter your mobile-money payment reference after paying (see instructions above).');
-          return;
-        }
-      } else if (eventAcceptsStepay(selectedEvent) && stepayEnabled) {
+      if (eventAcceptsStepay(selectedEvent) && stepayEnabled) {
         showWalletToast('Use Pay with Stepay below to complete payment in-app.');
         return;
-      } else {
-        showWalletToast('This event has no email payment rail enabled. Ask the host to turn on Stepay or mobile money.');
+      }
+      if (eventAcceptsStellar(selectedEvent)) {
+        showWalletToast('Pay with Freighter (Stellar), then register — or use Stepay if enabled.');
         return;
       }
+      showWalletToast('This event has no email payment rail enabled. Ask the host to turn on Stellar or Stepay.');
+      return;
     }
     setRegistering(true);
     try {
@@ -2293,9 +2304,6 @@ function HomeContent() {
           eventId: selectedEvent.id,
           email,
           name: nameTrim,
-          ...(price > 0 && normalPayRef.trim()
-            ? { mobileMoneyReference: normalPayRef.trim() }
-            : {}),
         }),
       });
       const data = await res.json();
@@ -2422,7 +2430,10 @@ function HomeContent() {
             </button>
             {/* Desktop / tablet: wallet in header. Mobile: inside the menu below. */}
             <div className="hidden md:block scale-90 lg:scale-100 origin-right">
-              <ConnectWalletButton compact />
+              <ConnectWalletButton
+                compact
+                onStellarConnected={(addr) => setStellarAddress(addr)}
+              />
             </div>
           </div>
         </div>
@@ -2454,8 +2465,11 @@ function HomeContent() {
                 ))}
               </nav>
               <div className="mt-4 space-y-2">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Wallet</p>
-                <ConnectWalletButton fullWidth />
+                <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 font-bold">Stellar wallet</p>
+                <ConnectWalletButton
+                  fullWidth
+                  onStellarConnected={(addr) => setStellarAddress(addr)}
+                />
               </div>
             </motion.div>
           ) : null}
@@ -2906,7 +2920,7 @@ function HomeContent() {
                     }
                   },
                   onSignWallet: signInHostWallet,
-                  onConnectWallet: () => openConnectModal?.(),
+                  onConnectWallet: () => void connectFreighterWallet(),
                 }}
                 creating={creating}
                 createError={createError}
@@ -3070,55 +3084,47 @@ function HomeContent() {
                       className="w-full bg-black/40 border border-white/10 px-3 py-2 text-white text-sm [color-scheme:dark]"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] uppercase tracking-widest text-white/35 font-bold">Mobile money instructions</label>
-                    <textarea
-                      value={manageForm.mobileMoneyInstructions}
-                      onChange={(e) => setManageForm((f) => ({ ...f, mobileMoneyInstructions: e.target.value }))}
-                      rows={3}
-                      className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm resize-none focus:outline-none focus:border-white/25"
-                    />
-                  </div>
                   {(() => {
                     const tp = parseFloat(manageForm.ticketPriceUsdc.trim());
                     const paid = Number.isFinite(tp) && tp > 0;
                     if (!paid) return null;
                     return (
-                      <div className="space-y-3 p-3 border border-cyan-500/25 bg-cyan-500/[0.04] rounded">
-                        <p className="text-[9px] uppercase tracking-widest text-cyan-400 font-black">
-                          Accepted payment modes
+                      <div className="space-y-3 p-3 border border-violet-500/25 bg-violet-500/[0.04] rounded">
+                        <p className="text-[9px] uppercase tracking-widest text-violet-300 font-black">
+                          Checkout rails
                         </p>
-                        {selectedEvent.isBlockchain !== false ? (
-                          <label className="flex items-start gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={manageForm.ticketAcceptUsdc}
-                              onChange={(e) =>
-                                setManageForm((f) => ({ ...f, ticketAcceptUsdc: e.target.checked }))
-                              }
-                              className="mt-0.5"
-                            />
-                            <span className="text-[10px] text-white/70">
-                              Accept <strong className="text-white">USDC on Base</strong> (wallet signup)
-                            </span>
-                          </label>
-                        ) : (
-                          <p className="text-[9px] text-white/40">
-                            This event uses email signup — collectors pay with{' '}
-                            <strong className="text-white/60">mobile money reference</strong> when enabled below.
-                          </p>
-                        )}
                         <label className="flex items-start gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={manageForm.ticketAcceptMobileMoney}
+                            checked={manageForm.ticketAcceptStellar}
                             onChange={(e) =>
-                              setManageForm((f) => ({ ...f, ticketAcceptMobileMoney: e.target.checked }))
+                              setManageForm((f) => ({
+                                ...f,
+                                ticketAcceptStellar: e.target.checked,
+                                ticketAcceptMobileMoney: false,
+                              }))
                             }
-                            className="mt-0.5 accent-emerald-500"
+                            className="mt-0.5 accent-violet-400"
                           />
                           <span className="text-[10px] text-white/70">
-                            Accept <strong className="text-emerald-400">mobile-money references</strong>
+                            Accept <strong className="text-violet-300">Stellar</strong> (USDC / Freighter)
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={manageForm.ticketAcceptStepay}
+                            onChange={(e) =>
+                              setManageForm((f) => ({
+                                ...f,
+                                ticketAcceptStepay: e.target.checked,
+                                ticketAcceptMobileMoney: false,
+                              }))
+                            }
+                            className="mt-0.5 accent-emerald-400"
+                          />
+                          <span className="text-[10px] text-white/70">
+                            Accept <strong className="text-emerald-300">Stepay</strong>
                           </span>
                         </label>
                       </div>
@@ -3297,22 +3303,17 @@ function HomeContent() {
                         : null}
                     </p>
                     <ul className="text-[9px] text-white/65 space-y-1 list-none font-mono leading-snug">
-                      {selectedEvent.isBlockchain !== false && eventAcceptsUsdc(selectedEvent) && (
+                      {eventAcceptsStellar(selectedEvent) && (
                         <li>
-                          <span className="text-blue-300/90 font-bold">Crypto</span>: USDC on Base (wallet registration).
+                          <span className="text-violet-300/90 font-bold">Stellar</span>: USDC via Freighter.
                         </li>
                       )}
                       {eventAcceptsStepay(selectedEvent) && (
                         <li>
-                          <span className="text-emerald-300/90 font-bold">Stepay</span>: pay in-app (mobile money → USDC) via stepay.pro.
+                          <span className="text-emerald-300/90 font-bold">Stepay</span>: in-app checkout via stepay.pro.
                         </li>
                       )}
-                      {eventAcceptsMobileMoney(selectedEvent) && (
-                        <li>
-                          <span className="text-emerald-400/90 font-bold">Mobile money</span>: follow the organizer’s steps and enter your reference when you register with email.
-                        </li>
-                      )}
-                      {!eventAcceptsMobileMoney(selectedEvent) &&
+                      {!eventAcceptsStellar(selectedEvent) &&
                       !eventAcceptsStepay(selectedEvent) &&
                       selectedEvent.isBlockchain === false ? (
                         <li className="text-amber-400/80">
@@ -3320,14 +3321,6 @@ function HomeContent() {
                         </li>
                       ) : null}
                     </ul>
-                    {selectedEvent.mobileMoneyInstructions ? (
-                      <div className="text-[10px] text-white/75 whitespace-pre-wrap leading-snug border border-white/10 p-2.5 bg-black/40 font-sans">
-                        <p className="text-[8px] uppercase tracking-widest text-white/35 font-black mb-1.5">
-                          How to pay (mobile / local)
-                        </p>
-                        {selectedEvent.mobileMoneyInstructions}
-                      </div>
-                    ) : null}
                   </div>
                 )}
 
@@ -3443,22 +3436,6 @@ function HomeContent() {
                             />
                           </div>
                           {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                          eventAcceptsMobileMoney(selectedEvent) ? (
-                            <div className="space-y-1">
-                              <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
-                                Mobile-money reference * (after payment)
-                              </label>
-                              <input
-                                type="text"
-                                required
-                                value={normalPayRef}
-                                onChange={e => setNormalPayRef(e.target.value)}
-                                placeholder="Transaction ID from your provider"
-                                className="w-full bg-white/[0.04] border border-white/10 px-3 py-2 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
-                              />
-                            </div>
-                          ) : null}
-                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
                           eventAcceptsStepay(selectedEvent) &&
                           stepayEnabled ? (
                             <StepayPayButton
@@ -3477,13 +3454,17 @@ function HomeContent() {
                             />
                           ) : null}
                           {(selectedEvent.ticketPriceUsdc ?? 0) <= 0 ||
-                          eventAcceptsMobileMoney(selectedEvent) ? (
+                          eventAcceptsStellar(selectedEvent) ? (
                             <button
                               type="submit"
                               disabled={registering}
                               className="w-full py-3 bg-white text-black hover:bg-neutral-200 transition-all font-bold text-[10px] tracking-[0.2em] uppercase disabled:opacity-50"
                             >
-                              {registering ? 'Processing...' : 'Register for Event'}
+                              {registering
+                                ? 'Processing...'
+                                : (selectedEvent.ticketPriceUsdc ?? 0) > 0
+                                  ? 'Register (after Stellar pay)'
+                                  : 'Register for Event'}
                             </button>
                           ) : null}
                           <button
@@ -3571,39 +3552,21 @@ function HomeContent() {
                                 <p className="text-[9px] text-amber-400/80">
                                   {userMint?.error
                                     ? `Checked in — mint pending: ${userMint.error}`
-                                    : mintConfig.soroban && mintConfig.base
-                                      ? 'Checked in — connect Freighter and/or Base wallet to mint.'
-                                      : mintConfig.base
-                                        ? 'Checked in — connect Base wallet to mint your proof.'
-                                        : 'Checked in — connect Freighter to mint your proof.'}
+                                    : 'Checked in — connect Freighter to mint your proof.'}
                                 </p>
-                                {mintConfig.soroban ? (
-                                  <ConnectStellarButton
-                                    onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                                  />
-                                ) : null}
-                                {mintConfig.base && !address ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => openConnectModal?.()}
-                                    className="w-full py-2.5 border border-white/20 hover:bg-white/5 text-[9px] font-bold tracking-[0.2em] uppercase"
-                                  >
-                                    Connect Base
-                                  </button>
-                                ) : null}
+                                <ConnectStellarButton
+                                  onConnected={(addr) => {
+                                    setStellarAddress(addr);
+                                    showWalletToast('Freighter connected — tap Mint proof.');
+                                  }}
+                                />
                                 <button
                                   type="button"
                                   disabled={mintingProof}
                                   onClick={() => void mintProofForSelectedEvent()}
                                   className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
                                 >
-                                  {mintingProof
-                                    ? 'Minting…'
-                                    : mintConfig.soroban && mintConfig.base
-                                      ? 'Mint proof'
-                                      : mintConfig.base
-                                        ? 'Mint proof on Base'
-                                        : 'Mint proof on Stellar'}
+                                  {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
                                 </button>
                               </div>
                             )}
@@ -3623,14 +3586,16 @@ function HomeContent() {
                       </div>
                     ))}
                   </div>
-                ) : !isConnected ? (
-                  <button
-                    type="button"
-                    onClick={() => openConnectModal?.()}
-                    className="w-full p-4 border border-white/20 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/30 text-center transition-colors"
-                  >
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-bold">Connect wallet to interact</p>
-                  </button>
+                ) : !(stellarAddress || isConnected) ? (
+                  <div className="w-full p-4 border border-white/20 bg-white/[0.03] space-y-3">
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-bold text-center">
+                      Connect Freighter to interact
+                    </p>
+                    <ConnectWalletButton
+                      fullWidth
+                      onStellarConnected={(addr) => setStellarAddress(addr)}
+                    />
+                  </div>
                 ) : (
                   <div className="space-y-6">
                     {renderOrganizerEventPanel()}
@@ -3652,73 +3617,13 @@ function HomeContent() {
                             Register with wallet
                           </p>
                           <p className="text-[9px] text-white/35 leading-relaxed">
-                            Connect your wallet, then add how we should list you and your email for confirmations.
-                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && eventAcceptsUsdc(selectedEvent) && blockchainPayMode === 'usdc' ? (
-                              <span className="block mt-2 text-amber-400/90">
-                                This ticket costs {selectedEvent.ticketPriceUsdc} USDC on Base — your wallet will be prompted to pay when you register.
-                              </span>
-                            ) : null}
-                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                            eventAcceptsMobileMoney(selectedEvent) &&
-                            blockchainPayMode === 'mobile' ? (
-                              <span className="block mt-2 text-emerald-400/90">
-                                Pay with mobile money using the organizer&apos;s instructions, then enter your reference below.
+                            Connect Freighter, then add how we should list you and your email for confirmations.
+                            {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && eventAcceptsStellar(selectedEvent) ? (
+                              <span className="block mt-2 text-violet-300/90">
+                                This ticket costs {selectedEvent.ticketPriceUsdc} USDC on Stellar.
                               </span>
                             ) : null}
                           </p>
-                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                          eventAcceptsUsdc(selectedEvent) &&
-                          eventAcceptsMobileMoney(selectedEvent) ? (
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setBlockchainPayMode('usdc')}
-                                className={`flex-1 py-2 text-[8px] font-black uppercase tracking-widest border ${
-                                  blockchainPayMode === 'usdc'
-                                    ? 'bg-white text-black border-white'
-                                    : 'border-white/15 text-white/50 hover:text-white'
-                                }`}
-                              >
-                                Pay USDC
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setBlockchainPayMode('mobile')}
-                                className={`flex-1 py-2 text-[8px] font-black uppercase tracking-widest border ${
-                                  blockchainPayMode === 'mobile'
-                                    ? 'bg-emerald-600/30 text-emerald-200 border-emerald-500/40'
-                                    : 'border-white/15 text-white/50 hover:text-white'
-                                }`}
-                              >
-                                Mobile money
-                              </button>
-                            </div>
-                          ) : null}
-                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                          blockchainPayMode === 'mobile' &&
-                          eventAcceptsMobileMoney(selectedEvent) &&
-                          selectedEvent.mobileMoneyInstructions ? (
-                            <div className="text-[11px] text-white/75 whitespace-pre-wrap leading-relaxed border border-white/10 p-3 bg-black/40">
-                              {selectedEvent.mobileMoneyInstructions}
-                            </div>
-                          ) : null}
-                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                          blockchainPayMode === 'mobile' &&
-                          eventAcceptsMobileMoney(selectedEvent) ? (
-                            <div className="space-y-2">
-                              <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
-                                Mobile-money reference *
-                              </label>
-                              <input
-                                type="text"
-                                required
-                                value={blockchainPayRef}
-                                onChange={e => setBlockchainPayRef(e.target.value)}
-                                placeholder="Transaction ID from your provider"
-                                className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
-                              />
-                            </div>
-                          ) : null}
                           <div className="space-y-2">
                             <label className="text-[8px] tracking-[0.2em] uppercase text-white/40 block">
                               First name or organization name *
@@ -3802,39 +3707,21 @@ function HomeContent() {
                             <p className="text-[9px] text-amber-400/80">
                               {userMint?.error
                                 ? `Checked in — mint pending: ${userMint.error}`
-                                : mintConfig.soroban && mintConfig.base
-                                  ? 'Checked in — connect Freighter and/or Base wallet to mint.'
-                                  : mintConfig.base
-                                    ? 'Checked in — connect Base wallet to mint your proof.'
-                                    : 'Checked in — connect Freighter to mint your proof.'}
+                                : 'Checked in — connect Freighter to mint your proof.'}
                             </p>
-                            {mintConfig.soroban ? (
-                              <ConnectStellarButton
-                                onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                              />
-                            ) : null}
-                            {mintConfig.base && !address ? (
-                              <button
-                                type="button"
-                                onClick={() => openConnectModal?.()}
-                                className="w-full py-2.5 border border-white/20 hover:bg-white/5 text-[9px] font-bold tracking-[0.2em] uppercase"
-                              >
-                                Connect Base
-                              </button>
-                            ) : null}
+                            <ConnectStellarButton
+                              onConnected={(addr) => {
+                                setStellarAddress(addr);
+                                showWalletToast('Freighter connected — tap Mint proof.');
+                              }}
+                            />
                             <button
                               type="button"
                               disabled={mintingProof}
                               onClick={() => void mintProofForSelectedEvent()}
                               className="w-full py-2.5 border border-white/20 hover:bg-white hover:text-black transition-colors text-[9px] font-bold tracking-[0.2em] uppercase disabled:opacity-50"
                             >
-                              {mintingProof
-                                ? 'Minting…'
-                                : mintConfig.soroban && mintConfig.base
-                                  ? 'Mint proof'
-                                  : mintConfig.base
-                                    ? 'Mint proof on Base'
-                                    : 'Mint proof on Stellar'}
+                              {mintingProof ? 'Minting…' : 'Mint proof on Stellar'}
                             </button>
                           </div>
                         )}
@@ -4010,11 +3897,7 @@ function HomeContent() {
                   ? `Your attendance proof was minted on ${mintChainLabel(mintReceipt.chain)}.`
                   : mintReceipt?.error
                     ? `Checked in. Mint: ${mintReceipt.error}`
-                    : mintConfig.soroban && mintConfig.base
-                      ? 'Your presence is recorded. Connect Freighter and/or Base to mint.'
-                      : mintConfig.base
-                        ? 'Your presence is recorded. Connect Base wallet to mint.'
-                        : 'Your presence is recorded. Connect Freighter to mint on Soroban.'}
+                    : 'Your presence is recorded. Connect Freighter to mint on Soroban.'}
               </p>
               {mintReceipt?.ok && mintReceipt.tokenId ? (
                 <p className="text-[10px] font-mono text-white/40 mb-8">
@@ -4024,30 +3907,18 @@ function HomeContent() {
               ) : null}
               {!mintReceipt?.ok && selectedEvent ? (
                 <div className="w-full max-w-xs mx-auto mb-8 space-y-3">
-                  {mintConfig.soroban ? (
-                    <ConnectStellarButton
-                      onConnected={() => showWalletToast('Freighter connected — tap Mint proof.')}
-                    />
-                  ) : null}
-                  {mintConfig.base && !address ? (
-                    <button
-                      type="button"
-                      onClick={() => openConnectModal?.()}
-                      className="w-full py-3 border border-white/20 hover:bg-white/5 text-[10px] font-bold tracking-[0.2em] uppercase"
-                    >
-                      Connect Base
-                    </button>
-                  ) : null}
+                  <ConnectStellarButton
+                    onConnected={(addr) => {
+                      setStellarAddress(addr);
+                      showWalletToast('Freighter connected — tap Mint proof.');
+                    }}
+                  />
                   <button
                     type="button"
                     className="w-full py-3 border border-white/20 hover:bg-white hover:text-black transition-colors text-[10px] font-bold tracking-[0.2em] uppercase"
                     onClick={() => void mintProofForSelectedEvent()}
                   >
-                    {mintConfig.soroban && mintConfig.base
-                      ? 'Mint proof'
-                      : mintConfig.base
-                        ? 'Mint proof on Base'
-                        : 'Mint proof on Stellar'}
+                    Mint proof on Stellar
                   </button>
                 </div>
               ) : null}
@@ -4292,7 +4163,7 @@ function HomeContent() {
         </div>
         <div className="border-t border-white/[0.03] px-5 py-3 text-center">
           <span className="block text-[7px] font-mono tracking-[0.16em] sm:tracking-[0.28em] text-white/20 uppercase leading-relaxed">
-            © 2026 GATE PROTOCOL — Built on Base
+            © 2026 GATE PROTOCOL. Built on Stellar.
           </span>
         </div>
       </footer>

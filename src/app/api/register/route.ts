@@ -97,8 +97,14 @@ async function resolvePaidTicketOpts(
     if (eventAcceptsStellar(ev))
         allowed.push('crypto on Stellar (wallet pay or 64-char tx hash)');
     if (eventAcceptsStepay(ev)) allowed.push('Pay with Stepay');
-    if (eventAcceptsMobileMoney(ev))
-        allowed.push('mobile money (follow organizer instructions, then enter your payment reference)');
+
+    if (mobileRef.length >= 4) {
+        return {
+            ok: false,
+            error: 'Mobile money registration is removed. Pay with Stellar or Stepay.',
+            status: 400,
+        };
+    }
 
     if (txHash) {
         // Prefer explicit paymentRail; otherwise infer from hash shape (Base = 0x…, Stellar = 64 hex).
@@ -141,21 +147,6 @@ async function resolvePaidTicketOpts(
             payment: { txHash, rail: 'base' },
             paymentLabel: 'crypto on Base',
             paymentVerified: true,
-        };
-    }
-    if (mobileRef.length >= 4) {
-        if (!eventAcceptsMobileMoney(ev)) {
-            return {
-                ok: false,
-                error: 'This organizer is not accepting mobile-money references for this ticket.',
-                status: 400,
-            };
-        }
-        return {
-            ok: true,
-            payment: { mobileRef },
-            paymentLabel: 'mobile money (awaiting host confirmation)',
-            paymentVerified: false,
         };
     }
     return {

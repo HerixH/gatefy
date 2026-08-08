@@ -117,7 +117,7 @@ export function OrganizerManageModal({
                 isBlockchain: event.isBlockchain !== false,
                 ticketPriceUsdc: ticketAmount ?? undefined,
                 ticketAcceptUsdc: form.ticketAcceptUsdc,
-                ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+                ticketAcceptMobileMoney: false,
                 ticketAcceptStellar: form.ticketAcceptStellar,
                 ticketAcceptStepay: form.ticketAcceptStepay,
             });
@@ -140,9 +140,9 @@ export function OrganizerManageModal({
                     location: form.location.trim(),
                     maxAttendees: maxPatch,
                     ticketPriceUsdc: ticketAmount,
-                    mobileMoneyInstructions: form.mobileMoneyInstructions.trim() || null,
+                    mobileMoneyInstructions: null,
                     ticketAcceptUsdc: form.ticketAcceptUsdc,
-                    ticketAcceptMobileMoney: form.ticketAcceptMobileMoney,
+                    ticketAcceptMobileMoney: false,
                     ticketAcceptStellar: form.ticketAcceptStellar,
                     ticketAcceptStepay: form.ticketAcceptStepay,
                     bannerUrl: form.bannerUrl.trim() || null,
@@ -307,43 +307,18 @@ export function OrganizerManageModal({
                                         className={`${inputCls} [color-scheme:dark]`}
                                     />
                                 </div>
-                                <Field label="Mobile money instructions">
-                                    <textarea
-                                        value={form.mobileMoneyInstructions}
-                                        onChange={(e) => setForm((f) => ({ ...f, mobileMoneyInstructions: e.target.value }))}
-                                        rows={3}
-                                        className={`${inputCls} resize-none`}
-                                    />
-                                </Field>
                                 {(() => {
                                     const tp = parseFloat(form.ticketPriceUsdc.trim());
                                     const paid = Number.isFinite(tp) && tp > 0;
                                     if (!paid) return null;
                                     return (
-                                        <div className="space-y-3 p-3 border border-cyan-500/25 bg-cyan-500/[0.04]">
-                                            <p className="text-[9px] uppercase tracking-widest text-cyan-400 font-black">
+                                        <div className="space-y-3 p-3 border border-violet-500/25 bg-violet-500/[0.04]">
+                                            <p className="text-[9px] uppercase tracking-widest text-violet-300 font-black">
                                                 Checkout rails — same ticket
                                             </p>
                                             <p className="text-[8px] text-white/35 font-mono">
-                                                One ticket amount. Enable Base, Stellar, and/or mobile for checkout.
+                                                One ticket amount. Enable Stellar and/or Stepay.
                                             </p>
-                                            {event.isBlockchain !== false ? (
-                                                <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={form.ticketAcceptUsdc}
-                                                        onChange={(e) =>
-                                                            setForm((f) => ({ ...f, ticketAcceptUsdc: e.target.checked }))
-                                                        }
-                                                    />
-                                                    Base — crypto (wallet signup)
-                                                </label>
-                                            ) : (
-                                                <p className="text-[9px] text-white/40">
-                                                    Email signup: Base crypto needs wallet registration. Enable Stellar
-                                                    and/or mobile below.
-                                                </p>
-                                            )}
                                             <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
                                                 <input
                                                     type="checkbox"
@@ -352,11 +327,12 @@ export function OrganizerManageModal({
                                                         setForm((f) => ({
                                                             ...f,
                                                             ticketAcceptStellar: e.target.checked,
+                                                            ticketAcceptMobileMoney: false,
                                                         }))
                                                     }
                                                     className="accent-violet-400"
                                                 />
-                                                Stellar — crypto
+                                                Stellar — USDC on Stellar
                                             </label>
                                             <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
                                                 <input
@@ -366,25 +342,12 @@ export function OrganizerManageModal({
                                                         setForm((f) => ({
                                                             ...f,
                                                             ticketAcceptStepay: e.target.checked,
+                                                            ticketAcceptMobileMoney: false,
                                                         }))
                                                     }
                                                     className="accent-emerald-400"
                                                 />
-                                                Stepay — in-app (mobile money → USDC)
-                                            </label>
-                                            <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={form.ticketAcceptMobileMoney}
-                                                    onChange={(e) =>
-                                                        setForm((f) => ({
-                                                            ...f,
-                                                            ticketAcceptMobileMoney: e.target.checked,
-                                                        }))
-                                                    }
-                                                    className="accent-emerald-500"
-                                                />
-                                                Mobile money — local pay + reference
+                                                Stepay — in-app checkout
                                             </label>
                                         </div>
                                     );
