@@ -187,7 +187,7 @@ export function CreateEventWizard({
                       ticketAcceptUsdc: form.ticketAcceptUsdc,
                       ticketAcceptMobileMoney: false,
                       ticketAcceptStellar: form.ticketAcceptStellar === true,
-                      ticketAcceptStepay: form.ticketAcceptStepay === true,
+                      ticketAcceptStepay: false,
                   })
                 : 'No payment',
             capacity: form.maxAttendees.trim() ? `${form.maxAttendees} max` : 'Unlimited',
@@ -228,22 +228,8 @@ export function CreateEventWizard({
             return null;
         }
         if (id === 'tickets') {
-            if (
-                paidTicket > 0 &&
-                form.isBlockchain &&
-                !form.ticketAcceptUsdc &&
-                form.ticketAcceptStellar !== true &&
-                form.ticketAcceptStepay !== true
-            ) {
-                return 'Enable Stellar, Stepay, and/or Base for a paid ticket.';
-            }
-            if (
-                paidTicket > 0 &&
-                !form.isBlockchain &&
-                form.ticketAcceptStellar !== true &&
-                form.ticketAcceptStepay !== true
-            ) {
-                return 'Enable Stellar and/or Stepay for email signup paid tickets.';
+            if (paidTicket > 0 && form.ticketAcceptStellar !== true) {
+                return 'Enable Stellar checkout for a paid ticket.';
             }
             return null;
         }
@@ -658,6 +644,7 @@ export function CreateEventWizard({
                                                     setForm((f) => ({
                                                         ...f,
                                                         ticketAcceptStellar: e.target.checked,
+                                                        ticketAcceptStepay: false,
                                                         ticketAcceptMobileMoney: false,
                                                     }))
                                                 }
@@ -666,24 +653,6 @@ export function CreateEventWizard({
                                             <span className="text-[10px] text-white/70">
                                                 <span className="text-violet-300 font-bold">Stellar</span> — USDC on
                                                 Stellar (Freighter)
-                                            </span>
-                                        </label>
-                                        <label className="flex items-start gap-3 cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={form.ticketAcceptStepay === true}
-                                                onChange={(e) =>
-                                                    setForm((f) => ({
-                                                        ...f,
-                                                        ticketAcceptStepay: e.target.checked,
-                                                        ticketAcceptMobileMoney: false,
-                                                    }))
-                                                }
-                                                className="mt-1 accent-emerald-400"
-                                            />
-                                            <span className="text-[10px] text-white/70">
-                                                <span className="text-emerald-300 font-bold">Stepay</span> — in-app
-                                                checkout via stepay.pro
                                             </span>
                                         </label>
                                     </div>

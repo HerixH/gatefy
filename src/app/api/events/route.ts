@@ -74,7 +74,8 @@ export async function POST(request: Request) {
         const acceptUsdc = ticketAcceptUsdc !== false;
         const acceptMobile = false; // Mobile money removed — Stellar / Stepay
         const acceptStellar = ticketAcceptStellar === true;
-        const acceptStepay = ticketAcceptStepay === true;
+        const acceptStepay = false; // Stepay checkout hidden — Stellar only for now
+        void ticketAcceptStepay;
         const mmInstr = undefined;
         void ticketAcceptMobileMoney;
         void mobileMoneyInstructions;
@@ -298,8 +299,8 @@ export async function PATCH(request: Request) {
         if ('ticketAcceptStellar' in body && typeof body.ticketAcceptStellar === 'boolean') {
             patch.ticketAcceptStellar = body.ticketAcceptStellar;
         }
-        if ('ticketAcceptStepay' in body && typeof body.ticketAcceptStepay === 'boolean') {
-            patch.ticketAcceptStepay = body.ticketAcceptStepay;
+        if ('ticketAcceptStepay' in body) {
+            patch.ticketAcceptStepay = false;
         }
 
         // Soft-cancel / restore (upcoming only). Admin takedowns cannot be restored by hosts.
@@ -358,10 +359,7 @@ export async function PATCH(request: Request) {
             patch.ticketAcceptStellar !== undefined
                 ? patch.ticketAcceptStellar
                 : event.ticketAcceptStellar === true;
-        const mergedStepay =
-            patch.ticketAcceptStepay !== undefined
-                ? patch.ticketAcceptStepay
-                : event.ticketAcceptStepay === true;
+        const mergedStepay = false;
 
         if (!onlyCancelToggle) {
             const paymentMerged = validateEventPaymentConfig({

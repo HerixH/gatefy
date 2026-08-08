@@ -13,8 +13,8 @@ import { Scanner } from '@/components/Scanner';
 import { ConnectStellarButton } from '@/components/ConnectStellarButton';
 import { ConnectWalletButton } from '@/components/ConnectWalletButton';
 import { CreateEventWizard } from '@/components/CreateEventWizard';
-import { StepayPayButton } from '@/components/StepayPayButton';
 import { EventLocationMapLazy } from '@/components/EventLocationMapLazy';
+import { StellarPayPanel } from '@/components/StellarPayPanel';
 import { EventLocationField } from '@/components/EventLocationField';
 import { EventsNearMe } from '@/components/EventsNearMe';
 import { connectFreighter } from '@/lib/stellar-freighter-pay';
@@ -27,7 +27,7 @@ import {
 } from '@/lib/event-organizer';
 import {
   eventAcceptsMobileMoney,
-  eventAcceptsStepay,
+  eventAcceptsStellar,
   eventAcceptsUsdc,
   formatEventTicketSummary,
   isPaidRegistration,
@@ -132,7 +132,7 @@ interface Event {
   ticketAcceptMobileMoney?: boolean;
   /** Paid flow: accept Stellar USDC (opt-in). */
   ticketAcceptStellar?: boolean;
-  /** Paid flow: accept Pay with Stepay (opt-in). */
+  /** @deprecated Stepay checkout hidden for now. */
   ticketAcceptStepay?: boolean;
 }
 
@@ -204,6 +204,7 @@ function HomeContent() {
   /** Which attendance mint chains the server has enabled. */
   const [mintConfig, setMintConfig] = useState({ soroban: true, base: false });
   const [stepayEnabled, setStepayEnabled] = useState(false);
+  const [stellarPayTxHash, setStellarPayTxHash] = useState('');
   const [registering, setRegistering] = useState(false);
   const [normalSignupEmail, setNormalSignupEmail] = useState('');
   const [normalSignupName, setNormalSignupName] = useState('');
@@ -854,6 +855,8 @@ function HomeContent() {
     mobileMoneyInstructions: '' as string,
     ticketAcceptUsdc: true,
     ticketAcceptMobileMoney: false,
+    ticketAcceptStellar: false,
+    ticketAcceptStepay: false,
     bannerUrl: '',
   });
   const [manageBannerUploading, setManageBannerUploading] = useState(false);
@@ -1137,7 +1140,7 @@ function HomeContent() {
         ticketAcceptUsdc: form.ticketAcceptUsdc,
         ticketAcceptMobileMoney: false,
         ticketAcceptStellar: form.ticketAcceptStellar === true,
-        ticketAcceptStepay: form.ticketAcceptStepay === true,
+        ticketAcceptStepay: false,
       });
       if (!pv.ok) {
         setCreateError(pv.error);
@@ -1147,7 +1150,7 @@ function HomeContent() {
       payload.ticketAcceptUsdc = form.ticketAcceptUsdc;
       payload.ticketAcceptMobileMoney = false;
       payload.ticketAcceptStellar = form.ticketAcceptStellar === true;
-      payload.ticketAcceptStepay = form.ticketAcceptStepay === true;
+      payload.ticketAcceptStepay = false;
       if (address) {
         payload.organizer = address;
       } else {
@@ -1219,7 +1222,9 @@ function HomeContent() {
       ticketPriceUsdc: ev.ticketPriceUsdc != null && ev.ticketPriceUsdc > 0 ? String(ev.ticketPriceUsdc) : '',
       mobileMoneyInstructions: ev.mobileMoneyInstructions || '',
       ticketAcceptUsdc: ev.ticketAcceptUsdc !== false,
-      ticketAcceptMobileMoney: ev.ticketAcceptMobileMoney !== false,
+      ticketAcceptMobileMoney: false,
+      ticketAcceptStellar: ev.ticketAcceptStellar === true,
+      ticketAcceptStepay: false,
       bannerUrl: ev.bannerUrl || '',
     });
     setShowManageEvent(true);
@@ -1264,7 +1269,7 @@ function HomeContent() {
         ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
         ticketAcceptMobileMoney: false,
         ticketAcceptStellar: manageForm.ticketAcceptStellar,
-        ticketAcceptStepay: manageForm.ticketAcceptStepay,
+        ticketAcceptStepay: false,
       });
       if (!payCheck.ok) {
         setManageError(payCheck.error);
@@ -1287,7 +1292,7 @@ function HomeContent() {
         ticketAcceptUsdc: manageForm.ticketAcceptUsdc,
         ticketAcceptMobileMoney: false,
         ticketAcceptStellar: manageForm.ticketAcceptStellar,
-        ticketAcceptStepay: manageForm.ticketAcceptStepay,
+        ticketAcceptStepay: false,
         bannerUrl: manageForm.bannerUrl.trim() || null,
       };
 
@@ -1570,6 +1575,7 @@ function HomeContent() {
       return;
     }
     setSelectedEvent(ev);
+    setStellarPayTxHash('');
   }, [searchParams, events, pathname, router]);
 
   // Remaining seats = capacity minus registrations (so it updates after someone registers)
@@ -2170,21 +2176,14 @@ function HomeContent() {
       return;
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
-    const useUsdc =
-      price > 0 && eventAcceptsUsdc(selectedEvent) && blockchainPayMode === 'usdc';
     const useStellar = price > 0 && eventAcceptsStellar(selectedEvent);
-    const useStepay = price > 0 && eventAcceptsStepay(selectedEvent) && stepayEnabled;
 
-    if (price > 0 && !useUsdc && !useStellar && !useStepay) {
+    if (price > 0 && !useStellar) {
       showWalletToast('No payment method is enabled for this ticket. Contact the organizer.');
       return;
     }
-    if (useStepay && !useStellar && !useUsdc) {
-      showWalletToast('Use Pay with Stepay to complete payment.');
-      return;
-    }
-    if (useUsdc && !address) {
-      showWalletToast('Base USDC needs a Base wallet. Use Stellar or Stepay if the host enabled them.');
+    if (useStellar && !stellarPayTxHash.trim()) {
+      showWalletToast('Pay with Freighter (Stellar) first, then register.');
       return;
     }
     if (useStellar && !stellar) {
@@ -2193,21 +2192,7 @@ function HomeContent() {
     }
     setRegistering(true);
     try {
-      let paymentTxHash: string | undefined;
-      if (useUsdc) {
-        if (DEV_MODE) {
-          paymentTxHash = `0xDEV${Date.now().toString(16)}`;
-        } else {
-          const hash = await writeContractAsync({
-            address: USDC_ADDRESS,
-            abi: ERC20_ABI,
-            functionName: 'transfer',
-            args: [TREASURY_ADDRESS, parseUnits(String(price), 6)],
-          });
-          await waitForTransactionReceipt(wagmiConfig, { hash });
-          paymentTxHash = hash;
-        }
-      }
+      const paymentTxHash = useStellar ? stellarPayTxHash.trim() : undefined;
       const res = await fetch('/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2217,7 +2202,7 @@ function HomeContent() {
           ...(stellar ? { stellarAddress: stellar } : {}),
           email: emailTrim,
           name: nameTrim,
-          ...(paymentTxHash ? { paymentTxHash, paymentRail: 'base' } : {}),
+          ...(paymentTxHash ? { paymentTxHash, paymentRail: 'stellar' } : {}),
         }),
       });
       const data = await res.json();
@@ -2284,16 +2269,14 @@ function HomeContent() {
     }
     const price = selectedEvent.ticketPriceUsdc ?? 0;
     if (price > 0) {
-      if (eventAcceptsStepay(selectedEvent) && stepayEnabled) {
-        showWalletToast('Use Pay with Stepay below to complete payment in-app.');
+      if (!eventAcceptsStellar(selectedEvent)) {
+        showWalletToast('This event has no Stellar checkout enabled. Ask the host to turn on Stellar.');
         return;
       }
-      if (eventAcceptsStellar(selectedEvent)) {
-        showWalletToast('Pay with Freighter (Stellar), then register — or use Stepay if enabled.');
+      if (!stellarPayTxHash.trim()) {
+        showWalletToast('Pay with Freighter (Stellar) below, then tap Register.');
         return;
       }
-      showWalletToast('This event has no email payment rail enabled. Ask the host to turn on Stellar or Stepay.');
-      return;
     }
     setRegistering(true);
     try {
@@ -2304,6 +2287,13 @@ function HomeContent() {
           eventId: selectedEvent.id,
           email,
           name: nameTrim,
+          ...(price > 0 && stellarPayTxHash.trim()
+            ? {
+                paymentTxHash: stellarPayTxHash.trim(),
+                paymentRail: 'stellar',
+                stellarAddress: stellarAddress || readStellarAddress() || undefined,
+              }
+            : {}),
         }),
       });
       const data = await res.json();
@@ -3101,6 +3091,7 @@ function HomeContent() {
                               setManageForm((f) => ({
                                 ...f,
                                 ticketAcceptStellar: e.target.checked,
+                                ticketAcceptStepay: false,
                                 ticketAcceptMobileMoney: false,
                               }))
                             }
@@ -3108,23 +3099,6 @@ function HomeContent() {
                           />
                           <span className="text-[10px] text-white/70">
                             Accept <strong className="text-violet-300">Stellar</strong> (USDC / Freighter)
-                          </span>
-                        </label>
-                        <label className="flex items-start gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={manageForm.ticketAcceptStepay}
-                            onChange={(e) =>
-                              setManageForm((f) => ({
-                                ...f,
-                                ticketAcceptStepay: e.target.checked,
-                                ticketAcceptMobileMoney: false,
-                              }))
-                            }
-                            className="mt-0.5 accent-emerald-400"
-                          />
-                          <span className="text-[10px] text-white/70">
-                            Accept <strong className="text-emerald-300">Stepay</strong>
                           </span>
                         </label>
                       </div>
@@ -3303,23 +3277,15 @@ function HomeContent() {
                         : null}
                     </p>
                     <ul className="text-[9px] text-white/65 space-y-1 list-none font-mono leading-snug">
-                      {eventAcceptsStellar(selectedEvent) && (
+                      {eventAcceptsStellar(selectedEvent) ? (
                         <li>
                           <span className="text-violet-300/90 font-bold">Stellar</span>: USDC via Freighter.
                         </li>
-                      )}
-                      {eventAcceptsStepay(selectedEvent) && (
-                        <li>
-                          <span className="text-emerald-300/90 font-bold">Stepay</span>: in-app checkout via stepay.pro.
-                        </li>
-                      )}
-                      {!eventAcceptsStellar(selectedEvent) &&
-                      !eventAcceptsStepay(selectedEvent) &&
-                      selectedEvent.isBlockchain === false ? (
+                      ) : (
                         <li className="text-amber-400/80">
-                          Check with the host — no email payment rail is listed for this ticket.
+                          Check with the host — Stellar checkout is not enabled for this ticket.
                         </li>
-                      ) : null}
+                      )}
                     </ul>
                   </div>
                 )}
@@ -3436,20 +3402,13 @@ function HomeContent() {
                             />
                           </div>
                           {(selectedEvent.ticketPriceUsdc ?? 0) > 0 &&
-                          eventAcceptsStepay(selectedEvent) &&
-                          stepayEnabled ? (
-                            <StepayPayButton
-                              eventId={selectedEvent.id}
-                              email={normalSignupEmail}
-                              name={normalSignupName}
+                          eventAcceptsStellar(selectedEvent) ? (
+                            <StellarPayPanel
                               amountUsdc={selectedEvent.ticketPriceUsdc!}
                               disabled={registering || !!ticketClaim?.sending}
-                              onAlreadyRegistered={(info) => {
-                                void startTicketClaim({
-                                  eventId: selectedEvent.id,
-                                  email: info.email ?? normalSignupEmail,
-                                  name: info.name ?? normalSignupName,
-                                });
+                              onPaid={(txHash) => {
+                                setStellarPayTxHash(txHash);
+                                showWalletToast('Stellar payment confirmed — tap Register.');
                               }}
                             />
                           ) : null}
@@ -3648,13 +3607,28 @@ function HomeContent() {
                               className="w-full bg-white/[0.04] border border-white/10 px-4 py-3 text-white text-sm font-mono placeholder:text-white/20 focus:outline-none focus:border-white/25"
                             />
                           </div>
+                          {(selectedEvent.ticketPriceUsdc ?? 0) > 0 && eventAcceptsStellar(selectedEvent) ? (
+                            <StellarPayPanel
+                              amountUsdc={selectedEvent.ticketPriceUsdc!}
+                              memoHint={blockchainSignupEmail}
+                              disabled={registering}
+                              onPaid={(txHash) => {
+                                setStellarPayTxHash(txHash);
+                                showWalletToast('Stellar payment confirmed — tap Register.');
+                              }}
+                            />
+                          ) : null}
                           <button
                             type="submit"
                             disabled={registering}
                             className="w-full py-4 bg-white text-black hover:bg-neutral-200 transition-all group flex items-center justify-center gap-3 disabled:opacity-50"
                           >
                             <span className="tracking-[0.2em] uppercase text-sm font-bold">
-                              {registering ? 'Processing...' : 'Register for Event'}
+                              {registering
+                                ? 'Processing...'
+                                : (selectedEvent.ticketPriceUsdc ?? 0) > 0
+                                  ? 'Register (after Stellar pay)'
+                                  : 'Register for Event'}
                             </span>
                           </button>
                         </form>

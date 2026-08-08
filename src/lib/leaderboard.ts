@@ -28,11 +28,6 @@ export interface LeaderboardOrganizer {
     walletSignupEvents: number;
 }
 
-function truncateWalletAddr(w: string): string {
-    if (!w || w.length < 14) return w;
-    return `${w.slice(0, 6)}...${w.slice(-4)}`;
-}
-
 export async function getLeaderboardAttendees(limit = 50): Promise<LeaderboardAttendee[]> {
     if (!isSupabaseConfigured) return [];
     const [records, registrations] = await Promise.all([getAttendance(), getRegistrations()]);
@@ -50,19 +45,13 @@ export async function getLeaderboardAttendees(limit = 50): Promise<LeaderboardAt
 
     for (const r of records) {
         if (!r.eventId) continue;
-        if (r.wallet) {
-            const w = r.wallet.trim().toLowerCase();
-            const key = `w:${w}`;
-            const cur = counts.get(key) ?? { eventCount: 0, wallet: w, email: null };
-            cur.eventCount += 1;
-            counts.set(key, cur);
-        } else if (r.email) {
-            const em = r.email.trim().toLowerCase();
-            const key = `e:${em}`;
-            const cur = counts.get(key) ?? { eventCount: 0, wallet: null, email: em };
-            cur.eventCount += 1;
-            counts.set(key, cur);
-        }
+        // Leaderboard shows email attendees only (hide Base / wallet address rows).
+        const em = (r.email ?? '').trim().toLowerCase();
+        if (!em) continue;
+        const key = `e:${em}`;
+        const cur = counts.get(key) ?? { eventCount: 0, wallet: null, email: em };
+        cur.eventCount += 1;
+        counts.set(key, cur);
     }
 
     const sorted = [...counts.values()]
@@ -70,19 +59,11 @@ export async function getLeaderboardAttendees(limit = 50): Promise<LeaderboardAt
         .slice(0, limit);
 
     return sorted.map((s, i) => {
-        let displayLabel: string;
-        const participantType: 'wallet' | 'email' = s.wallet ? 'wallet' : 'email';
-        if (s.wallet) {
-            displayLabel = truncateWalletAddr(s.wallet);
-        } else if (s.email) {
-            displayLabel = emailToName.get(s.email) ?? 'Guest';
-        } else {
-            displayLabel = '—';
-        }
+        const displayLabel = s.email ? emailToName.get(s.email) ?? 'Guest' : '—';
         return {
             rank: i + 1,
             displayLabel,
-            participantType,
+            participantType: 'email' as const,
             eventCount: s.eventCount,
         };
     });
@@ -119,18 +100,15 @@ export async function getLeaderboardOrganizers(limit = 50): Promise<LeaderboardO
     }
     const sorted = [...byOrganizer.entries()]
         .map(([organizerId, data]) => ({ organizerId, ...data }))
+        // Hide wallet organisers (0x… Base hosts); email hosts only.
+        .filter((s) => isEmailOrganizerId(s.organizerId))
         .sort((a, b) => b.totalAttendees - a.totalAttendees)
         .slice(0, limit);
     return sorted.map((s, i) => {
-        const isEmail = isEmailOrganizerId(s.organizerId);
-        const organizerType: 'wallet' | 'email' = isEmail ? 'email' : 'wallet';
-        const displayLabel = isEmail
-            ? (s.displayName ?? 'Organiser')
-            : truncateWalletAddr(s.organizerId);
         return {
             rank: i + 1,
-            displayLabel,
-            organizerType,
+            displayLabel: s.displayName ?? 'Organiser',
+            organizerType: 'email' as const,
             eventCount: s.eventCount,
             totalAttendees: s.totalAttendees,
             emailSignupEvents: s.emailSignupEvents,

@@ -10,7 +10,7 @@ const sections = [
     },
     {
         title: '2. The Service',
-        body: 'GATE PROTOCOL is an event hosting and attendance verification product. Hosts can create events, set capacity, issue check-in codes, manage rosters, and optionally sell tickets. Attendees can register, pay where required, and receive verified proof of presence. Features may include free or paid tickets, Stellar and Stepay checkout, QR check-in, and host dashboards. The Protocol is provided for lawful event and community use only.',
+        body: 'GATE PROTOCOL is an event hosting and attendance verification product. Hosts can create events, set capacity, issue check-in codes, manage rosters, and optionally sell tickets. Attendees can register, pay where required, and receive verified proof of presence. Features may include free or paid tickets, Stellar USDC checkout, QR check-in, and host dashboards. The Protocol is provided for lawful event and community use only.',
     },
     {
         title: '3. Host accounts and verification',
@@ -18,11 +18,11 @@ const sections = [
     },
     {
         title: '4. Tickets and payments',
-        body: 'Hosts may offer free events or paid tickets. For paid tickets, hosts enable Stellar and/or Stepay checkout. On-chain payments are verified against the configured treasury and network rules. Crypto transfers that are confirmed on-chain are final and irreversible. GATE PROTOCOL is not a bank, remittance provider, or escrow agent for host payouts unless expressly stated for a specific product feature.',
+        body: 'Hosts may offer free events or paid tickets. For paid tickets, hosts enable Stellar USDC checkout. On-chain payments are verified against the configured treasury and network rules. Crypto transfers that are confirmed on-chain are final and irreversible. GATE PROTOCOL is not a bank, remittance provider, or escrow agent for host payouts unless expressly stated for a specific product feature.',
     },
     {
         title: '5. Organiser responsibilities',
-        body: 'Hosts are responsible for accurate event details, lawful ticketing, clear payment options (Stellar and/or Stepay), capacity limits, cancelling only upcoming events when appropriate, and handling disputes with their attendees. Soft-cancelled events stop new signups; historical roster data may be retained. Hosts must not use the Protocol for fraud, scams, unlicensed lottery activity, or other illegal events.',
+        body: 'Hosts are responsible for accurate event details, lawful ticketing, clear payment options (Stellar), capacity limits, cancelling only upcoming events when appropriate, and handling disputes with their attendees. Soft-cancelled events stop new signups; historical roster data may be retained. Hosts must not use the Protocol for fraud, scams, unlicensed lottery activity, or other illegal events.',
     },
     {
         title: '6. Attendee registration and check-in',

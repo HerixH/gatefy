@@ -12,7 +12,6 @@ import {
 import { getEventById } from '@/lib/events';
 import {
     eventAcceptsMobileMoney,
-    eventAcceptsStepay,
     eventAcceptsStellar,
     eventAcceptsUsdc,
     type TicketPaymentFields,
@@ -96,12 +95,10 @@ async function resolvePaidTicketOpts(
     if (eventAcceptsUsdc(ev)) allowed.push('crypto on Base (0x… tx after wallet pay)');
     if (eventAcceptsStellar(ev))
         allowed.push('crypto on Stellar (wallet pay or 64-char tx hash)');
-    if (eventAcceptsStepay(ev)) allowed.push('Pay with Stepay');
-
     if (mobileRef.length >= 4) {
         return {
             ok: false,
-            error: 'Mobile money registration is removed. Pay with Stellar or Stepay.',
+            error: 'Mobile money registration is removed. Pay with Stellar USDC (Freighter).',
             status: 400,
         };
     }

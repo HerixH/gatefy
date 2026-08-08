@@ -107,7 +107,7 @@ export function validateCreateEventForm(
             ticketAcceptUsdc: form.ticketAcceptUsdc,
             ticketAcceptMobileMoney: false,
             ticketAcceptStellar: form.ticketAcceptStellar,
-            ticketAcceptStepay: form.ticketAcceptStepay,
+            ticketAcceptStepay: false,
         });
         if (!pv.ok) return { ok: false, error: pv.error };
     }

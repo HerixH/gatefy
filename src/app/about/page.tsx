@@ -51,7 +51,7 @@ export default function About() {
                         <p>
                             GATE PROTOCOL is a decentralised attendance verification system built on{' '}
                             <span className="text-white/90 font-medium">Stellar</span>. Organisers run events,
-                            check-ins, and ticketing in one place, with Stellar and Stepay checkout.
+                            check-ins, and ticketing in one place, with Stellar USDC checkout.
                         </p>
                         <p>
                             Unlike traditional ticketing systems that rely on centralised databases, GATE PROTOCOL uses
@@ -96,8 +96,8 @@ export default function About() {
                         <div>
                             <h2 className="text-lg font-black tracking-tight text-white mb-3 uppercase">Unified payments</h2>
                             <p>
-                                One ticket price. Hosts enable Stellar and/or Stepay for checkout, and guests pay with
-                                Freighter or Stepay at signup.
+                                One ticket price. Hosts enable Stellar checkout, and guests pay USDC with Freighter at
+                                signup.
                             </p>
                         </div>
                     </div>

@@ -10,7 +10,6 @@ import { ConnectWalletButton } from '@/components/ConnectWalletButton';
 import { readStellarAddress } from '@/lib/stellar-session';
 import {
     eventAcceptsMobileMoney,
-    eventAcceptsStepay,
     eventAcceptsStellar,
     eventAcceptsUsdc,
     formatEventTicketSummary,
@@ -953,10 +952,7 @@ function OrganizerDashboardInner() {
                                             {(selectedEvent.ticketPriceUsdc ?? 0) > 0 ? (
                                                 <p className="text-[8px] font-mono text-white/30">
                                                     Rails:{' '}
-                                                    {[
-                                                        eventAcceptsStellar(selectedEvent) ? 'Stellar' : null,
-                                                        eventAcceptsStepay(selectedEvent) ? 'Stepay' : null,
-                                                    ]
+                                                    {[eventAcceptsStellar(selectedEvent) ? 'Stellar' : null]
                                                         .filter(Boolean)
                                                         .join(' · ') || 'none'}
                                                     {selectedInsights && selectedInsights.unpaid > 0 ? (

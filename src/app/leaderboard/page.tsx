@@ -83,7 +83,7 @@ export default function LeaderboardPage() {
                         Leaderboard
                     </h1>
                     <p className="text-white/45 text-xs mb-6 max-w-sm leading-relaxed">
-                        Stats only, no explorer links. Email and wallet ranked the same.
+                        Stats only — ranked by email check-ins and email hosts.
                     </p>
 
                     <div className="flex gap-0 border-b border-white/10 mb-4">

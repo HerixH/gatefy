@@ -188,7 +188,7 @@ export async function createEvent(data: Omit<Event, 'id' | 'createdAt' | 'attend
         ticketAcceptUsdc: data.ticketAcceptUsdc !== false,
         ticketAcceptMobileMoney: false,
         ticketAcceptStellar: data.ticketAcceptStellar === true,
-        ticketAcceptStepay: data.ticketAcceptStepay === true,
+        ticketAcceptStepay: false,
     };
 
     if (isSupabaseConfigured) {

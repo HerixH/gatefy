@@ -1,6 +1,6 @@
 /**
  * Ticket payment rules shared by API and UI. No Node/fs — safe for client bundles.
- * Rails: Stellar USDC and Stepay (Base crypto optional for legacy; mobile money removed).
+ * Rails: Stellar USDC only for now (Stepay + mobile money + Base checkout hidden).
  */
 
 export type TicketPaymentFields = {
@@ -9,9 +9,9 @@ export type TicketPaymentFields = {
     ticketAcceptUsdc?: boolean;
     /** @deprecated Mobile money removed — ignored. */
     ticketAcceptMobileMoney?: boolean;
-    /** USDC on Stellar (Horizon-verified). Opt-in; default off for existing events. */
+    /** USDC on Stellar (Horizon-verified). */
     ticketAcceptStellar?: boolean;
-    /** Pay with Stepay checkout. Opt-in. */
+    /** @deprecated Stepay checkout hidden for now — ignored. */
     ticketAcceptStepay?: boolean;
 };
 
@@ -19,7 +19,7 @@ export function eventAcceptsUsdc(ev: Pick<TicketPaymentFields, 'ticketAcceptUsdc
     return ev.ticketAcceptUsdc !== false;
 }
 
-/** Always false — mobile money rail removed; use Stellar / Stepay. */
+/** Always false — mobile money rail removed. */
 export function eventAcceptsMobileMoney(
     _ev: Pick<TicketPaymentFields, 'ticketAcceptMobileMoney'>
 ): boolean {
@@ -30,8 +30,9 @@ export function eventAcceptsStellar(ev: Pick<TicketPaymentFields, 'ticketAcceptS
     return ev.ticketAcceptStellar === true;
 }
 
-export function eventAcceptsStepay(ev: Pick<TicketPaymentFields, 'ticketAcceptStepay'>): boolean {
-    return ev.ticketAcceptStepay === true;
+/** Always false — Stepay checkout hidden for now; Stellar only. */
+export function eventAcceptsStepay(_ev: Pick<TicketPaymentFields, 'ticketAcceptStepay'>): boolean {
+    return false;
 }
 
 export function validateEventPaymentConfig(
@@ -42,26 +43,11 @@ export function validateEventPaymentConfig(
     const price = event.ticketPriceUsdc != null && event.ticketPriceUsdc > 0 ? Number(event.ticketPriceUsdc) : 0;
     if (!(Number.isFinite(price) && price > 0)) return { ok: true };
 
-    const usdcOk = event.ticketAcceptUsdc !== false;
     const stellarOk = event.ticketAcceptStellar === true;
-    const stepayOk = event.ticketAcceptStepay === true;
-    if (!usdcOk && !stellarOk && !stepayOk) {
+    if (!stellarOk) {
         return {
             ok: false,
-            error: 'Paid events must accept at least one payment method (Stellar, Stepay, or Base).',
-        };
-    }
-    const bc = event.isBlockchain !== false;
-    if (bc && !usdcOk && !stellarOk && !stepayOk) {
-        return {
-            ok: false,
-            error: 'Wallet-based paid tickets need Stellar, Stepay, and/or Base. Enable a rail or set the ticket free.',
-        };
-    }
-    if (!bc && !stellarOk && !stepayOk) {
-        return {
-            ok: false,
-            error: 'Email-only paid tickets need Stellar and/or Stepay. Enable a payment rail or choose a free ticket.',
+            error: 'Paid events must enable Stellar checkout (USDC on Stellar).',
         };
     }
     return { ok: true };
@@ -82,9 +68,7 @@ export function formatEventTicketSummary(
     const price = ev.ticketPriceUsdc ?? 0;
     if (!(Number.isFinite(price) && price > 0)) return 'Free';
     const rails: string[] = [];
-    if (ev.isBlockchain !== false && eventAcceptsUsdc(ev)) rails.push('USDC');
     if (eventAcceptsStellar(ev)) rails.push('Stellar');
-    if (eventAcceptsStepay(ev)) rails.push('Stepay');
     return rails.length ? `Ticket ${price} · ${rails.join(' · ')}` : `Ticket ${price}`;
 }
 
@@ -100,7 +84,7 @@ export function isPendingMobileRegistration(status?: string | null): boolean {
 export function registrationPaymentLabel(status?: string | null): string {
     const st = (status ?? '').trim().toLowerCase();
     if (st === 'paid_crypto') return 'Crypto (Base)';
-    if (st === 'paid_stellar') return 'Crypto (Stellar / Stepay)';
+    if (st === 'paid_stellar') return 'Crypto (Stellar)';
     if (st === 'paid_mobile') return 'Legacy payment';
     if (st === 'pending_mobile') return 'Legacy payment (unpaid)';
     if (st === 'rejected_mobile') return 'Legacy payment (rejected)';

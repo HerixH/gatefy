@@ -119,7 +119,7 @@ export function OrganizerManageModal({
                 ticketAcceptUsdc: form.ticketAcceptUsdc,
                 ticketAcceptMobileMoney: false,
                 ticketAcceptStellar: form.ticketAcceptStellar,
-                ticketAcceptStepay: form.ticketAcceptStepay,
+                ticketAcceptStepay: false,
             });
             if (!payCheck.ok) {
                 setError(payCheck.error);
@@ -144,7 +144,7 @@ export function OrganizerManageModal({
                     ticketAcceptUsdc: form.ticketAcceptUsdc,
                     ticketAcceptMobileMoney: false,
                     ticketAcceptStellar: form.ticketAcceptStellar,
-                    ticketAcceptStepay: form.ticketAcceptStepay,
+                    ticketAcceptStepay: false,
                     bannerUrl: form.bannerUrl.trim() || null,
                 }),
             });
@@ -317,7 +317,7 @@ export function OrganizerManageModal({
                                                 Checkout rails — same ticket
                                             </p>
                                             <p className="text-[8px] text-white/35 font-mono">
-                                                One ticket amount. Enable Stellar and/or Stepay.
+                                                One ticket amount. Checkout is Stellar USDC only for now.
                                             </p>
                                             <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
                                                 <input
@@ -327,27 +327,13 @@ export function OrganizerManageModal({
                                                         setForm((f) => ({
                                                             ...f,
                                                             ticketAcceptStellar: e.target.checked,
+                                                            ticketAcceptStepay: false,
                                                             ticketAcceptMobileMoney: false,
                                                         }))
                                                     }
                                                     className="accent-violet-400"
                                                 />
-                                                Stellar — USDC on Stellar
-                                            </label>
-                                            <label className="flex gap-2 cursor-pointer text-[10px] text-white/70">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={form.ticketAcceptStepay}
-                                                    onChange={(e) =>
-                                                        setForm((f) => ({
-                                                            ...f,
-                                                            ticketAcceptStepay: e.target.checked,
-                                                            ticketAcceptMobileMoney: false,
-                                                        }))
-                                                    }
-                                                    className="accent-emerald-400"
-                                                />
-                                                Stepay — in-app checkout
+                                                Stellar — USDC on Stellar (Freighter)
                                             </label>
                                         </div>
                                     );
