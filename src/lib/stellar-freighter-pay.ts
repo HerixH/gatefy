@@ -2,7 +2,7 @@
 
 /**
  * Freighter Connect — sign & submit USDC ticket payments on Stellar.
- * Official SCF Integration List partner: Freighter Connect (SDF).
+ * Desktop: browser extension API. Mobile: WalletConnect → Freighter Mobile.
  */
 
 import {
@@ -26,6 +26,18 @@ import {
     clientStellarUsdcIssuer,
     formatStellarAmount,
 } from '@/lib/stellar-client-config';
+import {
+    clearStellarAddress,
+    readStellarConnectMode,
+    writeStellarAddress,
+    type StellarConnectMode,
+} from '@/lib/stellar-session';
+import {
+    connectWalletConnect,
+    disconnectWalletConnect,
+    isLikelyMobileDevice,
+    signXdrWithWalletConnect,
+} from '@/lib/stellar-walletconnect';
 
 export type FreighterPayResult =
     | { ok: true; hash: string; address: string }
@@ -45,16 +57,10 @@ export async function freighterAvailable(): Promise<boolean> {
     }
 }
 
-/** Request Freighter access; returns public key (G…). */
-export async function connectFreighter(): Promise<{ ok: true; address: string } | { ok: false; error: string }> {
+async function connectExtension(): Promise<
+    { ok: true; address: string } | { ok: false; error: string }
+> {
     try {
-        const available = await freighterAvailable();
-        if (!available) {
-            return {
-                ok: false,
-                error: 'Install a Stellar wallet extension, then refresh this page.',
-            };
-        }
         const access = await requestAccess();
         if (access.error) {
             return { ok: false, error: access.error.message || 'Wallet access denied' };
@@ -75,9 +81,43 @@ export async function connectFreighter(): Promise<{ ok: true; address: string } 
 }
 
 /**
- * Build a classic USDC payment, sign with Freighter, submit to Horizon.
- * @param amountUsdc human USDC amount
- * @param memo optional memo (max 28 bytes for text)
+ * Request Freighter access; returns public key (G…).
+ * Tries the browser extension first; falls back to WalletConnect (Freighter Mobile).
+ */
+export async function connectFreighter(): Promise<
+    { ok: true; address: string; mode: StellarConnectMode } | { ok: false; error: string }
+> {
+    const available = await freighterAvailable();
+    if (available) {
+        const r = await connectExtension();
+        if (!r.ok) return r;
+        writeStellarAddress(r.address, 'extension');
+        return { ok: true, address: r.address, mode: 'extension' };
+    }
+
+    // Mobile / no extension → WalletConnect deep-link into Freighter Mobile
+    const wc = await connectWalletConnect();
+    if (!wc.ok) {
+        const hint = isLikelyMobileDevice()
+            ? ' Install Freighter Mobile, then approve the WalletConnect prompt.'
+            : ' Install the Freighter browser extension, unlock it, and refresh — or use Freighter Mobile via WalletConnect.';
+        return { ok: false, error: `${wc.error}${hint}` };
+    }
+    writeStellarAddress(wc.address, 'walletconnect');
+    return { ok: true, address: wc.address, mode: 'walletconnect' };
+}
+
+/** Disconnect extension session cache and WalletConnect (if used). */
+export async function disconnectFreighter(): Promise<void> {
+    const mode = readStellarConnectMode();
+    clearStellarAddress();
+    if (mode === 'walletconnect') {
+        await disconnectWalletConnect();
+    }
+}
+
+/**
+ * Build a classic USDC payment, sign with Freighter (extension or WC), submit to Horizon.
  */
 export async function payTicketUsdcWithFreighter(
     amountUsdc: number,
@@ -97,6 +137,7 @@ export async function payTicketUsdcWithFreighter(
     const connected = await connectFreighter();
     if (!connected.ok) return connected;
     const address = connected.address;
+    const mode = connected.mode;
 
     const server = new Horizon.Server(clientStellarHorizonUrl());
     let account;
@@ -129,16 +170,26 @@ export async function payTicketUsdcWithFreighter(
     if (memoText) builder.addMemo(Memo.text(memoText));
 
     const tx = builder.setTimeout(180).build();
+    const unsignedXdr = tx.toXDR();
 
     try {
-        const signed = await signTransaction(tx.toXDR(), {
-            networkPassphrase: networkPassphrase(),
-            address,
-        });
-        if (signed.error) {
-            return { ok: false, error: signed.error.message || 'Wallet declined to sign' };
+        let signedXdr: string;
+        if (mode === 'walletconnect') {
+            const signed = await signXdrWithWalletConnect(unsignedXdr);
+            if (!signed.ok) return signed;
+            signedXdr = signed.signedXdr;
+        } else {
+            const signed = await signTransaction(unsignedXdr, {
+                networkPassphrase: networkPassphrase(),
+                address,
+            });
+            if (signed.error) {
+                return { ok: false, error: signed.error.message || 'Wallet declined to sign' };
+            }
+            signedXdr = signed.signedTxXdr;
         }
-        const signedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, networkPassphrase());
+
+        const signedTx = TransactionBuilder.fromXDR(signedXdr, networkPassphrase());
         const result = await server.submitTransaction(signedTx);
         const hash = (result as { hash?: string }).hash;
         if (!hash || !/^[a-fA-F0-9]{64}$/.test(hash)) {
@@ -146,7 +197,10 @@ export async function payTicketUsdcWithFreighter(
         }
         return { ok: true, hash, address };
     } catch (e: unknown) {
-        const anyErr = e as { response?: { data?: { extras?: { result_codes?: unknown } } }; message?: string };
+        const anyErr = e as {
+            response?: { data?: { extras?: { result_codes?: unknown } } };
+            message?: string;
+        };
         const codes = anyErr?.response?.data?.extras?.result_codes;
         if (codes) {
             return { ok: false, error: `Stellar rejected payment: ${JSON.stringify(codes)}` };

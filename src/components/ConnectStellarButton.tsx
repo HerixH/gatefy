@@ -1,12 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { connectFreighter } from '@/lib/stellar-freighter-pay';
-import {
-    clearStellarAddress,
-    readStellarAddress,
-    writeStellarAddress,
-} from '@/lib/stellar-session';
+import { connectFreighter, disconnectFreighter } from '@/lib/stellar-freighter-pay';
+import { readStellarAddress } from '@/lib/stellar-session';
 
 function shortAddr(addr: string) {
     if (addr.length < 12) return addr;
@@ -38,15 +34,16 @@ export function ConnectStellarButton({ className = '', compact = false, onConnec
             setError(r.error);
             return;
         }
-        writeStellarAddress(r.address);
         setAddress(r.address);
         onConnected?.(r.address);
     };
 
-    const disconnect = () => {
-        clearStellarAddress();
+    const disconnect = async () => {
+        setBusy(true);
+        await disconnectFreighter();
         setAddress(null);
         setError(null);
+        setBusy(false);
     };
 
     if (address) {
@@ -54,15 +51,16 @@ export function ConnectStellarButton({ className = '', compact = false, onConnec
             <div className={`flex flex-col items-stretch gap-1 ${className}`}>
                 <button
                     type="button"
-                    onClick={disconnect}
+                    disabled={busy}
+                    onClick={() => void disconnect()}
                     title="Disconnect Freighter"
                     className={
                         compact
-                            ? 'px-3 py-2 border border-white/20 text-[9px] font-mono uppercase tracking-wider text-white/80 hover:bg-white/5'
-                            : 'w-full py-3 border border-white/20 text-[10px] font-mono uppercase tracking-[0.2em] text-white/80 hover:bg-white/5'
+                            ? 'px-3 py-2 border border-white/20 text-[9px] font-mono uppercase tracking-wider text-white/80 hover:bg-white/5 disabled:opacity-50'
+                            : 'w-full py-3 border border-white/20 text-[10px] font-mono uppercase tracking-[0.2em] text-white/80 hover:bg-white/5 disabled:opacity-50'
                     }
                 >
-                    Stellar {shortAddr(address)}
+                    {busy ? 'Disconnecting…' : `Stellar ${shortAddr(address)}`}
                 </button>
             </div>
         );

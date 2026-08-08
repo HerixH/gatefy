@@ -1,12 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { connectFreighter } from '@/lib/stellar-freighter-pay';
-import {
-    clearStellarAddress,
-    readStellarAddress,
-    writeStellarAddress,
-} from '@/lib/stellar-session';
+import { connectFreighter, disconnectFreighter, freighterAvailable } from '@/lib/stellar-freighter-pay';
+import { readStellarAddress } from '@/lib/stellar-session';
+import { isLikelyMobileDevice } from '@/lib/stellar-walletconnect';
 
 function shortAddr(addr: string) {
     if (addr.length < 12) return addr;
@@ -21,7 +18,7 @@ type Props = {
     onStellarConnected?: (address: string) => void;
 };
 
-/** Connect / disconnect Freighter (Stellar only). */
+/** Connect / disconnect Freighter (extension on desktop, WalletConnect on mobile). */
 export function ConnectWalletButton({
     className = '',
     compact = false,
@@ -31,9 +28,13 @@ export function ConnectWalletButton({
     const [stellar, setStellar] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [mobileHint, setMobileHint] = useState(false);
 
     useEffect(() => {
         setStellar(readStellarAddress());
+        void freighterAvailable().then((ok) => {
+            setMobileHint(!ok && isLikelyMobileDevice());
+        });
     }, []);
 
     const connectStellar = async () => {
@@ -45,15 +46,16 @@ export function ConnectWalletButton({
             setError(r.error);
             return;
         }
-        writeStellarAddress(r.address);
         setStellar(r.address);
         onStellarConnected?.(r.address);
     };
 
-    const disconnectStellar = () => {
-        clearStellarAddress();
-        setStellar(null);
+    const onDisconnect = async () => {
+        setBusy(true);
         setError(null);
+        await disconnectFreighter();
+        setStellar(null);
+        setBusy(false);
     };
 
     const btnClass = fullWidth
@@ -63,21 +65,22 @@ export function ConnectWalletButton({
           : 'px-4 py-2.5 border border-white/25 bg-white text-black text-[11px] font-bold tracking-wide hover:bg-neutral-200 disabled:opacity-50';
 
     const disconnectClass = fullWidth
-        ? 'w-full min-h-[48px] px-4 py-3 border border-white/20 text-[12px] font-mono tracking-[0.12em] text-white/85 hover:bg-white/5'
+        ? 'w-full min-h-[48px] px-4 py-3 border border-white/20 text-[12px] font-mono tracking-[0.12em] text-white/85 hover:bg-white/5 disabled:opacity-50'
         : compact
-          ? 'px-3 py-2 border border-white/20 text-[9px] font-mono uppercase tracking-wider text-white/80 hover:bg-white/5'
-          : 'px-4 py-2.5 border border-white/20 text-[11px] font-mono text-white/80 hover:bg-white/5';
+          ? 'px-3 py-2 border border-white/20 text-[9px] font-mono uppercase tracking-wider text-white/80 hover:bg-white/5 disabled:opacity-50'
+          : 'px-4 py-2.5 border border-white/20 text-[11px] font-mono text-white/80 hover:bg-white/5 disabled:opacity-50';
 
     if (stellar) {
         return (
             <div className={`flex flex-col items-stretch gap-1 ${fullWidth ? 'w-full' : ''} ${className}`}>
                 <button
                     type="button"
-                    onClick={disconnectStellar}
+                    disabled={busy}
+                    onClick={() => void onDisconnect()}
                     title="Disconnect Freighter"
                     className={disconnectClass}
                 >
-                    Stellar {shortAddr(stellar)}
+                    {busy ? 'Disconnecting…' : `Stellar ${shortAddr(stellar)}`}
                 </button>
             </div>
         );
@@ -93,6 +96,13 @@ export function ConnectWalletButton({
             >
                 {busy ? 'Connecting…' : 'Connect Wallet'}
             </button>
+            {mobileHint && !error ? (
+                <p
+                    className={`text-[9px] text-white/40 leading-snug ${fullWidth ? '' : 'text-right'}`}
+                >
+                    Opens Freighter Mobile via WalletConnect
+                </p>
+            ) : null}
             {error ? (
                 <p className={`text-[9px] text-amber-300/90 leading-snug ${fullWidth ? '' : 'text-right'}`}>
                     {error}

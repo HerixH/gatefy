@@ -1,12 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     clientStellarNetwork,
     clientStellarTreasury,
     clientStellarUsdcIssuer,
 } from '@/lib/stellar-client-config';
 import { connectFreighter, freighterAvailable, payTicketUsdcWithFreighter } from '@/lib/stellar-freighter-pay';
+import { readStellarAddress } from '@/lib/stellar-session';
+import { isLikelyMobileDevice } from '@/lib/stellar-walletconnect';
 
 type Props = {
     amountUsdc: number;
@@ -18,24 +20,28 @@ type Props = {
 
 /**
  * Stellar USDC pay panel (wallet connect → pay → parent gets tx hash).
+ * Desktop: Freighter extension. Mobile: WalletConnect → Freighter Mobile.
  */
 export function StellarPayPanel({ amountUsdc, memoHint, onPaid, disabled }: Props) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [address, setAddress] = useState<string | null>(null);
+    const [mobileHint, setMobileHint] = useState(false);
     const network = clientStellarNetwork();
     const treasury = clientStellarTreasury();
     const issuer = clientStellarUsdcIssuer();
+
+    useEffect(() => {
+        setAddress(readStellarAddress());
+        void freighterAvailable().then((ok) => {
+            setMobileHint(!ok && isLikelyMobileDevice());
+        });
+    }, []);
 
     const handleConnect = async () => {
         setError('');
         setBusy(true);
         try {
-            const ok = await freighterAvailable();
-            if (!ok) {
-                setError('Install a Stellar wallet extension, unlock it, then try again.');
-                return;
-            }
             const r = await connectFreighter();
             if (!r.ok) {
                 setError(r.error);
@@ -73,7 +79,14 @@ export function StellarPayPanel({ amountUsdc, memoHint, onPaid, disabled }: Prop
                 <span className="text-white font-bold">{amountUsdc}</span> in stablecoin on Stellar, then register.
                 Hash fills in automatically.
             </p>
-            <p className="text-[9px] font-mono text-white/40 break-all">To: {treasury || '(set NEXT_PUBLIC_STELLAR_TREASURY)'}</p>
+            {mobileHint ? (
+                <p className="text-[9px] text-violet-200/70 leading-relaxed">
+                    On mobile this opens Freighter via WalletConnect — approve in the Freighter app.
+                </p>
+            ) : null}
+            <p className="text-[9px] font-mono text-white/40 break-all">
+                To: {treasury || '(set NEXT_PUBLIC_STELLAR_TREASURY)'}
+            </p>
             <p className="text-[8px] font-mono text-white/30 truncate" title={issuer}>
                 Asset · {issuer.slice(0, 4)}…{issuer.slice(-4)}
             </p>
@@ -84,15 +97,19 @@ export function StellarPayPanel({ amountUsdc, memoHint, onPaid, disabled }: Prop
                 <button
                     type="button"
                     disabled={busy || disabled}
-                    onClick={handleConnect}
+                    onClick={() => void handleConnect()}
                     className="flex-1 py-2.5 border border-violet-400/40 text-[8px] font-black uppercase tracking-widest text-violet-100 hover:bg-violet-500/20 disabled:opacity-40"
                 >
-                    {address ? 'Reconnect wallet' : 'Connect Stellar wallet'}
+                    {busy && !address
+                        ? 'Connecting…'
+                        : address
+                          ? 'Reconnect wallet'
+                          : 'Connect Stellar wallet'}
                 </button>
                 <button
                     type="button"
                     disabled={busy || disabled || !treasury}
-                    onClick={handlePay}
+                    onClick={() => void handlePay()}
                     className="flex-1 py-2.5 bg-violet-500 text-black text-[8px] font-black uppercase tracking-widest hover:bg-violet-400 disabled:opacity-40"
                 >
                     {busy ? 'Waiting…' : `Pay ${amountUsdc}`}

@@ -18,7 +18,7 @@ import { StellarPayPanel } from '@/components/StellarPayPanel';
 import { EventLocationField } from '@/components/EventLocationField';
 import { EventsNearMe } from '@/components/EventsNearMe';
 import { connectFreighter } from '@/lib/stellar-freighter-pay';
-import { readStellarAddress, writeStellarAddress } from '@/lib/stellar-session';
+import { readStellarAddress } from '@/lib/stellar-session';
 import {
   isEventOrganizer,
   formatOrganizerShort,
@@ -908,9 +908,10 @@ function HomeContent() {
       showWalletToast(r.error);
       return;
     }
-    writeStellarAddress(r.address);
     setStellarAddress(r.address);
-    showWalletToast('Freighter connected');
+    showWalletToast(
+      r.mode === 'walletconnect' ? 'Freighter Mobile connected' : 'Freighter connected'
+    );
   };
 
   const signInHostWallet = async () => {
